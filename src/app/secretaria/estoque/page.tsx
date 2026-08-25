@@ -1,0 +1,555 @@
+"use client";
+
+import Image from "next/image";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import {
+  DemoPatientRecord,
+  DemoStockItem,
+  DemoStockStatus,
+  assignReadyStockToPatient,
+  demoMedicalPatients,
+  getPatientBillingRequirement,
+  readDemoPatients,
+  readDemoPrescriptions,
+  readDemoStock,
+  saveDemoStockItem,
+  subscribeDemoPatients,
+} from "../../medico/patient-store";
+
+type StockFilter = "todos" | DemoStockStatus;
+type StockOriginFilter = "todos" | "pedido-paciente" | "pronta-entrega";
+
+const stockStatuses: Record<
+  DemoStockStatus,
+  { label: string; badge: string; description: string }
+> = {
+  disponivel: {
+    label: "Disponível",
+    badge: "bg-[#eaf8f3] text-[#187157]",
+    description: "Pronto para organização da entrega",
+  },
+  reservado: {
+    label: "Reservado",
+    badge: "bg-[#fff6e7] text-[#966419]",
+    description: "Separado para este paciente",
+  },
+  entregue: {
+    label: "Entregue",
+    badge: "bg-[#eef3ff] text-[#3c5da0]",
+    description: "Entrega concluída",
+  },
+};
+
+function formatDate(value?: string) {
+  if (!value) return "Não informado";
+
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function normalizeSearch(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[.\-/]/g, "");
+}
+
+export default function SecretariaEstoquePage() {
+  const [stock, setStock] = useState<DemoStockItem[]>([]);
+  const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<StockFilter>("todos");
+  const [search, setSearch] = useState("");
+  const [message, setMessage] = useState("");
+  const [originFilter, setOriginFilter] = useState<StockOriginFilter>("todos");
+  const [assignmentPatientId, setAssignmentPatientId] = useState("");
+  const [assignmentPaymentConfirmed, setAssignmentPaymentConfirmed] = useState(false);
+  const [assignmentAsaasConfirmed, setAssignmentAsaasConfirmed] = useState(false);
+  const [assignmentError, setAssignmentError] = useState("");
+
+  useEffect(() => {
+    const synchronize = () => {
+      const savedPatients = readDemoPatients();
+      const savedIds = new Set(savedPatients.map((patient) => patient.id));
+      setStock(readDemoStock());
+      setPatients([
+        ...savedPatients,
+        ...demoMedicalPatients.filter((patient) => !savedIds.has(patient.id)),
+      ]);
+    };
+
+    queueMicrotask(synchronize);
+
+    return subscribeDemoPatients(synchronize);
+  }, []);
+
+  const filteredStock = useMemo(() => {
+    const normalized = normalizeSearch(search);
+
+    return stock.filter((item) => {
+      if (filter !== "todos" && item.status !== filter) return false;
+      if (originFilter === "pronta-entrega" && item.patientId) return false;
+      if (originFilter === "pedido-paciente" && !item.patientId) return false;
+      if (!normalized) return true;
+
+      return normalizeSearch(
+        `${item.patientName} ${item.patientCpf} ${item.batchCode} ${item.doctor} ${item.treatment}`,
+      ).includes(normalized);
+    });
+  }, [filter, originFilter, search, stock]);
+
+  const selectedItem =
+    filteredStock.find((item) => item.id === selectedItemId) ?? filteredStock[0];
+  const assignmentPatient = patients.find((patient) => patient.id === assignmentPatientId);
+  const assignmentPrescription = assignmentPatient ? readDemoPrescriptions(assignmentPatient.id)[0] : undefined;
+  const assignmentBilling = assignmentPatient ? getPatientBillingRequirement(assignmentPatient) : undefined;
+  const readyBottleCount = stock
+    .filter((item) => item.origin === "pronta-entrega" && !item.patientId)
+    .reduce((total, item) => total + item.bottles, 0);
+
+  const availableBottles = stock
+    .filter((item) => item.status === "disponivel")
+    .reduce((total, item) => total + item.bottles, 0);
+
+  const reservedBottles = stock
+    .filter((item) => item.status === "reservado")
+    .reduce((total, item) => total + item.bottles, 0);
+
+  const pendingPatientCount = new Set(
+    stock
+      .filter((item) => item.status !== "entregue" && item.patientId)
+      .map((item) => item.patientId),
+  ).size;
+
+  const batchCount = new Set(stock.map((item) => item.batchId)).size;
+
+  const summaryCards = [
+    {
+      label: "Frascos disponíveis",
+      value: availableBottles,
+      description: "Conferidos e liberados",
+      color: "text-[#187157]",
+    },
+    {
+      label: "Pronta entrega",
+      value: readyBottleCount,
+      description: "Frascos sem paciente definido",
+      color: "text-[#7351a3]",
+    },
+    {
+      label: "Frascos reservados",
+      value: reservedBottles,
+      description: "Separados para entrega",
+      color: "text-[#966419]",
+    },
+    {
+      label: "Pacientes aguardando",
+      value: pendingPatientCount,
+      description: "Com vacinas no estoque",
+      color: "text-[#a3113a]",
+    },
+    {
+      label: "Lotes recebidos",
+      value: batchCount,
+      description: "Com entrada registrada",
+      color: "text-[#4965a2]",
+    },
+  ];
+
+  function toggleReservation(item: DemoStockItem) {
+    if (item.status === "entregue" || !item.patientId) return;
+
+    const reserve = item.status === "disponivel";
+
+    saveDemoStockItem({
+      ...item,
+      status: reserve ? "reservado" : "disponivel",
+      reservedAt: reserve ? new Date().toISOString() : undefined,
+    });
+    setSelectedItemId(item.id);
+    setMessage(
+      reserve
+        ? `Vacina de ${item.patientName} reservada para organização da entrega.`
+        : `Vacina de ${item.patientName} liberada novamente no estoque.`,
+    );
+  }
+
+  function selectStockItem(item: DemoStockItem) {
+    setSelectedItemId(item.id);
+    setAssignmentPatientId("");
+    setAssignmentPaymentConfirmed(false);
+    setAssignmentAsaasConfirmed(false);
+    setAssignmentError("");
+  }
+
+  function assignSelectedItem() {
+    if (!selectedItem || !assignmentPatient) {
+      setAssignmentError("Selecione o paciente que receberá o frasco.");
+      return;
+    }
+
+    try {
+      const assigned = assignReadyStockToPatient(
+        selectedItem,
+        assignmentPatient,
+        assignmentPaymentConfirmed,
+        assignmentAsaasConfirmed,
+      );
+      setSelectedItemId(assigned.id);
+      setAssignmentError("");
+      setOriginFilter("pedido-paciente");
+      setMessage(`Frasco de pronta entrega vinculado a ${assignmentPatient.name} usando a última receita disponível.`);
+    } catch (cause) {
+      setAssignmentError(cause instanceof Error ? cause.message : "Não foi possível vincular este frasco.");
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-[#f8f5f2] text-[#34292d]">
+      <div className="min-h-screen lg:grid lg:grid-cols-[285px_minmax(0,1fr)]">
+        <aside className="bg-gradient-to-b from-[#b31340] to-[#790b2a] px-7 py-8 text-white lg:min-h-screen">
+          <div className="border-b border-white/15 pb-8">
+            <Image
+              src="/logo-cra-branca.png"
+              alt="CRA - Centro de Rinite e Alergia"
+              width={170}
+              height={115}
+              priority
+              className="h-auto w-36"
+            />
+            <p className="mt-4 text-sm text-white/70">Painel da Secretaria</p>
+          </div>
+
+          <nav className="mt-8 space-y-2">
+            <Link
+              href="/secretaria"
+              className="block rounded-2xl px-4 py-3 text-sm text-white/80 hover:bg-white/10"
+            >
+              Dashboard
+            </Link>
+            <Link
+              href="/secretaria#kanban-pacientes"
+              className="block rounded-2xl px-4 py-3 text-sm text-white/80 hover:bg-white/10"
+            >
+              Kanban de pacientes
+            </Link>
+            <Link
+              href="/secretaria/lotes"
+              className="block rounded-2xl px-4 py-3 text-sm text-white/80 hover:bg-white/10"
+            >
+              Lotes
+            </Link>
+            <Link
+              href="/secretaria/estoque"
+              className="block rounded-2xl bg-white/15 px-4 py-3 text-sm font-semibold"
+            >
+              Vacinas em estoque
+            </Link>
+            {["Notas fiscais", "Contratos", "Configurações"].map((item) => (
+              <span
+                key={item}
+                className="block rounded-2xl px-4 py-3 text-sm text-white/65"
+              >
+                {item}
+              </span>
+            ))}
+            <Link href="/" className="block rounded-2xl px-4 py-3 text-sm font-semibold text-white/85 hover:bg-white/10">
+              Sair
+            </Link>
+          </nav>
+
+          <div className="mt-12 rounded-2xl border border-white/15 bg-white/10 p-4">
+            <p className="text-sm font-semibold">Estoque rastreável</p>
+            <p className="mt-2 text-xs leading-5 text-white/75">
+              Cada frasco está vinculado ao paciente, à receita médica e ao lote de produção.
+            </p>
+          </div>
+        </aside>
+
+        <section className="min-w-0 px-5 py-8 sm:px-8 lg:px-10">
+          <header className="mb-8 flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9c173c]">
+                Secretaria · estoque e recebimento
+              </p>
+              <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#86203b] sm:text-4xl">
+                Vacinas em estoque
+              </h1>
+              <p className="mt-2 text-sm text-[#776b6e]">
+                Acompanhe os frascos conferidos e organize a separação por paciente.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 self-start">
+              <Link
+                href="/secretaria/lotes"
+                className="rounded-2xl border border-[#eadfd9] bg-white px-5 py-3 text-sm font-semibold text-[#a3113a] shadow-sm hover:bg-[#fff8f8]"
+              >
+                ← Conferir lotes recebidos
+              </Link>
+              <Link href="/" className="rounded-2xl border border-[#eadfd9] bg-white px-4 py-3 text-sm font-semibold text-[#a3113a] shadow-sm hover:bg-[#fff8f8]">
+                Sair
+              </Link>
+            </div>
+          </header>
+
+          {message && (
+            <div className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-[#cfe9df] bg-[#edf8f3] px-4 py-3 text-sm text-[#187157]">
+              <span>{message}</span>
+              <button type="button" onClick={() => setMessage("")} aria-label="Fechar mensagem">
+                ×
+              </button>
+            </div>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-5">
+            {summaryCards.map((card) => (
+              <article
+                key={card.label}
+                className="rounded-[24px] border border-[#eee5e0] bg-white p-5 shadow-sm"
+              >
+                <p className="text-sm font-medium text-[#76696d]">{card.label}</p>
+                <p className={`mt-3 text-4xl font-bold ${card.color}`}>{card.value}</p>
+                <p className="mt-2 text-xs text-[#8a7c80]">{card.description}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="mt-7 grid gap-6 2xl:grid-cols-[minmax(0,1.1fr)_440px]">
+            <section className="self-start rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-7">
+              <div className="mb-5 grid gap-2 rounded-2xl bg-[#f8f2ef] p-2 sm:grid-cols-3">
+                {([
+                  { value: "todos", label: "Todos os frascos" },
+                  { value: "pedido-paciente", label: "Pedidos de pacientes" },
+                  { value: "pronta-entrega", label: "Pronta entrega" },
+                ] as const).map((option) => (
+                  <button key={option.value} type="button" onClick={() => { setOriginFilter(option.value); setAssignmentError(""); }} className={`rounded-xl px-3 py-2.5 text-xs font-semibold ${originFilter === option.value ? "bg-white text-[#a3113a] shadow-sm" : "text-[#766b6e]"}`}>{option.label}</button>
+                ))}
+              </div>
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-[#433438]">Frascos por paciente</h2>
+                  <p className="mt-1 text-sm text-[#817578]">
+                    Entradas geradas após conferência dos lotes.
+                  </p>
+                </div>
+                <select
+                  value={filter}
+                  onChange={(event) => setFilter(event.target.value as StockFilter)}
+                  className="h-11 rounded-xl border border-[#e9dfda] bg-white px-4 text-sm outline-none focus:border-[#b91142]"
+                >
+                  <option value="todos">Todos os status</option>
+                  {Object.entries(stockStatuses).map(([value, status]) => (
+                    <option key={value} value={value}>{status.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Buscar paciente, CPF, lote, médico ou tratamento"
+                className="mt-5 h-12 w-full rounded-xl border border-[#e9dfda] px-4 text-sm outline-none focus:border-[#b91142]"
+              />
+
+              <div className="mt-6 space-y-3">
+                {filteredStock.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-6 py-14 text-center">
+                    <p className="font-semibold text-[#53454a]">Nenhuma vacina encontrada no estoque</p>
+                    <p className="mx-auto mt-2 max-w-md text-sm text-[#817578]">
+                      Finalize a conferência de um lote recebido do laboratório para registrar os frascos automaticamente.
+                    </p>
+                    <Link
+                      href="/secretaria/lotes"
+                      className="mt-5 inline-flex rounded-xl bg-[#a3113a] px-4 py-3 text-xs font-semibold text-white"
+                    >
+                      Ir para conferência de lotes
+                    </Link>
+                  </div>
+                ) : (
+                  filteredStock.map((item) => {
+                    const active = selectedItem?.id === item.id;
+                    const status = stockStatuses[item.status];
+
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => selectStockItem(item)}
+                        className={`w-full rounded-2xl border p-4 text-left transition sm:p-5 ${
+                          active
+                            ? "border-[#b91142] bg-[#fff5f7]"
+                            : "border-[#eee6e2] bg-[#fdfbf9] hover:border-[#dcb8c1]"
+                        }`}
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <h3 className="text-sm font-bold text-[#433438]">
+                              {item.patientId ? item.patientName : "Pronta entrega · sem paciente"}
+                            </h3>
+                            <p className="mt-1 text-xs text-[#817578]">
+                              {item.patientId ? `CPF ${item.patientCpf} · ${item.doctor}` : `${item.formulas.map((formula) => formula.name).join(" · ")} · aguardando vinculação`}
+                            </p>
+                          </div>
+                          <span className={`self-start rounded-full px-3 py-1 text-xs font-semibold ${!item.patientId ? "bg-[#f3edff] text-[#7351a3]" : status.badge}`}>
+                            {!item.patientId ? "Pronta entrega" : status.label}
+                          </span>
+                        </div>
+
+                        <div className="mt-4 grid gap-2 text-xs text-[#6e6165] sm:grid-cols-3">
+                          <span><strong>Lote:</strong> {item.batchCode}</span>
+                          <span><strong>Frascos:</strong> {item.bottles}</span>
+                          <span><strong>Entrega:</strong> {item.delivery ?? "A definir"}</span>
+                        </div>
+                        <p className="mt-3 text-xs text-[#766a6d]">
+                          <strong>Fase:</strong> {item.phase}
+                        </p>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+
+            <section className="self-start rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-7">
+              {!selectedItem ? (
+                <div className="rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-14 text-center">
+                  <p className="font-semibold text-[#53454a]">Selecione um item do estoque</p>
+                  <p className="mt-2 text-sm text-[#817578]">
+                    As informações completas do paciente e da vacina aparecerão aqui.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#a3113a]">
+                    Detalhes do estoque
+                  </p>
+                  <h2 className="mt-2 text-xl font-bold text-[#433438]">
+                    {selectedItem.patientId ? selectedItem.patientName : "Pronta entrega"}
+                  </h2>
+                  <p className="mt-1 text-sm text-[#817578]">{selectedItem.patientId ? `CPF ${selectedItem.patientCpf}` : "Frasco disponível para vinculação a um paciente."}</p>
+                  <span className={`mt-4 inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${!selectedItem.patientId ? "bg-[#f3edff] text-[#7351a3]" : stockStatuses[selectedItem.status].badge}`}>
+                    {!selectedItem.patientId ? "Pronta entrega" : stockStatuses[selectedItem.status].label}
+                  </span>
+
+                  <div className="mt-6 grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl bg-[#fbf5f2] p-4">
+                      <p className="text-xs text-[#817578]">Quantidade</p>
+                      <p className="mt-2 text-2xl font-bold text-[#a3113a]">
+                        {selectedItem.bottles}
+                      </p>
+                      <p className="mt-1 text-xs text-[#817578]">frasco(s)</p>
+                    </div>
+                    <div className="rounded-2xl bg-[#fbf5f2] p-4">
+                      <p className="text-xs text-[#817578]">Entrega prevista</p>
+                      <p className="mt-3 text-sm font-bold text-[#a3113a]">
+                        {selectedItem.delivery ?? "A definir"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 space-y-4 border-t border-[#eee5e0] pt-5 text-sm">
+                    <div>
+                      <p className="text-xs text-[#817578]">Tratamento</p>
+                      <p className="mt-1 font-semibold text-[#433438]">{selectedItem.treatment}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[#817578]">Fase</p>
+                      <p className="mt-1 font-semibold text-[#433438]">{selectedItem.phase}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[#817578]">Médico responsável</p>
+                      <p className="mt-1 font-semibold text-[#433438]">{selectedItem.doctor}</p>
+                    </div>
+                    {selectedItem.patientPhone && (
+                      <div>
+                        <p className="text-xs text-[#817578]">Contato do paciente</p>
+                        <p className="mt-1 font-semibold text-[#433438]">
+                          {selectedItem.patientPhone}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-6 rounded-2xl bg-[#fbf5f2] p-4">
+                    <p className="text-sm font-bold text-[#433438]">Composição da vacina</p>
+                    <div className="mt-4 space-y-3">
+                      {selectedItem.formulas.map((formula) => (
+                        <div key={formula.id} className="flex items-center justify-between gap-3 text-xs">
+                          <span className="text-[#625559]">{formula.name}</span>
+                          <strong className="text-[#a3113a]">{formula.percentage}%</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-6 space-y-3 border-t border-[#eee5e0] pt-5 text-xs text-[#716569]">
+                    <p><strong>Lote:</strong> {selectedItem.batchCode}</p>
+                    <p><strong>Laboratório:</strong> {selectedItem.laboratory}</p>
+                    <p><strong>Entrada no estoque:</strong> {formatDate(selectedItem.receivedAt)}</p>
+                    <p><strong>Conferido por:</strong> {selectedItem.checkedBy}</p>
+                    {selectedItem.reservedAt && (
+                      <p><strong>Reserva:</strong> {formatDate(selectedItem.reservedAt)}</p>
+                    )}
+                    {selectedItem.deliveredAt && (
+                      <p><strong>Entrega:</strong> {formatDate(selectedItem.deliveredAt)}</p>
+                    )}
+                  </div>
+
+                  {!selectedItem.patientId && (
+                    <div className="mt-6 rounded-2xl border border-[#e5daf1] bg-[#faf7ff] p-4">
+                      <h3 className="text-sm font-bold text-[#7351a3]">Vincular a um paciente</h3>
+                      <p className="mt-1 text-xs text-[#66595d]">A última receita do paciente será buscada automaticamente.</p>
+                      <select value={assignmentPatientId} onChange={(event) => { setAssignmentPatientId(event.target.value); setAssignmentPaymentConfirmed(false); setAssignmentAsaasConfirmed(false); setAssignmentError(""); }} className="mt-4 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]">
+                        <option value="">Selecione um paciente</option>
+                        {patients.filter((patient) => patient.registrationStatus === "completed").map((patient) => <option key={patient.id} value={patient.id}>{patient.name} · {patient.cpf}</option>)}
+                      </select>
+
+                      {assignmentPatient && (
+                        <div className="mt-4 rounded-xl bg-white p-3 text-xs text-[#66595d]">
+                          <p><strong>Última receita:</strong> {assignmentPrescription ? formatDate(assignmentPrescription.createdAt) : "Paciente sem receita cadastrada"}</p>
+                          {assignmentPrescription && <p className="mt-2"><strong>Fase prescrita:</strong> {assignmentPrescription.phase}</p>}
+                          {assignmentPrescription && <p className="mt-2"><strong>Composição:</strong> {assignmentPrescription.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ")}</p>}
+                          {assignmentPrescription && assignmentPrescription.phase !== selectedItem.phase && <p className="mt-2 rounded-lg bg-[#fff4e4] p-2 text-[#966419]">A fase deste frasco é diferente da fase da última receita. Confira antes de prosseguir.</p>}
+                          {assignmentBilling && <p className={`mt-3 font-semibold ${assignmentBilling.paymentRequired ? "text-[#966419]" : "text-[#187157]"}`}>{assignmentBilling.explanation}</p>}
+                          {assignmentBilling?.paymentRequired && <label className="mt-3 flex items-start gap-2"><input type="checkbox" checked={assignmentPaymentConfirmed} onChange={(event) => setAssignmentPaymentConfirmed(event.target.checked)} className="mt-0.5 accent-[#a3113a]" />Confirmo a cobrança e o pagamento deste frasco.</label>}
+                          {assignmentBilling?.asaasRequired && <label className="mt-3 flex items-start gap-2 rounded-lg bg-[#eef3ff] p-2 text-[#3c5da0]"><input type="checkbox" checked={assignmentAsaasConfirmed} onChange={(event) => setAssignmentAsaasConfirmed(event.target.checked)} className="mt-0.5 accent-[#3c5da0]" /><span><strong>Confirmar no ASAAS se o pagamento está em dia.</strong></span></label>}
+                        </div>
+                      )}
+
+                      {assignmentError && <p role="alert" className="mt-3 rounded-xl bg-[#fff1f3] px-3 py-2 text-xs text-[#a3113a]">{assignmentError}</p>}
+                      <button type="button" onClick={assignSelectedItem} disabled={!assignmentPatientId || !assignmentPrescription} className="mt-4 w-full rounded-xl bg-[#7351a3] px-4 py-3 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">Vincular frasco ao paciente</button>
+                    </div>
+                  )}
+
+                  {selectedItem.patientId && selectedItem.status !== "entregue" && (
+                    <button
+                      type="button"
+                      onClick={() => toggleReservation(selectedItem)}
+                      className={`mt-6 w-full rounded-xl px-4 py-3.5 text-sm font-semibold ${
+                        selectedItem.status === "disponivel"
+                          ? "bg-[#a3113a] text-white hover:bg-[#870e31]"
+                          : "border border-[#eadfd9] text-[#a3113a] hover:bg-[#fff8f8]"
+                      }`}
+                    >
+                      {selectedItem.status === "disponivel"
+                        ? "Reservar para entrega"
+                        : "Cancelar reserva e liberar estoque"}
+                    </button>
+                  )}
+
+                  <p className="mt-4 text-center text-xs text-[#817578]">
+                    {selectedItem.patientId ? stockStatuses[selectedItem.status].description : "Disponível para vinculação a um paciente"}.
+                  </p>
+                </>
+              )}
+            </section>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
