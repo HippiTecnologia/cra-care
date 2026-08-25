@@ -102,6 +102,7 @@ export default function LaboratorioPage() {
 
       const searchable = [
         batch.code,
+        batch.name ?? "",
         batch.laboratory,
         ...batch.items.flatMap((item) => [
           item.patientName,
@@ -245,7 +246,7 @@ export default function LaboratorioPage() {
     const document = printWindow.document;
     document.title = `Receita médica - ${item.patientName} - ${batch.code}`;
     const styles = document.createElement("style");
-    styles.textContent = "body{font-family:Arial,sans-serif;color:#34292d;margin:48px;line-height:1.6}header{border-bottom:3px solid #a3113a;padding-bottom:18px}h1{color:#a3113a;margin:0}h2{font-size:17px;margin-top:28px}p{margin:7px 0}.formula{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #eee}.signature{margin-top:55px;border-top:1px solid #aaa;padding-top:12px}@media print{body{margin:24px}}";
+    styles.textContent = "body{font-family:Arial,sans-serif;color:#34292d;margin:48px;line-height:1.6}header{border-bottom:3px solid #a3113a;padding-bottom:18px}.brand-logo{width:150px;height:auto;display:block;margin-bottom:15px;filter:brightness(0) saturate(100%) invert(14%) sepia(71%) saturate(3580%) hue-rotate(328deg) brightness(79%) contrast(105%);-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{color:#a3113a;margin:0}h2{font-size:17px;margin-top:28px}p{margin:7px 0}.formula{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #eee}.signature{margin-top:55px;border-top:1px solid #aaa;padding-top:12px}@media print{body{margin:24px}}";
     document.head.append(styles);
 
     function addText(tag: "h1" | "h2" | "p", value: string, parent: HTMLElement = document.body) {
@@ -255,8 +256,13 @@ export default function LaboratorioPage() {
     }
 
     const header = document.createElement("header");
+    const logo = document.createElement("img");
+    logo.src = new URL("/logo-cra-branca.png", window.location.origin).toString();
+    logo.alt = "CRA - Centro de Rinite e Alergia";
+    logo.className = "brand-logo";
+    header.append(logo);
     addText("h1", "CRA Care · Receita médica", header);
-    addText("p", `Lote ${batch.code} · Emitida em ${formatDate(prescription.createdAt)}`, header);
+    addText("p", `Lote ${batch.name ?? batch.code} · Emitida em ${formatDate(prescription.createdAt)}`, header);
     document.body.append(header);
     addText("h2", "Dados do paciente");
     addText("p", `Paciente: ${item.patientName}`);
@@ -292,7 +298,9 @@ export default function LaboratorioPage() {
     addText("p", prescription.signatureStatus === "signed" ? "Receita assinada" : "Assinatura pendente", signature);
     document.body.append(signature);
     printWindow.focus();
-    printWindow.requestAnimationFrame(() => printWindow.print());
+    void logo.decode().catch(() => undefined).then(() => {
+      printWindow.requestAnimationFrame(() => printWindow.print());
+    });
     setMessage(`Receita de ${item.patientName} preparada. Selecione "Salvar como PDF" na impressão.`);
     setError("");
   }
@@ -465,7 +473,7 @@ export default function LaboratorioPage() {
                         }`}
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <h3 className="text-sm font-bold text-[#433438]">{batch.code}</h3>
+                          <h3 className="text-sm font-bold text-[#433438]">{batch.name ?? batch.code}</h3>
                           <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${appearance.badge}`}>
                             {appearance.label}
                           </span>
@@ -515,7 +523,7 @@ export default function LaboratorioPage() {
                         Ordem de produção
                       </p>
                       <h2 className="mt-2 text-2xl font-bold text-[#433438]">
-                        Lote {selectedBatch.code}
+                        Lote {selectedBatch.name ?? selectedBatch.code}
                       </h2>
                       <p className="mt-2 text-xs font-semibold text-[#7351a3]">{selectedBatch.orderType === "pronta-entrega" ? "Produção para estoque de pronta entrega" : "Produção vinculada a pacientes"}</p>
                       <p className="mt-2 text-sm text-[#817578]">

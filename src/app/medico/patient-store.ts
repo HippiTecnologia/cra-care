@@ -22,12 +22,14 @@ export type DemoPatientRecord = {
     | "com-pedido"
     | "em-conversa"
     | "ativo"
+    | "bacteriana"
     | "tentar-novamente"
     | "perdido"
     | "concluido"
     | "desistente";
-  acquisitionMethod?: "Por frasco" | "Tratamento de 6 meses";
-  paymentMethod?: "A definir" | "Asaas";
+  acquisitionMethod?: "Por frasco" | "Tratamento de 6 meses" | "Recorrente — ASAAS";
+  paymentMethod?: "A definir" | "Dinheiro" | "PIX" | "Asaas" | "Cartão de crédito" | "Cartão de débito";
+  paymentInstallments?: number;
   notes?: string;
   abandonmentReason?: string;
 };
@@ -84,6 +86,7 @@ export type DemoBatchItem = {
 export type DemoBatch = {
   id: string;
   code: string;
+  name?: string;
   createdAt: string;
   sentAt?: string;
   productionStartedAt?: string;
@@ -448,9 +451,10 @@ export function getPatientBillingRequirement(
   const renewalBottle = bottleNumbers.find(
     (number) => number > 3 && (number - 1) % 3 === 0,
   );
+  const recurringAsaas = acquisitionMethod === "Recorrente — ASAAS";
   const paymentRequired =
-    acquisitionMethod === "Por frasco" || Boolean(renewalBottle);
-  const asaasRequired = paymentRequired && paymentMethod === "Asaas";
+    !recurringAsaas && (acquisitionMethod === "Por frasco" || Boolean(renewalBottle));
+  const asaasRequired = recurringAsaas || (paymentRequired && paymentMethod === "Asaas");
 
   return {
     acquisitionMethod,
@@ -459,7 +463,9 @@ export function getPatientBillingRequirement(
     paymentRequired,
     asaasRequired,
     explanation:
-      acquisitionMethod === "Por frasco"
+      recurringAsaas
+        ? "Pagamento recorrente: confirme no ASAAS se a cobrança está em dia."
+        : acquisitionMethod === "Por frasco"
         ? "Cada novo frasco precisa de pagamento confirmado."
         : paymentRequired
           ? `Novo pagamento necessário: o pedido inclui o ${renewalBottle}º frasco.`

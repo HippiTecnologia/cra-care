@@ -17,14 +17,15 @@ type PatientStatus =
   | "com-pedido"
   | "em-conversa"
   | "ativo"
+  | "bacteriana"
   | "tentar-novamente"
   | "perdido"
   | "concluido"
   | "desistente";
 
 type DeliveryMethod = "Motoboy" | "Retirada" | "Sedex" | "Aéreo";
-type AcquisitionMethod = "Por frasco" | "Tratamento de 6 meses";
-type PaymentMethod = "A definir" | "Asaas";
+type AcquisitionMethod = "Por frasco" | "Tratamento de 6 meses" | "Recorrente — ASAAS";
+type PaymentMethod = "A definir" | "Dinheiro" | "PIX" | "Asaas" | "Cartão de crédito" | "Cartão de débito";
 
 type Patient = {
   id: string;
@@ -47,6 +48,7 @@ type Patient = {
   billingCpf?: string;
   acquisitionMethod?: AcquisitionMethod;
   paymentMethod?: PaymentMethod;
+  paymentInstallments?: number;
   notes?: string;
   abandonmentReason?: string;
   registrationComplete?: boolean;
@@ -72,6 +74,7 @@ type NewPatientForm = {
   status: PatientStatus;
   acquisitionMethod: AcquisitionMethod;
   paymentMethod: PaymentMethod;
+  paymentInstallments: number;
   notes: string;
   abandonmentReason: string;
 };
@@ -101,6 +104,12 @@ const columns: {
     title: "Paciente ativo",
     color: "border-t-[#20876b]",
     badge: "bg-[#eaf8f3] text-[#187157]",
+  },
+  {
+    id: "bacteriana",
+    title: "Paciente bacteriana",
+    color: "border-t-[#3988a1]",
+    badge: "bg-[#eaf6f9] text-[#28728a]",
   },
   {
     id: "tentar-novamente",
@@ -178,7 +187,7 @@ const initialPatients: Patient[] = [
     drops: 5,
     phase: "FASE 1:100 - 100 UBE",
     delivery: "Retirada",
-    status: "ativo",
+    status: "bacteriana",
   },
   {
     id: "003",
@@ -229,7 +238,7 @@ const initialPatients: Patient[] = [
     drops: 6,
     phase: "FASE 1:4 - 1250 UBE",
     delivery: "Motoboy",
-    status: "tentar-novamente",
+    status: "bacteriana",
   },
   {
     id: "006",
@@ -275,6 +284,7 @@ function createEmptyPatientForm(): NewPatientForm {
     status: "em-conversa",
     acquisitionMethod: "Por frasco",
     paymentMethod: "A definir",
+    paymentInstallments: 1,
     notes: "",
     abandonmentReason: "",
   };
@@ -318,9 +328,13 @@ function patientFromMedicalRecord(record: DemoPatientRecord): Patient {
     drops: record.drops ?? defaults.drops,
     phase: record.phase ?? defaults.phase,
     delivery: record.delivery ?? defaults.delivery,
-    status: record.status ?? "em-conversa",
+    status: record.treatment?.toLowerCase().includes("bacteriana") &&
+      (!record.status || ["ativo", "tentar-novamente", "em-conversa"].includes(record.status))
+      ? "bacteriana"
+      : record.status ?? "em-conversa",
     acquisitionMethod: record.acquisitionMethod ?? defaults.acquisitionMethod,
     paymentMethod: record.paymentMethod ?? defaults.paymentMethod,
+    paymentInstallments: record.paymentInstallments ?? 1,
     notes: record.notes ?? "",
     abandonmentReason: record.abandonmentReason ?? "",
     registrationComplete: record.registrationStatus === "completed",
@@ -367,11 +381,7 @@ function isBirthdayToday(date: string) {
 }
 
 function requiresNewOrder(patient: Patient) {
-  if (
-    patient.status === "concluido" ||
-    patient.status === "perdido" ||
-    patient.status === "desistente"
-  ) {
+  if (patient.status !== "ativo" || patient.treatment.toLowerCase().includes("bacteriana")) {
     return false;
   }
 
@@ -511,6 +521,7 @@ export default function SecretariaPage() {
       status: patient.status,
       acquisitionMethod: patient.acquisitionMethod ?? "Por frasco",
       paymentMethod: patient.paymentMethod ?? "A definir",
+      paymentInstallments: patient.paymentInstallments ?? 1,
       notes: patient.notes ?? "",
       abandonmentReason: patient.abandonmentReason ?? "",
     });
@@ -578,6 +589,7 @@ export default function SecretariaPage() {
       billingCpf,
       acquisitionMethod: newPatient.acquisitionMethod,
       paymentMethod: newPatient.paymentMethod,
+      paymentInstallments: newPatient.paymentMethod === "Cartão de crédito" ? Math.max(1, newPatient.paymentInstallments) : undefined,
       notes: newPatient.notes.trim(),
       abandonmentReason: newPatient.status === "desistente" ? newPatient.abandonmentReason.trim() : undefined,
       registrationComplete: true,
@@ -1395,16 +1407,20 @@ export default function SecretariaPage() {
                     Método de aquisição
                     <select
                       value={newPatient.acquisitionMethod}
-                      onChange={(event) =>
-                        updateNewPatient(
-                          "acquisitionMethod",
-                          event.target.value as AcquisitionMethod,
-                        )
-                      }
+                      onChange={(event) => {
+                        const acquisitionMethod = event.target.value as AcquisitionMethod;
+                        setNewPatient((current) => ({
+                          ...current,
+                          acquisitionMethod,
+                          paymentMethod: acquisitionMethod === "Recorrente — ASAAS" ? "Asaas" : current.paymentMethod,
+                        }));
+                        setFormError("");
+                      }}
                       className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]"
                     >
                       <option>Por frasco</option>
                       <option>Tratamento de 6 meses</option>
+                      <option>Recorrente — ASAAS</option>
                     </select>
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
@@ -1420,9 +1436,26 @@ export default function SecretariaPage() {
                       className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]"
                     >
                       <option>A definir</option>
-                      <option>Asaas</option>
+                      <option>Dinheiro</option>
+                      <option>PIX</option>
+                      <option value="Asaas">ASAAS</option>
+                      <option>Cartão de crédito</option>
+                      <option>Cartão de débito</option>
                     </select>
                   </label>
+                  {newPatient.paymentMethod === "Cartão de crédito" && (
+                    <label className="text-sm font-medium text-[#544449]">
+                      Número de parcelas *
+                      <input
+                        min={1}
+                        max={36}
+                        type="number"
+                        value={newPatient.paymentInstallments}
+                        onChange={(event) => updateNewPatient("paymentInstallments", Math.max(1, Number(event.target.value)))}
+                        className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]"
+                      />
+                    </label>
+                  )}
                   <label className="text-sm font-medium text-[#544449]">
                     Último recebimento *
                     <input

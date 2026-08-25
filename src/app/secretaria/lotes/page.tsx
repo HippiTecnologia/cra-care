@@ -82,6 +82,11 @@ function normalizeSearch(value: string) {
     .replace(/[.\-/]/g, "");
 }
 
+function defaultBatchName() {
+  const today = new Date();
+  return `${String(today.getDate()).padStart(2, "0")}-${String(today.getMonth() + 1).padStart(2, "0")}-${today.getFullYear()}`;
+}
+
 export default function SecretariaLotesPage() {
   const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
   const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
@@ -90,6 +95,8 @@ export default function SecretariaLotesPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<BatchFilter>("todos");
   const [laboratory, setLaboratory] = useState("Laboratório CRA");
+  const [batchName, setBatchName] = useState(defaultBatchName);
+  const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -176,6 +183,7 @@ export default function SecretariaLotesPage() {
     ? readyItems.reduce((total, item) => total + item.bottles, 0)
     : selectedPrescriptions.reduce((total, prescription) => total + prescription.bottles, 0);
   const selectedItemCount = orderType === "pronta-entrega" ? readyItems.length : selectedPrescriptions.length;
+  const editingBatch = batches.find((batch) => batch.id === editingBatchId && batch.status === "rascunho");
 
   const filteredBatches = batches.filter(
     (batch) => filter === "todos" || batch.status === filter,
@@ -199,17 +207,7 @@ export default function SecretariaLotesPage() {
     setError("");
   }
 
-  function createBatch() {
-    if (selectedItemCount === 0) {
-      setError(orderType === "pronta-entrega" ? "Cadastre pelo menos um frasco para pronta entrega." : "Selecione pelo menos uma receita para montar o lote.");
-      return;
-    }
-
-    if (!laboratory.trim()) {
-      setError("Informe o laboratório responsável pela produção.");
-      return;
-    }
-
+  function validateSelectedPayments() {
     const missingPayment = orderType === "pedido-paciente"
       ? selectedPrescriptions.find((prescription) => {
           const patient = patientById.get(prescription.patientId);
@@ -226,12 +224,14 @@ export default function SecretariaLotesPage() {
       setError(billing?.asaasRequired && !paymentConfirmations[missingPayment.id]?.asaas
         ? `Confirmar no ASAAS se o pagamento de ${patient?.name} está em dia.`
         : `Confirme o pagamento de ${patient?.name ?? "todos os pacientes"} antes de incluir no lote.`);
-      return;
+      return false;
     }
 
-    const items: DemoBatchItem[] = orderType === "pronta-entrega"
-      ? readyItems
-      : selectedPrescriptions.flatMap(
+    return true;
+  }
+
+  function createSelectedPatientItems(): DemoBatchItem[] {
+    return selectedPrescriptions.flatMap(
       (prescription) => {
         const patient = patientById.get(prescription.patientId);
 
@@ -261,12 +261,34 @@ export default function SecretariaLotesPage() {
         ];
       },
     );
+  }
+
+  function createBatch() {
+    if (!batchName.trim()) {
+      setError("Informe o nome do lote, por exemplo: 15-08-2026.");
+      return;
+    }
+
+    if (orderType === "pronta-entrega" && selectedItemCount === 0) {
+      setError("Cadastre pelo menos um frasco para pronta entrega.");
+      return;
+    }
+
+    if (!laboratory.trim()) {
+      setError("Informe o laboratório responsável pela produção.");
+      return;
+    }
+
+    if (!validateSelectedPayments()) return;
+
+    const items = orderType === "pronta-entrega" ? readyItems : createSelectedPatientItems();
 
     const createdAt = new Date().toISOString();
     const nextNumber = String(batches.length + 1).padStart(3, "0");
     const batch: DemoBatch = {
       id: crypto.randomUUID(),
       code: `CRA-${new Date().getFullYear()}-${nextNumber}`,
+      name: batchName.trim(),
       createdAt,
       orderType,
       status: "rascunho",
@@ -280,9 +302,51 @@ export default function SecretariaLotesPage() {
     setReadyItems([]);
     setPaymentConfirmations({});
     setNotes("");
+    setEditingBatchId(orderType === "pedido-paciente" ? batch.id : null);
     setExpandedBatchId(batch.id);
     setError("");
-    setMessage(`Lote ${batch.code} criado em ${formatDate(createdAt)}. Confira os detalhes e envie manualmente ao laboratório quando estiver pronto.`);
+    setMessage(`Lote ${batch.name} criado em ${formatDate(createdAt)}. Adicione os pacientes e envie manualmente ao laboratório quando estiver pronto.`);
+  }
+
+  function addSelectedPatientsToBatch() {
+    if (!editingBatch || selectedPrescriptions.length === 0) {
+      setError("Selecione ao menos um paciente para adicionar ao lote.");
+      return;
+    }
+
+    if (!validateSelectedPayments()) return;
+
+    const items = createSelectedPatientItems();
+    saveDemoBatch({ ...editingBatch, items: [...editingBatch.items, ...items] });
+    setSelectedIds([]);
+    setPaymentConfirmations({});
+    setExpandedBatchId(editingBatch.id);
+    setError("");
+    setMessage(`${items.length} paciente(s) adicionado(s) ao lote ${editingBatch.name ?? editingBatch.code}.`);
+  }
+
+  function removeBatchItem(batch: DemoBatch, item: DemoBatchItem) {
+    if (batch.status !== "rascunho") return;
+
+    saveDemoBatch({
+      ...batch,
+      items: batch.items.filter((current) => current.prescriptionId !== item.prescriptionId),
+    });
+    setMessage(`${item.patientName} removido do lote ${batch.name ?? batch.code}.`);
+    setError("");
+  }
+
+  function editDraftBatch(batch: DemoBatch) {
+    if (batch.status !== "rascunho") return;
+
+    setEditingBatchId(batch.id);
+    setExpandedBatchId(batch.id);
+    setBatchName(batch.name ?? defaultBatchName());
+    setOrderType(batch.orderType ?? "pedido-paciente");
+    setLaboratory(batch.laboratory);
+    setSearch("");
+    setError("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function addReadyItem() {
@@ -312,12 +376,19 @@ export default function SecretariaLotesPage() {
   }
 
   function sendBatch(batch: DemoBatch) {
+    if (batch.items.length === 0) {
+      setError("Adicione pelo menos um paciente ou frasco antes de enviar o lote ao laboratório.");
+      setExpandedBatchId(batch.id);
+      return;
+    }
+
     saveDemoBatch({
       ...batch,
       status: "enviado",
       sentAt: new Date().toISOString(),
     });
-    setMessage(`Lote ${batch.code} enviado ao ${batch.laboratory}.`);
+    if (editingBatchId === batch.id) setEditingBatchId(null);
+    setMessage(`Lote ${batch.name ?? batch.code} enviado ao ${batch.laboratory}.`);
     setError("");
   }
 
@@ -664,8 +735,19 @@ export default function SecretariaLotesPage() {
               </p>
               <h2 className="mt-2 text-xl font-bold text-[#433438]">Montar lote</h2>
               <p className="mt-1 text-sm text-[#817578]">
-                {orderType === "pronta-entrega" ? "Monte um lote sem paciente para abastecer a pronta entrega." : "Selecione as receitas e confirme as cobranças antes da produção."}
+                {editingBatch ? `Você está adicionando pacientes ao lote ${editingBatch.name ?? editingBatch.code}.` : orderType === "pronta-entrega" ? "Monte um lote sem paciente para abastecer a pronta entrega." : "Crie o lote com a data e adicione os pacientes aos poucos."}
               </p>
+
+              <label className="mt-5 block text-sm font-semibold text-[#544449]">
+                Nome do lote *
+                <input
+                  value={batchName}
+                  disabled={Boolean(editingBatch)}
+                  onChange={(event) => setBatchName(event.target.value)}
+                  placeholder="Ex.: 15-08-2026"
+                  className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142] disabled:bg-[#f8f5f2]"
+                />
+              </label>
 
               <div className="mt-6 grid grid-cols-2 gap-3">
                 <div className="rounded-2xl bg-[#fbf5f2] p-4">
@@ -736,12 +818,27 @@ export default function SecretariaLotesPage() {
 
               <button
                 type="button"
-                onClick={createBatch}
-                disabled={selectedItemCount === 0}
+                onClick={editingBatch ? addSelectedPatientsToBatch : createBatch}
+                disabled={editingBatch ? selectedItemCount === 0 : !batchName.trim() || (orderType === "pronta-entrega" && selectedItemCount === 0)}
                 className="mt-5 w-full rounded-xl bg-[#a3113a] px-4 py-3.5 text-sm font-semibold text-white hover:bg-[#870e31] disabled:cursor-not-allowed disabled:opacity-45"
               >
-                Criar lote
+                {editingBatch ? "Adicionar pacientes ao lote" : "Criar lote"}
               </button>
+              {editingBatch && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingBatchId(null);
+                    setBatchName(defaultBatchName());
+                    setSelectedIds([]);
+                    setPaymentConfirmations({});
+                    setError("");
+                  }}
+                  className="mt-3 w-full rounded-xl border border-[#eadfd9] px-4 py-3 text-sm font-semibold text-[#a3113a]"
+                >
+                  Criar outro lote
+                </button>
+              )}
               <p className="mt-3 text-center text-xs text-[#817578]">
                 O laboratório só receberá o lote depois do envio manual pela secretaria.
               </p>
@@ -790,14 +887,14 @@ export default function SecretariaLotesPage() {
                       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                         <div>
                           <div className="flex flex-wrap items-center gap-3">
-                            <h3 className="text-base font-bold text-[#433438]">{batch.code}</h3>
+                            <h3 className="text-base font-bold text-[#433438]">Lote {batch.name ?? batch.code}</h3>
                             <span className={`rounded-full px-3 py-1 text-xs font-semibold ${batch.orderType === "pronta-entrega" ? "bg-[#fff4e4] text-[#966419]" : "bg-[#f3edff] text-[#7351a3]"}`}>{batch.orderType === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente"}</span>
                             <span className={`rounded-full px-3 py-1 text-xs font-semibold ${status.badge}`}>
                               {status.label}
                             </span>
                           </div>
                           <p className="mt-2 text-xs text-[#776b6e]">
-                            Criado em {formatDate(batch.createdAt)} · {batch.laboratory}
+                            {batch.code} · Criado em {formatDate(batch.createdAt)} · {batch.laboratory}
                           </p>
                           <p className="mt-1 text-xs text-[#776b6e]">
                             {batch.items.length} {batch.orderType === "pronta-entrega" ? "fórmula(s)" : "paciente(s)"} · {bottleCount} frasco(s) · {status.description}
@@ -813,13 +910,21 @@ export default function SecretariaLotesPage() {
                             {expanded ? "Ocultar detalhes" : "Ver detalhes"}
                           </button>
                           {batch.status === "rascunho" && (
-                            <button
-                              type="button"
-                              onClick={() => sendBatch(batch)}
-                              className="rounded-xl bg-[#a3113a] px-4 py-3 text-xs font-semibold text-white"
-                            >
-                              Enviar ao laboratório
-                            </button>
+                            <>
+                              {batch.orderType !== "pronta-entrega" && (
+                                <button type="button" onClick={() => editDraftBatch(batch)} className="rounded-xl border border-[#e6dbd6] px-4 py-3 text-xs font-semibold text-[#a3113a]">
+                                  Adicionar pacientes
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => sendBatch(batch)}
+                                disabled={batch.items.length === 0}
+                                className="rounded-xl bg-[#a3113a] px-4 py-3 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45"
+                              >
+                                Enviar ao laboratório
+                              </button>
+                            </>
                           )}
                           {batch.status === "pronto" && !expanded && (
                             <button
@@ -865,6 +970,11 @@ export default function SecretariaLotesPage() {
                           </div>
 
                           <div className="mt-5 space-y-2">
+                            {batch.items.length === 0 && (
+                              <p className="rounded-xl border border-dashed border-[#e6dbd6] px-4 py-4 text-sm text-[#817578]">
+                                Este lote ainda está vazio. Pesquise e adicione os pacientes antes do envio.
+                              </p>
+                            )}
                             {batch.items.map((item) => {
                               const checked = (batch.checkedPrescriptionIds ?? []).includes(item.prescriptionId);
 
@@ -889,6 +999,15 @@ export default function SecretariaLotesPage() {
                                     .map((formula) => `${formula.name} ${formula.percentage}%`)
                                     .join(" · ")}
                                 </p>
+                                {batch.status === "rascunho" && (
+                                  <button
+                                    type="button"
+                                    onClick={() => removeBatchItem(batch, item)}
+                                    className="mt-3 rounded-lg bg-[#fff1f3] px-3 py-2 text-xs font-semibold text-[#a3113a]"
+                                  >
+                                    Remover {item.patientId ? "paciente" : "frasco"} do lote
+                                  </button>
+                                )}
                                 {batch.status === "pronto" && (
                                   <button
                                     type="button"

@@ -42,6 +42,7 @@ export type PatientPortalState = {
   signedCpf?: string;
   bottles: PatientBottle[];
   useRecords: PatientUseRecord[];
+  dayOverrides?: Record<string, "off" | "nao-registrado">;
   assessments: PatientAssessment[];
   reminders: PatientReminderSettings;
 };
@@ -82,6 +83,7 @@ export function createDefaultPortalState(patientId: string): PatientPortalState 
     patientId,
     bottles: [],
     useRecords: [],
+    dayOverrides: {},
     assessments: [],
     reminders: {
       enabled: false,

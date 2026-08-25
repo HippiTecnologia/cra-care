@@ -213,10 +213,11 @@ export default function MedicalPatientPage() {
       phase,
       drops,
       treatment: prescription.treatment,
+      status: "com-pedido",
     });
 
     setMessage(
-      "Receita gerada com sucesso. A fase e a posologia já foram atualizadas para a secretaria.",
+      "Receita gerada com sucesso. O paciente foi encaminhado para a coluna Paciente com pedido da secretaria.",
     );
     setError("");
     setSelectedPrescriptionId(prescription.id);
