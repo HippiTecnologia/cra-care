@@ -48,6 +48,7 @@ type Patient = {
   acquisitionMethod?: AcquisitionMethod;
   paymentMethod?: PaymentMethod;
   notes?: string;
+  abandonmentReason?: string;
   registrationComplete?: boolean;
 };
 
@@ -72,6 +73,7 @@ type NewPatientForm = {
   acquisitionMethod: AcquisitionMethod;
   paymentMethod: PaymentMethod;
   notes: string;
+  abandonmentReason: string;
 };
 
 type FilterMode = "todos" | "novo-pedido" | "aniversario" | "ativos" | "concluidos";
@@ -274,6 +276,7 @@ function createEmptyPatientForm(): NewPatientForm {
     acquisitionMethod: "Por frasco",
     paymentMethod: "A definir",
     notes: "",
+    abandonmentReason: "",
   };
 }
 
@@ -319,6 +322,7 @@ function patientFromMedicalRecord(record: DemoPatientRecord): Patient {
     acquisitionMethod: record.acquisitionMethod ?? defaults.acquisitionMethod,
     paymentMethod: record.paymentMethod ?? defaults.paymentMethod,
     notes: record.notes ?? "",
+    abandonmentReason: record.abandonmentReason ?? "",
     registrationComplete: record.registrationStatus === "completed",
   };
 }
@@ -387,6 +391,11 @@ export default function SecretariaPage() {
   );
   const [formError, setFormError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [draggedPatientId, setDraggedPatientId] = useState<string | null>(null);
+  const [dragOverStatus, setDragOverStatus] = useState<PatientStatus | null>(null);
+  const [abandoningPatient, setAbandoningPatient] = useState<Patient | null>(null);
+  const [abandonmentReason, setAbandonmentReason] = useState("");
+  const [abandonmentError, setAbandonmentError] = useState("");
 
   useEffect(() => {
     const syncPatients = () => {
@@ -503,6 +512,7 @@ export default function SecretariaPage() {
       acquisitionMethod: patient.acquisitionMethod ?? "Por frasco",
       paymentMethod: patient.paymentMethod ?? "A definir",
       notes: patient.notes ?? "",
+      abandonmentReason: patient.abandonmentReason ?? "",
     });
     setFormError("");
     setSuccessMessage("");
@@ -514,6 +524,11 @@ export default function SecretariaPage() {
 
     if (!editingPatientId) {
       setFormError("Selecione um paciente cadastrado pelo médico.");
+      return;
+    }
+
+    if (newPatient.status === "desistente" && !newPatient.abandonmentReason.trim()) {
+      setFormError("Informe o motivo da desistência antes de salvar o paciente.");
       return;
     }
 
@@ -564,6 +579,7 @@ export default function SecretariaPage() {
       acquisitionMethod: newPatient.acquisitionMethod,
       paymentMethod: newPatient.paymentMethod,
       notes: newPatient.notes.trim(),
+      abandonmentReason: newPatient.status === "desistente" ? newPatient.abandonmentReason.trim() : undefined,
       registrationComplete: true,
     };
 
@@ -588,6 +604,45 @@ export default function SecretariaPage() {
     setFilter("todos");
     setSuccessMessage(`${patient.name} teve o cadastro complementado com sucesso.`);
     closePatientForm();
+  }
+
+  function movePatient(patient: Patient, status: PatientStatus, reason?: string) {
+    if (patient.status === status) return;
+
+    if (status === "desistente" && !reason?.trim()) {
+      setAbandoningPatient(patient);
+      setAbandonmentReason(patient.abandonmentReason ?? "");
+      setAbandonmentError("");
+      return;
+    }
+
+    const previousRecord = readDemoPatients().find((record) => record.id === patient.id);
+    const updatedPatient: Patient = {
+      ...patient,
+      status,
+      abandonmentReason: status === "desistente" ? reason?.trim() : undefined,
+    };
+
+    saveDemoPatient({
+      ...updatedPatient,
+      createdAt: previousRecord?.createdAt ?? new Date().toISOString(),
+      registrationStatus: patient.registrationComplete === false ? "pending-secretary" : "completed",
+    });
+    setSuccessMessage(`${patient.name} movido para ${columns.find((column) => column.id === status)?.title.toLowerCase()}.`);
+    setAbandoningPatient(null);
+    setAbandonmentReason("");
+    setAbandonmentError("");
+  }
+
+  function confirmAbandonment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!abandonmentReason.trim()) {
+      setAbandonmentError("Informe o motivo da desistência para continuar.");
+      return;
+    }
+
+    if (abandoningPatient) movePatient(abandoningPatient, "desistente", abandonmentReason);
   }
 
   const summaryCards: {
@@ -851,7 +906,23 @@ export default function SecretariaPage() {
                 return (
                   <div
                     key={column.id}
-                    className={`w-[320px] shrink-0 rounded-3xl border border-[#ece4df] border-t-4 bg-[#f1edea] p-4 ${column.color}`}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      setDragOverStatus(column.id);
+                    }}
+                    onDragLeave={(event) => {
+                      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOverStatus(null);
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const patientId = event.dataTransfer.getData("text/plain") || draggedPatientId;
+                      const patient = patients.find((item) => item.id === patientId);
+                      setDraggedPatientId(null);
+                      setDragOverStatus(null);
+                      if (patient) movePatient(patient, column.id);
+                    }}
+                    className={`w-[320px] shrink-0 rounded-3xl border border-[#ece4df] border-t-4 p-4 transition ${column.color} ${dragOverStatus === column.id ? "bg-[#fff1f4] ring-2 ring-[#b91142]/35" : "bg-[#f1edea]"}`}
                   >
                     <div className="mb-4 flex items-center justify-between gap-3">
                       <h3 className="text-sm font-bold text-[#49393d]">
@@ -888,7 +959,17 @@ export default function SecretariaPage() {
                         return (
                           <article
                             key={patient.id}
-                            className="rounded-2xl border border-[#ece3df] bg-white p-4 shadow-sm"
+                            draggable
+                            onDragStart={(event) => {
+                              event.dataTransfer.setData("text/plain", patient.id);
+                              event.dataTransfer.effectAllowed = "move";
+                              setDraggedPatientId(patient.id);
+                            }}
+                            onDragEnd={() => {
+                              setDraggedPatientId(null);
+                              setDragOverStatus(null);
+                            }}
+                            className={`cursor-grab rounded-2xl border border-[#ece3df] bg-white p-4 shadow-sm active:cursor-grabbing ${draggedPatientId === patient.id ? "opacity-50" : ""}`}
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div>
@@ -962,6 +1043,12 @@ export default function SecretariaPage() {
                                 </span>{" "}
                                 {patient.bottlesReceived}
                               </p>
+                              {patient.status === "desistente" && patient.abandonmentReason && (
+                                <p className="rounded-xl bg-[#fdf0ee] px-3 py-2 text-[#9b5047]">
+                                  <span className="font-semibold">Motivo da desistência:</span>{" "}
+                                  {patient.abandonmentReason}
+                                </p>
+                              )}
                             </div>
 
                             <div className="mt-4">
@@ -1284,6 +1371,18 @@ export default function SecretariaPage() {
                       ))}
                     </select>
                   </label>
+                  {newPatient.status === "desistente" && (
+                    <label className="text-sm font-medium text-[#544449] sm:col-span-2">
+                      Motivo da desistência *
+                      <textarea
+                        rows={3}
+                        value={newPatient.abandonmentReason}
+                        onChange={(event) => updateNewPatient("abandonmentReason", event.target.value)}
+                        placeholder="Descreva por que o paciente desistiu do tratamento"
+                        className="mt-2 w-full rounded-xl border border-[#e9dfda] px-4 py-3 outline-none focus:border-[#b91142]"
+                      />
+                    </label>
+                  )}
                 </div>
               </section>
 
@@ -1406,6 +1505,32 @@ export default function SecretariaPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {abandoningPatient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#29151b]/65 p-4 backdrop-blur-sm">
+          <form onSubmit={confirmAbandonment} className="w-full max-w-lg rounded-[28px] bg-white p-6 shadow-2xl sm:p-8">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#a3113a]">Paciente desistente</p>
+            <h2 className="mt-2 text-2xl font-bold text-[#433438]">Registrar motivo da desistência</h2>
+            <p className="mt-2 text-sm text-[#817578]">Informe por que {abandoningPatient.name} desistiu do tratamento.</p>
+            <textarea
+              autoFocus
+              rows={4}
+              value={abandonmentReason}
+              onChange={(event) => {
+                setAbandonmentReason(event.target.value);
+                setAbandonmentError("");
+              }}
+              placeholder="Ex.: dificuldade financeira, mudança de cidade ou decisão do paciente"
+              className="mt-5 w-full rounded-xl border border-[#e9dfda] px-4 py-3 text-sm outline-none focus:border-[#b91142]"
+            />
+            {abandonmentError && <p className="mt-2 text-sm text-[#a3113a]">{abandonmentError}</p>}
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={() => setAbandoningPatient(null)} className="rounded-xl border border-[#e6dbd6] px-4 py-3 text-sm font-semibold text-[#74666a]">Cancelar</button>
+              <button type="submit" className="rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">Confirmar desistência</button>
+            </div>
+          </form>
         </div>
       )}
     </main>

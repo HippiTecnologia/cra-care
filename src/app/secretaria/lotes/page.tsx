@@ -199,7 +199,7 @@ export default function SecretariaLotesPage() {
     setError("");
   }
 
-  function createBatch(sendImmediately: boolean) {
+  function createBatch() {
     if (selectedItemCount === 0) {
       setError(orderType === "pronta-entrega" ? "Cadastre pelo menos um frasco para pronta entrega." : "Selecione pelo menos uma receita para montar o lote.");
       return;
@@ -268,9 +268,8 @@ export default function SecretariaLotesPage() {
       id: crypto.randomUUID(),
       code: `CRA-${new Date().getFullYear()}-${nextNumber}`,
       createdAt,
-      sentAt: sendImmediately ? createdAt : undefined,
       orderType,
-      status: sendImmediately ? "enviado" : "rascunho",
+      status: "rascunho",
       laboratory: laboratory.trim(),
       notes: notes.trim(),
       items,
@@ -283,11 +282,7 @@ export default function SecretariaLotesPage() {
     setNotes("");
     setExpandedBatchId(batch.id);
     setError("");
-    setMessage(
-      sendImmediately
-        ? `Lote ${batch.code} enviado ao laboratório com ${items.length} ${orderType === "pronta-entrega" ? "item(ns) de pronta entrega" : "receita(s)"}.`
-        : `Lote ${batch.code} salvo como rascunho e pronto para envio.`,
-    );
+    setMessage(`Lote ${batch.code} criado em ${formatDate(createdAt)}. Confira os detalhes e envie manualmente ao laboratório quando estiver pronto.`);
   }
 
   function addReadyItem() {
@@ -538,15 +533,15 @@ export default function SecretariaLotesPage() {
                 <>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <h2 className="text-xl font-bold text-[#433438]">Receitas prontas para lote</h2>
+                  <h2 className="text-xl font-bold text-[#433438]">Adicionar paciente ao lote</h2>
                   <p className="mt-1 text-sm text-[#817578]">
-                    Somente a receita mais recente de cada paciente aparece aqui.
+                    Digite o nome ou CPF do paciente solicitante. A última receita médica será carregada automaticamente.
                   </p>
                 </div>
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Buscar paciente, CPF ou médico"
+                  placeholder="Digite o nome ou CPF do paciente"
                   className="h-11 w-full rounded-xl border border-[#e9dfda] px-4 text-sm outline-none focus:border-[#b91142] lg:w-72"
                 />
               </div>
@@ -741,20 +736,15 @@ export default function SecretariaLotesPage() {
 
               <button
                 type="button"
-                onClick={() => createBatch(true)}
+                onClick={createBatch}
                 disabled={selectedItemCount === 0}
                 className="mt-5 w-full rounded-xl bg-[#a3113a] px-4 py-3.5 text-sm font-semibold text-white hover:bg-[#870e31] disabled:cursor-not-allowed disabled:opacity-45"
               >
-                Criar e enviar ao laboratório
+                Criar lote
               </button>
-              <button
-                type="button"
-                onClick={() => createBatch(false)}
-                disabled={selectedItemCount === 0}
-                className="mt-3 w-full rounded-xl border border-[#eadfd9] px-4 py-3.5 text-sm font-semibold text-[#a3113a] hover:bg-[#fff8f8] disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                Salvar como rascunho
-              </button>
+              <p className="mt-3 text-center text-xs text-[#817578]">
+                O laboratório só receberá o lote depois do envio manual pela secretaria.
+              </p>
             </section>
           </div>
 

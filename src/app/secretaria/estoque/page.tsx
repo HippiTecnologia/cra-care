@@ -13,6 +13,7 @@ import {
   readDemoPatients,
   readDemoPrescriptions,
   readDemoStock,
+  saveDemoPatient,
   saveDemoStockItem,
   subscribeDemoPatients,
 } from "../../medico/patient-store";
@@ -176,6 +177,27 @@ export default function SecretariaEstoquePage() {
         ? `Vacina de ${item.patientName} reservada para organização da entrega.`
         : `Vacina de ${item.patientName} liberada novamente no estoque.`,
     );
+  }
+
+  function confirmDelivery(item: DemoStockItem) {
+    if (!item.patientId || item.status !== "reservado") return;
+
+    const deliveredAt = new Date().toISOString();
+    const patient = patients.find((record) => record.id === item.patientId);
+
+    saveDemoStockItem({ ...item, status: "entregue", deliveredAt });
+
+    if (patient) {
+      saveDemoPatient({
+        ...patient,
+        lastReceivedDate: deliveredAt.slice(0, 10),
+        bottlesReceived: (patient.bottlesReceived ?? 0) + item.bottles,
+        status: patient.status === "com-pedido" ? "ativo" : patient.status,
+      });
+    }
+
+    setSelectedItemId(item.id);
+    setMessage(`Recebimento confirmado: ${item.patientName} recebeu ${item.bottles} frasco(s) em ${formatDate(deliveredAt)}.`);
   }
 
   function selectStockItem(item: DemoStockItem) {
@@ -526,19 +548,24 @@ export default function SecretariaEstoquePage() {
                   )}
 
                   {selectedItem.patientId && selectedItem.status !== "entregue" && (
-                    <button
-                      type="button"
-                      onClick={() => toggleReservation(selectedItem)}
-                      className={`mt-6 w-full rounded-xl px-4 py-3.5 text-sm font-semibold ${
-                        selectedItem.status === "disponivel"
-                          ? "bg-[#a3113a] text-white hover:bg-[#870e31]"
-                          : "border border-[#eadfd9] text-[#a3113a] hover:bg-[#fff8f8]"
-                      }`}
-                    >
-                      {selectedItem.status === "disponivel"
-                        ? "Reservar para entrega"
-                        : "Cancelar reserva e liberar estoque"}
-                    </button>
+                    <div className="mt-6 space-y-3">
+                      {selectedItem.status === "reservado" && (
+                        <button type="button" onClick={() => confirmDelivery(selectedItem)} className="w-full rounded-xl bg-[#187157] px-4 py-3.5 text-sm font-semibold text-white hover:bg-[#135b46]">
+                          ✓ Confirmar recebimento pelo paciente
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => toggleReservation(selectedItem)}
+                        className={`w-full rounded-xl px-4 py-3.5 text-sm font-semibold ${
+                          selectedItem.status === "disponivel"
+                            ? "bg-[#a3113a] text-white hover:bg-[#870e31]"
+                            : "border border-[#eadfd9] text-[#a3113a] hover:bg-[#fff8f8]"
+                        }`}
+                      >
+                        {selectedItem.status === "disponivel" ? "Reservar para entrega" : "Cancelar reserva e liberar estoque"}
+                      </button>
+                    </div>
                   )}
 
                   <p className="mt-4 text-center text-xs text-[#817578]">

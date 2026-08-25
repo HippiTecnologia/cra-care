@@ -29,6 +29,7 @@ export type DemoPatientRecord = {
   acquisitionMethod?: "Por frasco" | "Tratamento de 6 meses";
   paymentMethod?: "A definir" | "Asaas";
   notes?: string;
+  abandonmentReason?: string;
 };
 
 export type PrescriptionFormula = {

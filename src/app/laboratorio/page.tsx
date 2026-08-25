@@ -5,8 +5,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   DemoBatch,
+  DemoBatchItem,
   DemoBatchStatus,
+  DemoPrescription,
   readDemoBatches,
+  readDemoPrescriptions,
   saveDemoBatch,
   subscribeDemoPatients,
 } from "../medico/patient-store";
@@ -65,6 +68,7 @@ function normalizeSearch(value: string) {
 
 export default function LaboratorioPage() {
   const [batches, setBatches] = useState<DemoBatch[]>([]);
+  const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [filter, setFilter] = useState<LaboratoryFilter>("todos");
   const [search, setSearch] = useState("");
@@ -74,8 +78,10 @@ export default function LaboratorioPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const synchronize = () =>
+    const synchronize = () => {
       setBatches(readDemoBatches().filter((batch) => batch.status !== "rascunho"));
+      setPrescriptions(readDemoPrescriptions());
+    };
 
     queueMicrotask(synchronize);
 
@@ -218,6 +224,76 @@ export default function LaboratorioPage() {
     setSelectedBatchId(batch.id);
     setResponsible(batch.productionResponsible ?? "Equipe de manipulação CRA");
     setProductionNotes(batch.productionNotes ?? "");
+    setError("");
+  }
+
+  function downloadPrescription(item: DemoBatchItem, batch: DemoBatch) {
+    const prescription = prescriptions.find((record) => record.id === item.prescriptionId);
+
+    if (!prescription) {
+      setError("A receita médica deste paciente não está disponível para download.");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=900,height=900");
+
+    if (!printWindow) {
+      setError("Permita a abertura de janelas no navegador para baixar a receita em PDF.");
+      return;
+    }
+
+    const document = printWindow.document;
+    document.title = `Receita médica - ${item.patientName} - ${batch.code}`;
+    const styles = document.createElement("style");
+    styles.textContent = "body{font-family:Arial,sans-serif;color:#34292d;margin:48px;line-height:1.6}header{border-bottom:3px solid #a3113a;padding-bottom:18px}h1{color:#a3113a;margin:0}h2{font-size:17px;margin-top:28px}p{margin:7px 0}.formula{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #eee}.signature{margin-top:55px;border-top:1px solid #aaa;padding-top:12px}@media print{body{margin:24px}}";
+    document.head.append(styles);
+
+    function addText(tag: "h1" | "h2" | "p", value: string, parent: HTMLElement = document.body) {
+      const element = document.createElement(tag);
+      element.textContent = value;
+      parent.append(element);
+    }
+
+    const header = document.createElement("header");
+    addText("h1", "CRA Care · Receita médica", header);
+    addText("p", `Lote ${batch.code} · Emitida em ${formatDate(prescription.createdAt)}`, header);
+    document.body.append(header);
+    addText("h2", "Dados do paciente");
+    addText("p", `Paciente: ${item.patientName}`);
+    addText("p", `CPF: ${item.patientCpf}`);
+    addText("h2", "Prescrição médica");
+    addText("p", `Médico responsável: ${prescription.doctor} · CRM ${prescription.doctorCrm}`);
+    addText("p", `Tratamento: ${prescription.treatment}`);
+    addText("p", `Fase: ${prescription.phase}`);
+    addText("p", `Quantidade: ${prescription.bottles} frasco(s)`);
+    addText("p", `Posologia: ${prescription.posology}`);
+    addText("p", `Frequência: ${prescription.frequency} · ${prescription.drops} gotas`);
+    addText("h2", "Fórmula e composição");
+
+    for (const formula of prescription.formulas) {
+      const row = document.createElement("div");
+      row.className = "formula";
+      const name = document.createElement("span");
+      name.textContent = formula.name;
+      const percentage = document.createElement("strong");
+      percentage.textContent = `${formula.percentage}%`;
+      row.append(name, percentage);
+      document.body.append(row);
+    }
+
+    if (prescription.notes) {
+      addText("h2", "Observações do médico");
+      addText("p", prescription.notes);
+    }
+
+    const signature = document.createElement("div");
+    signature.className = "signature";
+    addText("p", `${prescription.doctor} · CRM ${prescription.doctorCrm}`, signature);
+    addText("p", prescription.signatureStatus === "signed" ? "Receita assinada" : "Assinatura pendente", signature);
+    document.body.append(signature);
+    printWindow.focus();
+    printWindow.requestAnimationFrame(() => printWindow.print());
+    setMessage(`Receita de ${item.patientName} preparada. Selecione "Salvar como PDF" na impressão.`);
     setError("");
   }
 
@@ -493,6 +569,7 @@ export default function LaboratorioPage() {
                       {selectedBatch.items.map((item) => {
                         const prepared = selectedPreparedIds.includes(item.prescriptionId);
                         const editable = selectedBatch.status === "em-producao";
+                        const prescription = prescriptions.find((record) => record.id === item.prescriptionId);
 
                         return (
                           <article
@@ -520,7 +597,17 @@ export default function LaboratorioPage() {
                             <div className="mt-4 grid gap-3 text-xs text-[#66595d] sm:grid-cols-2">
                               <p><strong>Tratamento:</strong> {item.treatment}</p>
                               <p><strong>Fase:</strong> {item.phase}</p>
+                              {prescription && <p><strong>CRM:</strong> {prescription.doctorCrm}</p>}
+                              {prescription && <p><strong>Receita emitida:</strong> {formatDate(prescription.createdAt)}</p>}
+                              {prescription && <p><strong>Posologia:</strong> {prescription.posology}</p>}
+                              {prescription && <p><strong>Frequência:</strong> {prescription.frequency} · {prescription.drops} gotas</p>}
                             </div>
+
+                            {prescription?.notes && (
+                              <p className="mt-4 rounded-xl bg-[#fff8eb] px-3 py-2 text-xs text-[#745c37]">
+                                <strong>Observações do médico:</strong> {prescription.notes}
+                              </p>
+                            )}
 
                             <div className="mt-4 rounded-xl bg-white p-3">
                               <p className="text-xs font-semibold text-[#544449]">Composição da vacina</p>
@@ -538,6 +625,17 @@ export default function LaboratorioPage() {
                                 ))}
                               </div>
                             </div>
+
+                            {item.patientId && (
+                              <button
+                                type="button"
+                                disabled={!prescription}
+                                onClick={() => downloadPrescription(item, selectedBatch)}
+                                className="mt-4 rounded-xl border border-[#e6dbd6] px-4 py-2.5 text-xs font-semibold text-[#a3113a] hover:bg-[#fff5f7] disabled:cursor-not-allowed disabled:opacity-45"
+                              >
+                                ↓ Baixar receita em PDF
+                              </button>
+                            )}
 
                             {(editable || prepared) && (
                               <button
