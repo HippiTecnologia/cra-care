@@ -67,6 +67,32 @@ export default function SecretariaNotasFiscaisPage() {
     });
   }
 
+  async function extractPdfText(file: File) {
+    const { GlobalWorkerOptions, getDocument } = await import(
+      "pdfjs-dist/legacy/build/pdf.mjs"
+    );
+    GlobalWorkerOptions.workerSrc = new URL(
+      "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
+      import.meta.url,
+    ).toString();
+    const data = new Uint8Array(await file.arrayBuffer());
+    const pdf = await getDocument({ data }).promise;
+    const pages: string[] = [];
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      pages.push(
+        content.items
+          .map((item) => ("str" in item ? item.str : ""))
+          .join(" "),
+      );
+    }
+
+    pdf.cleanup();
+    return pages.join(" ");
+  }
+
   async function uploadInvoice(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -85,25 +111,27 @@ export default function SecretariaNotasFiscaisPage() {
       return;
     }
 
-    const cpf = normalizeCpf(file.name.replace(/\.pdf$/i, ""));
-    if (cpf.length !== 11) {
-      setError("O nome do arquivo deve conter somente o CPF do paciente. Ex.: 123.456.789-00.pdf");
-      return;
-    }
-
-    const patient = patients.find((record) => normalizeCpf(record.cpf) === cpf);
-    if (!patient) {
-      setError(`Nenhum paciente encontrado para o CPF do arquivo ${file.name}.`);
-      return;
-    }
-
-    if (invoices.some((invoice) => invoice.patientId === patient.id && invoice.fileName.toLowerCase() === file.name.toLowerCase())) {
-      setError("Este arquivo já foi vinculado ao paciente. Renomeie-o ou remova a versão anterior.");
-      return;
-    }
-
     setUploading(true);
     try {
+      const pdfText = await extractPdfText(file);
+      const normalizedText = normalizeCpf(pdfText);
+      const matchingPatients = patients.filter((record) =>
+        normalizedText.includes(normalizeCpf(record.cpf)),
+      );
+
+      if (matchingPatients.length === 0) {
+        throw new Error("Nenhum CPF de paciente cadastrado foi encontrado dentro do PDF. Confira se o documento possui texto pesquisável.");
+      }
+
+      if (matchingPatients.length > 1) {
+        throw new Error("O PDF contém CPFs de mais de um paciente cadastrado. Confira o documento antes de importar.");
+      }
+
+      const patient = matchingPatients[0];
+      if (invoices.some((invoice) => invoice.patientId === patient.id && invoice.fileName.toLowerCase() === file.name.toLowerCase())) {
+        throw new Error("Este arquivo já foi vinculado ao paciente. Renomeie-o ou remova a versão anterior.");
+      }
+
       const invoice: DemoInvoice = {
         id: crypto.randomUUID(),
         patientId: patient.id,
@@ -148,7 +176,7 @@ export default function SecretariaNotasFiscaisPage() {
         <section className="px-5 py-7 sm:px-8 lg:px-10 lg:py-9">
           <div className="mx-auto max-w-6xl">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div><p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#a3113a]">Secretaria · documentos</p><h1 className="mt-2 text-3xl font-bold text-[#433438]">Notas fiscais</h1><p className="mt-2 text-sm text-[#817578]">Envie o PDF com o CPF no nome para vinculá-lo automaticamente.</p></div>
+              <div><p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#a3113a]">Secretaria · documentos</p><h1 className="mt-2 text-3xl font-bold text-[#433438]">Notas fiscais</h1><p className="mt-2 text-sm text-[#817578]">Importe o PDF e o sistema localizará o paciente pelo CPF escrito no documento.</p></div>
               <Link href="/secretaria" className="self-start rounded-xl border border-[#e6dbd6] bg-white px-4 py-3 text-sm font-semibold text-[#a3113a]">← Voltar</Link>
             </div>
 
@@ -157,13 +185,13 @@ export default function SecretariaNotasFiscaisPage() {
 
             <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
               <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-center">
-                <div><h2 className="text-xl font-bold text-[#433438]">Upload da nota fiscal</h2><p className="mt-2 text-sm text-[#817578]">Padrão obrigatório: <strong>CPF.pdf</strong>, por exemplo, 123.456.789-00.pdf.</p></div>
+                <div><h2 className="text-xl font-bold text-[#433438]">Importar nota fiscal</h2><p className="mt-2 text-sm text-[#817578]">O arquivo pode ter qualquer nome. O CRA Care lerá o CPF diretamente no conteúdo do PDF.</p></div>
                 <label className={`cursor-pointer rounded-xl bg-[#a3113a] px-5 py-3 text-center text-sm font-semibold text-white ${uploading ? "pointer-events-none opacity-50" : ""}`}>
                   {uploading ? "Enviando..." : "Selecionar PDF"}
                   <input type="file" accept="application/pdf,.pdf" onChange={(event) => void uploadInvoice(event)} className="sr-only" />
                 </label>
               </div>
-              <p className="mt-5 rounded-2xl bg-[#fff8eb] px-4 py-3 text-xs leading-5 text-[#806238]"><strong>Protótipo:</strong> os PDFs ficam somente neste navegador e nesta aba. Na versão final, serão armazenados de forma privada no Supabase.</p>
+              <p className="mt-5 rounded-2xl bg-[#fff8eb] px-4 py-3 text-xs leading-5 text-[#806238]"><strong>Protótipo:</strong> o PDF precisa conter texto pesquisável; documentos apenas escaneados precisarão de OCR na versão final. Os arquivos ficam somente neste navegador e nesta aba e depois serão armazenados de forma privada no Supabase.</p>
             </section>
 
             <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
