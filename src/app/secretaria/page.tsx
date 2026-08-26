@@ -6,7 +6,10 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   DemoPatientRecord,
   DemoPrescription,
+  DemoInvoice,
+  PatientPaymentRecord,
   readDemoPatients,
+  readDemoInvoices,
   readDemoPrescriptions,
   saveDemoPatient,
   subscribeDemoPatients,
@@ -49,6 +52,7 @@ type Patient = {
   acquisitionMethod?: AcquisitionMethod;
   paymentMethod?: PaymentMethod;
   paymentInstallments?: number;
+  payments?: PatientPaymentRecord[];
   notes?: string;
   abandonmentReason?: string;
   registrationComplete?: boolean;
@@ -75,6 +79,7 @@ type NewPatientForm = {
   acquisitionMethod: AcquisitionMethod;
   paymentMethod: PaymentMethod;
   paymentInstallments: number;
+  payments: PatientPaymentRecord[];
   notes: string;
   abandonmentReason: string;
 };
@@ -285,6 +290,7 @@ function createEmptyPatientForm(): NewPatientForm {
     acquisitionMethod: "Por frasco",
     paymentMethod: "A definir",
     paymentInstallments: 1,
+    payments: [],
     notes: "",
     abandonmentReason: "",
   };
@@ -335,6 +341,7 @@ function patientFromMedicalRecord(record: DemoPatientRecord): Patient {
     acquisitionMethod: record.acquisitionMethod ?? defaults.acquisitionMethod,
     paymentMethod: record.paymentMethod ?? defaults.paymentMethod,
     paymentInstallments: record.paymentInstallments ?? 1,
+    payments: record.payments ?? [],
     notes: record.notes ?? "",
     abandonmentReason: record.abandonmentReason ?? "",
     registrationComplete: record.registrationStatus === "completed",
@@ -370,6 +377,13 @@ function formatDate(date: string) {
   return new Date(`${date}T12:00:00`).toLocaleDateString("pt-BR");
 }
 
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(value);
+}
+
 function isBirthdayToday(date: string) {
   const birthday = new Date(`${date}T12:00:00`);
   const today = new Date();
@@ -391,6 +405,7 @@ function requiresNewOrder(patient: Patient) {
 export default function SecretariaPage() {
   const [patients, setPatients] = useState<Patient[]>(initialPatients);
   const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
+  const [invoices, setInvoices] = useState<DemoInvoice[]>([]);
   const [search, setSearch] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("Todos os médicos");
   const [filter, setFilter] = useState<FilterMode>("todos");
@@ -406,6 +421,9 @@ export default function SecretariaPage() {
   const [abandoningPatient, setAbandoningPatient] = useState<Patient | null>(null);
   const [abandonmentReason, setAbandonmentReason] = useState("");
   const [abandonmentError, setAbandonmentError] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentDate, setPaymentDate] = useState(() => dateDaysAgo(0));
+  const [paymentNotes, setPaymentNotes] = useState("");
 
   useEffect(() => {
     const syncPatients = () => {
@@ -417,6 +435,7 @@ export default function SecretariaPage() {
         ...initialPatients.filter((patient) => !receivedIds.has(patient.id)),
       ]);
       setPrescriptions(readDemoPrescriptions());
+      setInvoices(readDemoInvoices());
     };
 
     queueMicrotask(syncPatients);
@@ -522,12 +541,52 @@ export default function SecretariaPage() {
       acquisitionMethod: patient.acquisitionMethod ?? "Por frasco",
       paymentMethod: patient.paymentMethod ?? "A definir",
       paymentInstallments: patient.paymentInstallments ?? 1,
+      payments: patient.payments ?? [],
       notes: patient.notes ?? "",
       abandonmentReason: patient.abandonmentReason ?? "",
     });
     setFormError("");
     setSuccessMessage("");
     setShowPatientForm(true);
+  }
+
+  function addPayment() {
+    const amount = Number(paymentAmount.replace(",", "."));
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setFormError("Informe um valor de pagamento maior que zero.");
+      return;
+    }
+
+    if (!paymentDate) {
+      setFormError("Informe a data do pagamento.");
+      return;
+    }
+
+    if (newPatient.paymentMethod === "A definir") {
+      setFormError("Selecione a forma de pagamento antes de registrar o valor pago.");
+      return;
+    }
+
+    const payment: PatientPaymentRecord = {
+      id: crypto.randomUUID(),
+      amount,
+      paidAt: paymentDate,
+      method: newPatient.paymentMethod,
+      installments:
+        newPatient.paymentMethod === "Cartão de crédito"
+          ? newPatient.paymentInstallments
+          : undefined,
+      notes: paymentNotes.trim() || undefined,
+    };
+
+    setNewPatient((current) => ({
+      ...current,
+      payments: [payment, ...current.payments],
+    }));
+    setPaymentAmount("");
+    setPaymentNotes("");
+    setFormError("");
   }
 
   function saveNewPatient(event: FormEvent<HTMLFormElement>) {
@@ -590,6 +649,7 @@ export default function SecretariaPage() {
       acquisitionMethod: newPatient.acquisitionMethod,
       paymentMethod: newPatient.paymentMethod,
       paymentInstallments: newPatient.paymentMethod === "Cartão de crédito" ? Math.max(1, newPatient.paymentInstallments) : undefined,
+      payments: newPatient.payments,
       notes: newPatient.notes.trim(),
       abandonmentReason: newPatient.status === "desistente" ? newPatient.abandonmentReason.trim() : undefined,
       registrationComplete: true,
@@ -732,9 +792,9 @@ export default function SecretariaPage() {
               Vacinas em estoque
             </Link>
 
-            <button className="w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
+            <Link href="/secretaria/notas-fiscais" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
               Notas fiscais
-            </button>
+            </Link>
 
             <button className="w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
               Contratos
@@ -967,6 +1027,7 @@ export default function SecretariaPage() {
                         const latestPrescription = prescriptions.find(
                           (prescription) => prescription.patientId === patient.id,
                         );
+                        const patientInvoices = invoices.filter((invoice) => invoice.patientId === patient.id);
 
                         return (
                           <article
@@ -1099,6 +1160,20 @@ export default function SecretariaPage() {
                                   {" · "}
                                   {latestPrescription.formulas.length} composição(ões)
                                 </p>
+                              </div>
+                            )}
+
+                            {patientInvoices.length > 0 && (
+                              <div className="mt-4 rounded-xl border border-[#e1daf0] bg-[#faf7ff] px-3 py-3">
+                                <p className="text-xs font-bold text-[#7351a3]">Notas fiscais · {patientInvoices.length}</p>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {patientInvoices.slice(0, 2).map((invoice) => (
+                                    <a key={invoice.id} href={invoice.fileData} target="_blank" rel="noreferrer" className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#7351a3]">
+                                      Abrir PDF
+                                    </a>
+                                  ))}
+                                  <Link href="/secretaria/notas-fiscais" className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#7351a3]">Ver todas</Link>
+                                </div>
                               </div>
                             )}
 
@@ -1498,6 +1573,56 @@ export default function SecretariaPage() {
                       <option>Aéreo</option>
                     </select>
                   </label>
+                </div>
+              </section>
+
+              <section className="border-t border-[#f0e8e4] pt-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-base font-bold text-[#a3113a]">Financeiro do paciente</h3>
+                    <p className="mt-1 text-xs text-[#817578]">Registre os valores efetivamente pagos pelo paciente.</p>
+                  </div>
+                  <div className="rounded-2xl bg-[#edf8f3] px-4 py-3 text-right">
+                    <p className="text-xs text-[#187157]">Total pago</p>
+                    <p className="mt-1 text-xl font-bold text-[#187157]">
+                      {formatCurrency(newPatient.payments.reduce((total, payment) => total + payment.amount, 0))}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <label className="text-sm font-medium text-[#544449]">
+                    Valor pago (R$)
+                    <input type="number" min="0.01" step="0.01" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} placeholder="0,00" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" />
+                  </label>
+                  <label className="text-sm font-medium text-[#544449]">
+                    Data do pagamento
+                    <input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" />
+                  </label>
+                  <label className="text-sm font-medium text-[#544449] lg:col-span-2">
+                    Observação
+                    <input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: pagamento do 2º frasco" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" />
+                  </label>
+                </div>
+                <button type="button" onClick={addPayment} className="mt-4 rounded-xl bg-[#187157] px-5 py-3 text-sm font-semibold text-white">
+                  Adicionar pagamento
+                </button>
+
+                <div className="mt-5 space-y-3">
+                  {newPatient.payments.length === 0 ? (
+                    <p className="rounded-2xl border border-dashed border-[#e6dbd6] px-4 py-5 text-center text-sm text-[#817578]">Nenhum pagamento registrado.</p>
+                  ) : newPatient.payments.map((payment) => (
+                    <article key={payment.id} className="flex flex-col gap-3 rounded-2xl bg-[#fbf5f2] p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-[#433438]">{formatCurrency(payment.amount)}</p>
+                        <p className="mt-1 text-xs text-[#716569]">{formatDate(payment.paidAt)} · {payment.method}{payment.installments ? ` · ${payment.installments}x` : ""}</p>
+                        {payment.notes && <p className="mt-1 text-xs text-[#817578]">{payment.notes}</p>}
+                      </div>
+                      <button type="button" onClick={() => setNewPatient((current) => ({ ...current, payments: current.payments.filter((item) => item.id !== payment.id) }))} className="self-start rounded-lg bg-[#fff1f3] px-3 py-2 text-xs font-semibold text-[#a3113a]">
+                        Remover
+                      </button>
+                    </article>
+                  ))}
                 </div>
               </section>
 

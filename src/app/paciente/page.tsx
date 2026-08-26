@@ -6,6 +6,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   DemoPatientRecord,
   DemoPrescription,
+  DemoInvoice,
+  readDemoInvoices,
   readDemoPrescriptions,
   subscribeDemoPatients,
 } from "../medico/patient-store";
@@ -22,7 +24,7 @@ import {
   subscribePortalState,
 } from "./patient-portal-store";
 
-type PatientSection = "inicio" | "frasco" | "alertas" | "calendario" | "notas" | "termo";
+type PatientSection = "inicio" | "frasco" | "alertas" | "calendario" | "notas" | "notas-fiscais" | "termo";
 
 const navigation: { id: PatientSection; icon: string; label: string; short: string }[] = [
   { id: "inicio", icon: "⌂", label: "Página inicial", short: "Início" },
@@ -30,8 +32,13 @@ const navigation: { id: PatientSection; icon: string; label: string; short: stri
   { id: "alertas", icon: "◷", label: "Alertas", short: "Alertas" },
   { id: "calendario", icon: "▦", label: "Calendário geral", short: "Dias" },
   { id: "notas", icon: "☰", label: "Notas", short: "Notas" },
+  { id: "notas-fiscais", icon: "▧", label: "Notas fiscais", short: "NFs" },
   { id: "termo", icon: "▤", label: "Termo", short: "Termo" },
 ];
+
+const vaccineWhatsAppUrl = `https://wa.me/5541999999999?text=${encodeURIComponent(
+  "Olá! Sou paciente do CRA Care e gostaria de falar com o setor de vacinas.",
+)}`;
 
 const weekdays = [
   { value: 0, short: "Dom", label: "Domingo" },
@@ -167,6 +174,7 @@ export default function PatientPortalPage() {
   const [patient, setPatient] = useState<DemoPatientRecord | null>(null);
   const [portal, setPortal] = useState<PatientPortalState | null>(null);
   const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
+  const [invoices, setInvoices] = useState<DemoInvoice[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [section, setSection] = useState<PatientSection>("inicio");
   const [signatureName, setSignatureName] = useState("");
@@ -206,6 +214,7 @@ export default function PatientPortalPage() {
       setPortal(current);
       setReminderDraft(current.reminders);
       setPrescriptions(readDemoPrescriptions(activePatient.id));
+      setInvoices(readDemoInvoices(activePatient.id));
       setLoaded(true);
     };
 
@@ -771,6 +780,24 @@ export default function PatientPortalPage() {
               </article>
             )}
 
+            {section === "notas-fiscais" && (
+              <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Meus documentos</p>
+                <h2 className="mt-2 text-2xl font-bold text-[#433438]">Notas fiscais</h2>
+                <p className="mt-2 text-sm leading-6 text-[#817578]">Consulte ou baixe as notas fiscais disponibilizadas pela secretaria.</p>
+                <div className="mt-6 space-y-3">
+                  {invoices.length === 0 ? (
+                    <p className="rounded-2xl border border-dashed border-[#e6dbd6] px-5 py-10 text-center text-sm text-[#817578]">Nenhuma nota fiscal disponível no momento.</p>
+                  ) : invoices.map((invoice) => (
+                    <div key={invoice.id} className="flex flex-col gap-4 rounded-2xl bg-[#fbf5f2] p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div><p className="text-sm font-bold text-[#433438]">{invoice.fileName}</p><p className="mt-1 text-xs text-[#817578]">Disponibilizada em {formatDate(invoice.uploadedAt, true)}</p></div>
+                      <div className="flex gap-2"><a href={invoice.fileData} target="_blank" rel="noreferrer" className="rounded-xl border border-[#e6dbd6] px-4 py-2.5 text-xs font-semibold text-[#a3113a]">Abrir</a><a href={invoice.fileData} download={invoice.fileName} className="rounded-xl bg-[#a3113a] px-4 py-2.5 text-xs font-semibold text-white">Baixar PDF</a></div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            )}
+
             {section === "termo" && (
               <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Documento do tratamento</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">Termo de Aquisição</h2></div><span className="self-start rounded-full bg-[#edf8f3] px-3 py-1.5 text-xs font-semibold text-[#187157]">✓ Assinado</span></div>
@@ -783,8 +810,22 @@ export default function PatientPortalPage() {
         </div>
       </div>
 
+      <a
+        href={vaccineWhatsAppUrl}
+        target="_blank"
+        rel="noreferrer"
+        aria-label="Falar com o setor de vacinas pelo WhatsApp"
+        title="Falar com o setor de vacinas"
+        className="fixed bottom-20 right-4 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-[#25D366] text-white shadow-[0_10px_30px_rgba(37,211,102,0.38)] transition hover:scale-105 hover:bg-[#1fbd5a] lg:bottom-6 lg:right-6 lg:h-auto lg:w-auto lg:gap-2 lg:px-5 lg:py-3"
+      >
+        <svg aria-hidden="true" viewBox="0 0 32 32" className="h-7 w-7 fill-current">
+          <path d="M16 3a12.7 12.7 0 0 0-11 19.1L3.3 28.5l6.5-1.7A12.7 12.7 0 1 0 16 3Zm0 23.2c-2 0-4-.6-5.7-1.6l-.4-.2-3.8 1 1-3.7-.3-.4A10.5 10.5 0 1 1 16 26.2Zm5.8-7.9c-.3-.2-1.9-.9-2.2-1-.3-.1-.5-.2-.7.2-.2.3-.8 1-1 1.2-.2.2-.4.2-.7.1-1.9-1-3.2-1.7-4.5-3.9-.3-.6.3-.6 1-1.8.1-.2.1-.4 0-.6l-1-2.4c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.6.1-.9.4-.3.3-1.2 1.2-1.2 2.9s1.3 3.4 1.4 3.6c.2.2 2.5 3.8 6 5.3 2.2.9 3.1 1 4.2.8.7-.1 1.9-.8 2.2-1.5.3-.7.3-1.3.2-1.5-.2-.1-.4-.2-.7-.3Z" />
+        </svg>
+        <span className="hidden text-sm font-semibold lg:inline">Setor de vacinas</span>
+      </a>
+
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-[#eee5e0] bg-white/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_30px_rgba(52,41,45,0.07)] backdrop-blur lg:hidden">
-        <div className="mx-auto grid max-w-lg grid-cols-6">{navigation.map((item) => <button key={item.id} type="button" onClick={() => setSection(item.id)} className={`flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-[10px] font-semibold ${section === item.id ? "text-[#a3113a]" : "text-[#8a7d80]"}`}><span className="text-lg leading-none">{item.icon}</span>{item.short}</button>)}</div>
+        <div className="mx-auto grid max-w-lg grid-cols-7">{navigation.map((item) => <button key={item.id} type="button" onClick={() => setSection(item.id)} className={`flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-[10px] font-semibold ${section === item.id ? "text-[#a3113a]" : "text-[#8a7d80]"}`}><span className="text-lg leading-none">{item.icon}</span>{item.short}</button>)}</div>
       </nav>
 
       {pendingAssessmentBottle && (

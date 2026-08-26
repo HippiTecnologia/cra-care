@@ -30,8 +30,30 @@ export type DemoPatientRecord = {
   acquisitionMethod?: "Por frasco" | "Tratamento de 6 meses" | "Recorrente — ASAAS";
   paymentMethod?: "A definir" | "Dinheiro" | "PIX" | "Asaas" | "Cartão de crédito" | "Cartão de débito";
   paymentInstallments?: number;
+  payments?: PatientPaymentRecord[];
   notes?: string;
   abandonmentReason?: string;
+};
+
+export type PatientPaymentRecord = {
+  id: string;
+  amount: number;
+  paidAt: string;
+  method: NonNullable<DemoPatientRecord["paymentMethod"]>;
+  installments?: number;
+  notes?: string;
+};
+
+export type DemoInvoice = {
+  id: string;
+  patientId: string;
+  patientName: string;
+  patientCpf: string;
+  fileName: string;
+  fileData: string;
+  fileSize: number;
+  uploadedAt: string;
+  uploadedBy: string;
 };
 
 export type PrescriptionFormula = {
@@ -280,6 +302,7 @@ const STORAGE_KEY = "cra-care-demo-patients";
 const PRESCRIPTIONS_KEY = "cra-care-demo-prescriptions";
 const BATCHES_KEY = "cra-care-demo-batches";
 const STOCK_KEY = "cra-care-demo-stock";
+const INVOICES_KEY = "cra-care-demo-invoices";
 const UPDATE_EVENT = "cra-care-demo-patients-updated";
 
 export function readDemoPatients(): DemoPatientRecord[] {
@@ -309,6 +332,35 @@ export function saveDemoPatient(patient: DemoPatientRecord) {
   window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(current));
   window.dispatchEvent(new Event(UPDATE_EVENT));
 
+  return current;
+}
+
+export function readDemoInvoices(patientId?: string): DemoInvoice[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const stored = window.sessionStorage.getItem(INVOICES_KEY);
+    const invoices = stored ? (JSON.parse(stored) as DemoInvoice[]) : [];
+
+    return invoices
+      .filter((invoice) => !patientId || invoice.patientId === patientId)
+      .sort((first, second) => new Date(second.uploadedAt).getTime() - new Date(first.uploadedAt).getTime());
+  } catch {
+    return [];
+  }
+}
+
+export function saveDemoInvoice(invoice: DemoInvoice) {
+  const current = readDemoInvoices();
+  window.sessionStorage.setItem(INVOICES_KEY, JSON.stringify([invoice, ...current]));
+  window.dispatchEvent(new Event(UPDATE_EVENT));
+  return readDemoInvoices();
+}
+
+export function removeDemoInvoice(invoiceId: string) {
+  const current = readDemoInvoices().filter((invoice) => invoice.id !== invoiceId);
+  window.sessionStorage.setItem(INVOICES_KEY, JSON.stringify(current));
+  window.dispatchEvent(new Event(UPDATE_EVENT));
   return current;
 }
 
