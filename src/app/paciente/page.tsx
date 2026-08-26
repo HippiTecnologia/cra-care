@@ -8,6 +8,7 @@ import {
   DemoPrescription,
   DemoInvoice,
   readDemoInvoices,
+  openDemoInvoicePdf,
   readDemoPrescriptions,
   subscribeDemoPatients,
 } from "../medico/patient-store";
@@ -130,25 +131,41 @@ function contractSections(patient: DemoPatientRecord, portal: PatientPortalState
   return [
     {
       heading: "Identificação do paciente",
-      text: `${patient.name}\nCPF: ${patient.cpf}\nMédico responsável: ${patient.doctor}`,
+      text: `Nome do paciente: ${patient.name}\nCPF: ${patient.cpf}\nData de nascimento: ${formatDate(patient.birthDate)}\nInício do tratamento: ${formatDate(patient.startDate)}\nTelefone: ${patient.phone ?? "Não informado"}\nE-mail: Não informado\nMédico solicitante: ${patient.doctor}`,
     },
     {
-      heading: "Objeto do termo",
-      text: `Aquisição e acompanhamento do tratamento ${patient.treatment ?? "indicado pela equipe médica"}, conforme prescrição individual, orientações da clínica e condições apresentadas pela secretaria.`,
+      heading: "Adesão ao tratamento",
+      text: "Declaro que estou aderindo voluntariamente ao tratamento de Imunoterapia Alérgeno Específica (IAE), indicado para o tratamento de alergias. Fui informado(a) de que esse tratamento utiliza doses controladas e personalizadas de alérgenos com o objetivo de reduzir ou eliminar reações alérgicas e melhorar a qualidade de vida. Também fui informado(a) de que existem outras alternativas de tratamento, como o uso de medicamentos para controle dos sintomas.",
     },
     {
-      heading: "Acompanhamento e orientações",
-      text: "Declaro ter recebido as orientações relativas ao acompanhamento do tratamento, ao registro de uso, aos retornos e ao contato com a equipe responsável. Comprometo-me a seguir a prescrição médica e comunicar intercorrências à clínica.",
+      heading: "Pontos importantes do tratamento",
+      text: `1. O tratamento é planejado tecnicamente e de forma personalizada pelo médico responsável. A dose, a fase e a composição podem ser ajustadas ao longo do tratamento. É necessária consulta médica a cada 3 meses ou conforme orientação médica.\n\n2. A duração média do tratamento é de 3 anos, sendo necessários pelo menos 6 meses para avaliar sua eficácia. Os resultados variam de pessoa para pessoa e não há garantia de sucesso.\n\n3. É fundamental seguir corretamente as orientações médicas e as datas de administração da vacina.\n\nDeclaro que tive a oportunidade de esclarecer dúvidas sobre benefícios, riscos, efeitos colaterais, duração, custos e necessidade de acompanhamento médico.\n\nTratamento indicado: ${patient.treatment ?? "Imunoterapia Alérgeno Específica (IAE)"}.`,
     },
     {
-      heading: "Documentos e privacidade",
-      text: "Estou ciente de que as informações deste atendimento serão utilizadas para o acompanhamento assistencial e administrativo do meu tratamento, conforme as políticas aplicáveis da clínica.",
+      heading: "Orientações para o uso da vacina",
+      text: "• A alimentação pode ser realizada normalmente antes da aplicação. Após escovar os dentes, aguarde 20 minutos.\n• Siga corretamente a quantidade de gotas por dia, conforme a tabela ou a orientação do médico ou da enfermagem.\n• Aplique a vacina em frente ao espelho, embaixo da língua.\n• Mantenha as gotas embaixo da língua, na região vestibular, por aproximadamente 2 minutos e depois engula.\n• É normal sentir leve formigamento ou dormência na língua.\n• Após a aplicação, permaneça em jejum por 45 minutos, sem ingerir alimentos, água ou outros líquidos.\n• A vacina pode ser aplicada pela manhã ou à noite.\n• Mantenha a vacina sempre refrigerada.\n• Em viagens, a vacina pode permanecer fora da geladeira por no máximo 4 dias e deve ser transportada com cuidado, em mala ou caixa de isopor climatizada.",
     },
     {
-      heading: "Assinatura do paciente",
+      heading: "Valores, pagamento e cancelamento",
+      text: `Tratamento Imunoterápico (Alérgeno Específico) — orientação e planejamento técnico.\nValor: R$ 270,00.\nForma de pagamento: Recorrência.\nMétodo registrado no CRA Care: ${patient.acquisitionMethod ?? "Não informado"}${patient.paymentMethod ? ` · ${patient.paymentMethod}` : ""}.\nO paciente poderá cancelar o tratamento a qualquer momento, mediante pagamento de multa correspondente a 1 mensalidade.`,
+    },
+    {
+      heading: "Possíveis efeitos adversos e crises de rinite",
+      text: "Os efeitos adversos são raros, mas podem ocorrer reações alérgicas, coceira, inchaço, vermelhidão, sintomas respiratórios ou piora inicial dos sintomas. Em caso de intercorrência, entre em contato com a equipe do CRA e com o médico responsável.\n\nMudanças de clima, odores fortes, ar-condicionado, perfumes e outros fatores não alérgicos também podem desencadear crises e não são controlados pela imunoterapia. Nesses casos, poderão ser utilizados medicamentos conforme orientação médica.",
+    },
+    {
+      heading: "Validade e renovação",
+      text: "Este termo é válido enquanto o paciente estiver realizando a Imunoterapia Alérgeno Específica. Em caso de reajuste de valores, um novo contrato será apresentado com aviso prévio. Após a formalização do novo documento, o termo anterior perderá a validade.",
+    },
+    {
+      heading: "Entrega",
+      text: "A entrega pode ser realizada por motoboy em Curitiba e Região Metropolitana. Para outras localidades, poderá ser utilizada entrega por Sedex ou Gollog quando o prazo for de até 5 dias úteis.\n\nA entrega em Curitiba está incluída. Para a Região Metropolitana de Curitiba, a taxa é de R$ 30,00. Para as demais localidades, o valor será informado mediante cotação. O paciente também poderá optar pela retirada na clínica.",
+    },
+    {
+      heading: "Assinaturas",
       text: portal.signedAt
-        ? `${portal.signedName}\nCPF: ${portal.signedCpf}\nAssinado em: ${formatDate(portal.signedAt, true)}`
-        : "Aguardando assinatura eletrônica do paciente.",
+        ? `Curitiba, ${formatDate(portal.signedAt)}.\n\nMédico solicitante: ${patient.doctor}\nCentro de Rinite e Alergia — IPO\n\nPaciente: ${portal.signedName}\nCPF: ${portal.signedCpf}\nAssinado eletronicamente em: ${formatDate(portal.signedAt, true)}`
+        : `Médico solicitante: ${patient.doctor}\nCentro de Rinite e Alergia — IPO\n\nAguardando assinatura eletrônica do paciente.`,
     },
   ];
 }
@@ -197,6 +214,7 @@ export default function PatientPortalPage() {
   const [showFinishForm, setShowFinishForm] = useState(false);
   const [assessmentFeeling, setAssessmentFeeling] = useState<PatientAssessment["feeling"] | "">("");
   const [assessmentNotes, setAssessmentNotes] = useState("");
+  const [showNotifications, setShowNotifications] = useState(false);
 
   useEffect(() => {
     const synchronize = () => {
@@ -256,8 +274,7 @@ export default function PatientPortalPage() {
   const today = dateKey(new Date());
   const todayRecord = currentBottleRecords.find((record) => record.date === today);
 
-  const chartDays = useMemo(() => {
-    return Array.from({ length: 7 }, (_, index) => {
+  const chartDays = Array.from({ length: 7 }, (_, index) => {
       const current = new Date();
       current.setDate(current.getDate() - (6 - index));
       const key = dateKey(current);
@@ -269,7 +286,6 @@ export default function PatientPortalPage() {
         scheduled: safePortal.reminders.weekdays.includes(current.getDay()),
       };
     });
-  }, [safePortal.reminders.weekdays, safePortal.useRecords]);
 
   const patientNotes = useMemo(() => {
     const notes = prescriptions.flatMap((prescription) => {
@@ -414,7 +430,7 @@ export default function PatientPortalPage() {
 
     if (existing) {
       updatePortal({
-        ...portal,
+        ...safePortal,
         useRecords: portal.useRecords.filter((record) => record.id !== existing.id),
         dayOverrides,
       });
@@ -525,7 +541,7 @@ export default function PatientPortalPage() {
   function downloadTerm() {
     if (!patient || !portal) return;
 
-    if (!openPrintableDocument("Termo de Aquisição", contractSections(patient, portal))) {
+    if (!openPrintableDocument("Termo de adesão — Imunoterapia Alérgeno Específica (IAE)", contractSections(patient, portal))) {
       setMessage("Permita a abertura de janelas para visualizar e salvar o termo em PDF.");
     }
   }
@@ -582,7 +598,7 @@ export default function PatientPortalPage() {
               <Link href="/" className="rounded-xl border border-white/25 bg-white/10 px-4 py-2 text-xs font-semibold text-white hover:bg-white/20">Sair</Link>
             </div>
             <p className="mt-6 text-xs font-semibold uppercase tracking-[0.16em] text-white/75">Primeiro acesso · etapa obrigatória</p>
-            <h1 className="mt-2 text-2xl font-bold sm:text-3xl">Termo de Aquisição</h1>
+            <h1 className="mt-2 text-2xl font-bold sm:text-3xl">Termo de adesão — Imunoterapia Alérgeno Específica (IAE)</h1>
             <p className="mt-2 max-w-xl text-sm leading-6 text-white/80">
               Olá, {patient.name.split(" ")[0]}! Antes de acessar seu acompanhamento, leia e assine o termo do seu tratamento.
             </p>
@@ -590,7 +606,7 @@ export default function PatientPortalPage() {
 
           <div className="px-6 py-7 sm:px-10 sm:py-9">
             <div className="max-h-[340px] space-y-5 overflow-y-auto rounded-2xl border border-[#eee5e0] bg-[#fcfaf8] p-5 sm:p-6">
-              {contractSections(patient, portal).slice(0, 4).map((item) => (
+              {contractSections(patient, portal).slice(0, -1).map((item) => (
                 <section key={item.heading}>
                   <h2 className="text-sm font-bold text-[#86203b]">{item.heading}</h2>
                   <p className="mt-2 whitespace-pre-line text-sm leading-7 text-[#65585c]">{item.text}</p>
@@ -611,7 +627,7 @@ export default function PatientPortalPage() {
 
             <label className="mt-5 flex cursor-pointer items-start gap-3 text-sm leading-6 text-[#66595d]">
               <input type="checkbox" checked={acceptedTerm} onChange={(event) => { setAcceptedTerm(event.target.checked); setSignatureError(""); }} className="mt-1 h-4 w-4 accent-[#a3113a]" />
-              Li o Termo de Aquisição, compreendi as orientações apresentadas e concordo com seu conteúdo.
+              Li o Termo de adesão à Imunoterapia Alérgeno Específica, compreendi as orientações apresentadas e concordo com seu conteúdo.
             </label>
 
             {signatureError && <p role="alert" className="mt-4 rounded-xl bg-[#fff1f3] px-4 py-3 text-sm text-[#a3113a]">{signatureError}</p>}
@@ -642,9 +658,51 @@ export default function PatientPortalPage() {
     : currentBottleRecords.length >= 20
       ? { emoji: "💗", text: "Você já avançou bastante no seu tratamento! Quando puder, que tal verificar sua consulta de acompanhamento? Assim, sua equipe poderá continuar acompanhando sua evolução." }
       : null;
+  const missedDays = currentBottle
+    ? Array.from({ length: Math.max(0, Math.floor((parseDate(today).getTime() - parseDate(currentBottle.startedAt).getTime()) / 86_400_000)) }, (_, index) => {
+        const day = parseDate(currentBottle.startedAt);
+        day.setDate(day.getDate() + index);
+        const key = dateKey(day);
+        const scheduled = portal.reminders.weekdays.includes(day.getDay());
+        const recorded = portal.useRecords.some((record) => record.date === key);
+        const override = portal.dayOverrides?.[key];
+        return scheduled && !recorded && override !== "off";
+      }).filter(Boolean).length
+    : 0;
+  const notifications = [
+    { id: "prototype-notification-test-v1", icon: "🔔", title: "Teste do sistema", text: "Esta é uma notificação de demonstração do CRA Care. Ao abrir o sino, ela será marcada como lida." },
+    ...(currentBottle && portal.reminders.enabled && portal.reminders.weekdays.includes(new Date().getDay()) && !todayRecord
+      ? [{ id: `reminder-${today}-${portal.reminders.time}`, icon: "💊", title: "Uso programado para hoje", text: `Seu lembrete está configurado para ${portal.reminders.time}. Registre o uso quando realizar o tratamento.` }]
+      : []),
+    ...(missedDays > 0
+      ? [{ id: `missed-${currentBottle?.id}-${missedDays}`, icon: "📅", title: `${missedDays} ${missedDays === 1 ? "dia precisa" : "dias precisam"} de atenção`, text: "Confira o calendário e atualize os dias que ficaram sem registro." }]
+      : []),
+    ...(currentBottleRecords.length >= 30
+      ? [{ id: `milestone-30-${currentBottle?.id}`, icon: "🌷", title: "30 dias de tratamento", text: "Pode ser um bom momento para solicitar o próximo frasco." }]
+      : currentBottleRecords.length >= 20
+        ? [{ id: `milestone-20-${currentBottle?.id}`, icon: "💗", title: "20 dias de tratamento", text: "Que tal verificar sua consulta de acompanhamento?" }]
+        : []),
+    ...(pendingAssessmentBottle
+      ? [{ id: `assessment-${pendingAssessmentBottle.id}`, icon: "📝", title: "Autoavaliação disponível", text: `Conte como você se sentiu durante o uso do frasco ${pendingAssessmentBottle.number}.` }]
+      : []),
+  ];
+  const readNotificationIds = portal.readNotificationIds ?? [];
+  const unreadCount = notifications.filter((notification) => !readNotificationIds.includes(notification.id)).length;
+
+  function openNotifications() {
+    const nextOpen = !showNotifications;
+    setShowNotifications(nextOpen);
+
+    if (nextOpen && unreadCount > 0) {
+      updatePortal({
+        ...safePortal,
+        readNotificationIds: Array.from(new Set([...readNotificationIds, ...notifications.map((notification) => notification.id)])),
+      });
+    }
+  }
 
   return (
-    <main className="min-h-screen bg-[#faf7f5] pb-24 text-[#34292d] lg:pb-0">
+    <main className="min-h-screen overflow-x-hidden bg-[#faf7f5] pb-24 text-[#34292d] lg:pb-0">
       <div className="min-h-screen lg:grid lg:grid-cols-[285px_minmax(0,1fr)]">
         <aside className="hidden bg-gradient-to-b from-[#b31340] to-[#790b2a] px-7 py-8 text-white lg:block">
           <Image src="/logo-cra-branca.png" alt="CRA - Centro de Rinite e Alergia" width={170} height={115} priority className="h-auto w-36" />
@@ -664,7 +722,7 @@ export default function PatientPortalPage() {
         </aside>
 
         <div className="min-w-0">
-          <header className="relative overflow-hidden bg-gradient-to-br from-[#bf1545] via-[#a3113a] to-[#790b2a] px-5 pb-12 pt-7 text-white sm:px-8 lg:px-10 lg:pb-12 lg:pt-9">
+          <header className="relative z-30 bg-gradient-to-br from-[#bf1545] via-[#a3113a] to-[#790b2a] px-5 pb-12 pt-7 text-white sm:px-8 lg:px-10 lg:pb-12 lg:pt-9">
             <div className="pointer-events-none absolute -right-12 -top-16 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
             <div className="relative mx-auto flex max-w-5xl items-center justify-between gap-4">
               <div>
@@ -672,14 +730,28 @@ export default function PatientPortalPage() {
                 <h1 className="mt-2 text-2xl font-bold sm:text-3xl">Olá, {patient.name.split(" ")[0]} 💗</h1>
                 <p className="mt-2 text-sm text-white/80">Um passo de cada vez. Estamos com você.</p>
               </div>
-              <div className="flex flex-col items-end gap-3">
+              <div className="relative flex flex-col items-end gap-3">
                 <Image src="/logo-cra-branca.png" alt="CRA" width={118} height={80} priority className="h-auto w-20 sm:w-24" />
-                <Link href="/" className="rounded-xl border border-white/25 bg-white/10 px-4 py-2 text-xs font-semibold text-white hover:bg-white/20">Sair</Link>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={openNotifications} aria-label={`Notificações${unreadCount ? `, ${unreadCount} nova(s)` : ""}`} className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/25 bg-white/10 text-lg hover:bg-white/20">
+                    🔔
+                    {unreadCount > 0 && <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#ffd45c] px-1 text-[10px] font-bold text-[#7a1833]">{unreadCount}</span>}
+                  </button>
+                  <Link href="/" className="rounded-xl border border-white/25 bg-white/10 px-4 py-2.5 text-xs font-semibold text-white hover:bg-white/20">Sair</Link>
+                </div>
+                {showNotifications && (
+                  <div className="absolute right-0 top-full z-[70] mt-3 w-[min(90vw,360px)] overflow-hidden rounded-2xl border border-[#eadfd9] bg-white text-[#34292d] shadow-[0_24px_70px_rgba(52,20,30,0.28)]">
+                    <div className="flex items-center justify-between border-b border-[#eee5e0] px-4 py-3"><div><p className="text-sm font-bold text-[#86203b]">Notificações</p><p className="mt-0.5 text-[11px] text-[#817578]">Avisos do seu tratamento</p></div><button type="button" onClick={() => setShowNotifications(false)} aria-label="Fechar notificações" className="rounded-lg px-2 py-1 text-lg text-[#817578]">×</button></div>
+                    <div className="max-h-80 overflow-y-auto p-2">
+                      {notifications.length === 0 ? <p className="px-4 py-8 text-center text-sm text-[#817578]">Tudo certo por aqui. Nenhum aviso no momento.</p> : notifications.map((notification) => <article key={notification.id} className="flex gap-3 rounded-xl px-3 py-3 hover:bg-[#fcf6f4]"><span className="text-xl">{notification.icon}</span><div><p className="text-sm font-bold text-[#433438]">{notification.title}</p><p className="mt-1 text-xs leading-5 text-[#74676a]">{notification.text}</p></div></article>)}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </header>
 
-          <section className="relative mx-auto -mt-6 max-w-5xl px-4 pb-8 sm:px-6 lg:px-10">
+          <section className="relative z-10 mx-auto -mt-6 max-w-5xl px-4 pb-8 sm:px-6 lg:px-10">
             {message && (
               <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-[#cfe9df] bg-[#edf8f3] px-4 py-3 text-sm text-[#187157] shadow-sm">
                 <span>{message}</span><button type="button" onClick={() => setMessage("")} aria-label="Fechar mensagem">×</button>
@@ -699,13 +771,14 @@ export default function PatientPortalPage() {
 
                 {milestone && <article className="rounded-[24px] border border-[#f2dce2] bg-[#fff5f7] px-5 py-5"><p className="text-lg">{milestone.emoji}</p><p className="mt-2 text-sm leading-7 text-[#754751]">{milestone.text}</p></article>}
 
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                   {[
-                    { label: "Frascos abertos", value: String(portal.bottles.length) },
+                    { label: "Frascos recebidos", value: String(patient.bottlesReceived ?? 0), detail: patient.lastReceivedDate ? `Última entrega: ${formatDate(patient.lastReceivedDate)}` : "Sem entrega registrada" },
+                    { label: "Frascos iniciados", value: String(portal.bottles.length), detail: "Registrados no portal" },
+                    { label: "Aguardando início", value: String(Math.max(0, (patient.bottlesReceived ?? 0) - portal.bottles.length)), detail: "Recebidos e ainda fechados" },
                     { label: "Frasco atual", value: currentBottle ? `#${currentBottle.number}` : "—" },
-                    { label: "Dias de uso", value: String(portal.useRecords.length) },
-                    { label: "Uso correto", value: `${regularity}%` },
-                  ].map((item) => <article key={item.label} className="rounded-[22px] border border-[#eee5e0] bg-white p-4 shadow-sm"><p className="text-xs text-[#817578]">{item.label}</p><p className="mt-3 text-2xl font-bold text-[#a3113a]">{item.value}</p></article>)}
+                    { label: "Uso correto", value: `${regularity}%`, detail: `${portal.useRecords.length} dia(s) registrado(s)` },
+                  ].map((item) => <article key={item.label} className="rounded-[22px] border border-[#eee5e0] bg-white p-4 shadow-sm"><p className="text-xs text-[#817578]">{item.label}</p><p className="mt-3 text-2xl font-bold text-[#a3113a]">{item.value}</p>{item.detail && <p className="mt-2 text-[11px] leading-4 text-[#817578]">{item.detail}</p>}</article>)}
                 </div>
 
                 <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
@@ -791,7 +864,7 @@ export default function PatientPortalPage() {
                   ) : invoices.map((invoice) => (
                     <div key={invoice.id} className="flex flex-col gap-4 rounded-2xl bg-[#fbf5f2] p-4 sm:flex-row sm:items-center sm:justify-between">
                       <div><p className="text-sm font-bold text-[#433438]">{invoice.fileName}</p><p className="mt-1 text-xs text-[#817578]">Disponibilizada em {formatDate(invoice.uploadedAt, true)}</p></div>
-                      <div className="flex gap-2"><a href={invoice.fileData} target="_blank" rel="noreferrer" className="rounded-xl border border-[#e6dbd6] px-4 py-2.5 text-xs font-semibold text-[#a3113a]">Abrir</a><a href={invoice.fileData} download={invoice.fileName} className="rounded-xl bg-[#a3113a] px-4 py-2.5 text-xs font-semibold text-white">Baixar PDF</a></div>
+                      <div className="flex gap-2"><button type="button" onClick={() => void openDemoInvoicePdf(invoice)} className="rounded-xl border border-[#e6dbd6] px-4 py-2.5 text-xs font-semibold text-[#a3113a]">Abrir</button><a href={invoice.fileData} download={invoice.fileName} className="rounded-xl bg-[#a3113a] px-4 py-2.5 text-xs font-semibold text-white">Baixar PDF</a></div>
                     </div>
                   ))}
                 </div>
@@ -800,7 +873,7 @@ export default function PatientPortalPage() {
 
             {section === "termo" && (
               <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Documento do tratamento</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">Termo de Aquisição</h2></div><span className="self-start rounded-full bg-[#edf8f3] px-3 py-1.5 text-xs font-semibold text-[#187157]">✓ Assinado</span></div>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Documento do tratamento</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">Termo de adesão — Imunoterapia Alérgeno Específica (IAE)</h2></div><span className="self-start rounded-full bg-[#edf8f3] px-3 py-1.5 text-xs font-semibold text-[#187157]">✓ Assinado</span></div>
                 <div className="mt-5 rounded-2xl bg-[#edf8f3] p-4 text-sm text-[#187157]"><p className="font-semibold">Documento assinado por {portal.signedName}</p><p className="mt-2 text-xs">CPF {portal.signedCpf} · {formatDate(portal.signedAt, true)}</p></div>
                 <div className="mt-6 space-y-5">{contractSections(patient, portal).map((item) => <section key={item.heading} className="rounded-2xl bg-[#fcfaf8] p-4"><h3 className="text-sm font-bold text-[#86203b]">{item.heading}</h3><p className="mt-2 whitespace-pre-line text-sm leading-7 text-[#65585c]">{item.text}</p></section>)}</div>
                 <button type="button" onClick={downloadTerm} className="mt-6 w-full rounded-2xl bg-[#a3113a] px-4 py-3.5 text-sm font-semibold text-white sm:w-auto sm:px-6">Baixar termo em PDF</button>

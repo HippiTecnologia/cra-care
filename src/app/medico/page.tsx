@@ -11,6 +11,10 @@ import {
   saveDemoPatient,
   subscribeDemoPatients,
 } from "./patient-store";
+import { readPortalState } from "../paciente/patient-portal-store";
+
+type DoctorSection = "dashboard" | "pacientes" | "financeiro" | "evolucao";
+type DoctorPatientFilter = "todos" | "ativo" | "com-pedido" | "concluido" | "perdido" | "desistente";
 
 const loggedDoctor = demoDoctor.name;
 
@@ -47,6 +51,8 @@ export default function MedicoPage() {
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [section, setSection] = useState<DoctorSection>("dashboard");
+  const [patientFilter, setPatientFilter] = useState<DoctorPatientFilter>("todos");
 
   useEffect(() => {
     const syncPatients = () => setRecords(readDemoPatients());
@@ -61,6 +67,11 @@ export default function MedicoPage() {
     [records],
   );
 
+  const allDoctorPatients = useMemo(() => {
+    const savedIds = new Set(doctorRecords.map((patient) => patient.id));
+    return [...doctorRecords, ...demoMedicalPatients.filter((patient) => patient.doctor === loggedDoctor && !savedIds.has(patient.id))];
+  }, [doctorRecords]);
+
   const visiblePatients = useMemo(() => {
     const term = search
       .normalize("NFD")
@@ -68,21 +79,7 @@ export default function MedicoPage() {
       .replace(/[.\-]/g, "")
       .toLowerCase();
 
-    const combined = [
-      ...doctorRecords.map((patient) => ({
-        id: patient.id,
-        name: patient.name,
-        cpf: patient.cpf,
-        birthDate: patient.birthDate,
-        status:
-          patient.registrationStatus === "pending-secretary"
-            ? "Aguardando secretaria"
-            : "Cadastro concluído",
-      })),
-      ...existingPatients.filter(
-        (patient) => !doctorRecords.some((record) => record.id === patient.id),
-      ),
-    ];
+    const combined = allDoctorPatients;
 
     return combined.filter((patient) => {
       const searchable = `${patient.name} ${patient.cpf}`
@@ -91,13 +88,31 @@ export default function MedicoPage() {
         .replace(/[.\-]/g, "")
         .toLowerCase();
 
-      return !term || searchable.includes(term);
+      const matchesStatus = patientFilter === "todos" || (patientFilter === "ativo" ? ["ativo", "em-conversa", "bacteriana", "tentar-novamente"].includes(patient.status ?? "") : patient.status === patientFilter);
+      return (!term || searchable.includes(term)) && matchesStatus;
     });
-  }, [doctorRecords, search]);
+  }, [allDoctorPatients, patientFilter, search]);
 
-  const pendingCount = doctorRecords.filter(
-    (patient) => patient.registrationStatus === "pending-secretary",
-  ).length;
+  const totalPatients = allDoctorPatients.length;
+  const countByStatus = (status: DoctorPatientFilter) => status === "todos" ? totalPatients : allDoctorPatients.filter((patient) => status === "ativo" ? ["ativo", "em-conversa", "bacteriana", "tentar-novamente"].includes(patient.status ?? "") : patient.status === status).length;
+  const percentage = (value: number) => totalPatients ? Math.round((value / totalPatients) * 100) : 0;
+  const statusMetrics = [
+    { id: "ativo" as const, label: "Pacientes ativos", color: "#24846b" },
+    { id: "com-pedido" as const, label: "Com pedido", color: "#a3113a" },
+    { id: "concluido" as const, label: "Concluídos", color: "#3d76a5" },
+    { id: "perdido" as const, label: "Perdidos", color: "#8b7d80" },
+    { id: "desistente" as const, label: "Desistentes", color: "#a86a32" },
+  ].map((item) => ({ ...item, value: countByStatus(item.id), percentage: percentage(countByStatus(item.id)) }));
+  const recentPatients = [...allDoctorPatients].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
+  const evolution = allDoctorPatients.map((patient) => {
+    const portal = readPortalState(patient.id);
+    const scheduled = portal.bottles.length ? Math.max(1, portal.useRecords.length + Object.values(portal.dayOverrides ?? {}).filter((value) => value === "nao-registrado").length) : 0;
+    const regularity = scheduled ? Math.round((portal.useRecords.length / scheduled) * 100) : 0;
+    const positive = portal.assessments.filter((assessment) => ["muito-bem", "bem"].includes(assessment.feeling)).length;
+    const discomfort = portal.assessments.filter((assessment) => ["desconfortos", "nao-bem"].includes(assessment.feeling)).length;
+    return { patient, regularity, positive, discomfort };
+  });
+  const averageRegularity = evolution.length ? Math.round(evolution.reduce((total, item) => total + item.regularity, 0) / evolution.length) : 0;
 
   function closeForm() {
     setShowForm(false);
@@ -160,16 +175,16 @@ export default function MedicoPage() {
           </div>
 
           <nav className="mt-8 space-y-2">
-            <button className="w-full rounded-2xl bg-white/15 px-4 py-3 text-left text-sm font-semibold">
+            <button type="button" onClick={() => setSection("dashboard")} className={`w-full rounded-2xl px-4 py-3 text-left text-sm ${section === "dashboard" ? "bg-white/15 font-semibold" : "text-white/80 hover:bg-white/10"}`}>
               Dashboard
             </button>
-            <button className="w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
+            <button type="button" onClick={() => setSection("pacientes")} className={`w-full rounded-2xl px-4 py-3 text-left text-sm ${section === "pacientes" ? "bg-white/15 font-semibold" : "text-white/80 hover:bg-white/10"}`}>
               Meus pacientes
             </button>
-            <button className="w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
-              Receitas
+            <button type="button" onClick={() => setSection("financeiro")} className={`w-full rounded-2xl px-4 py-3 text-left text-sm ${section === "financeiro" ? "bg-white/15 font-semibold" : "text-white/80 hover:bg-white/10"}`}>
+              Financeiro
             </button>
-            <button className="w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
+            <button type="button" onClick={() => setSection("evolucao")} className={`w-full rounded-2xl px-4 py-3 text-left text-sm ${section === "evolucao" ? "bg-white/15 font-semibold" : "text-white/80 hover:bg-white/10"}`}>
               Evolução
             </button>
             <Link
@@ -209,40 +224,27 @@ export default function MedicoPage() {
             </div>
           </header>
 
-          <section className="grid gap-4 md:grid-cols-3">
-            {[
-              {
-                title: "Meus pacientes",
-                value: existingPatients.length + doctorRecords.filter(
-                  (record) => !existingPatients.some((patient) => patient.id === record.id),
-                ).length,
-                subtitle: "Pacientes vinculados ao seu perfil",
-              },
-              {
-                title: "Aguardando secretaria",
-                value: pendingCount,
-                subtitle: "Cadastros que precisam ser completados",
-              },
-              {
-                title: "Cadastros finalizados",
-                value: doctorRecords.filter(
-                  (patient) => patient.registrationStatus === "completed",
-                ).length,
-                subtitle: "Pacientes liberados pela equipe",
-              },
-            ].map((card) => (
+          {section === "dashboard" && <>
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+            {statusMetrics.map((card) => (
               <div
-                key={card.title}
+                key={card.id}
                 className="rounded-3xl border border-[#efe6e1] bg-white p-6 shadow-[0_12px_35px_rgba(80,30,45,0.05)]"
               >
-                <p className="text-sm font-semibold text-[#74686b]">{card.title}</p>
+                <p className="text-sm font-semibold text-[#74686b]">{card.label}</p>
                 <p className="mt-4 text-4xl font-bold text-[#a3113a]">{card.value}</p>
-                <p className="mt-2 text-xs text-[#827679]">{card.subtitle}</p>
+                <p className="mt-2 text-xs text-[#827679]">{card.percentage}% do total</p>
               </div>
             ))}
           </section>
 
-          <section className="mt-8 rounded-3xl border border-[#efe6e1] bg-white p-6 shadow-[0_12px_35px_rgba(80,30,45,0.04)]">
+          <section className="mt-8 grid gap-6 xl:grid-cols-[1fr_1.2fr]">
+            <article className="rounded-3xl border border-[#efe6e1] bg-white p-6 shadow-sm"><h2 className="text-xl font-bold text-[#433438]">Distribuição dos pacientes</h2><p className="mt-1 text-sm text-[#817578]">Total: {totalPatients} pacientes vinculados ao seu perfil.</p><div className="mt-7 space-y-4">{statusMetrics.map((metric) => <div key={metric.id}><div className="flex justify-between text-xs"><strong>{metric.label}</strong><span>{metric.percentage}%</span></div><div className="mt-2 h-3 overflow-hidden rounded-full bg-[#f0e9e6]"><div className="h-full rounded-full" style={{ width: `${metric.percentage}%`, backgroundColor: metric.color }} /></div></div>)}</div></article>
+            <article className="rounded-3xl border border-[#efe6e1] bg-white p-6 shadow-sm"><div className="flex items-center justify-between"><div><h2 className="text-xl font-bold text-[#433438]">Últimos pacientes cadastrados</h2><p className="mt-1 text-sm text-[#817578]">Cadastros mais recentes deste médico.</p></div><button type="button" onClick={() => setSection("pacientes")} className="rounded-xl border border-[#eadfd9] px-4 py-2 text-xs font-semibold text-[#a3113a]">Ver todos</button></div><div className="mt-5 space-y-3">{recentPatients.map((patient) => <div key={patient.id} className="flex items-center justify-between gap-3 rounded-2xl bg-[#fbf7f5] p-4"><div><p className="text-sm font-bold">{patient.name}</p><p className="mt-1 text-xs text-[#817578]">CPF {patient.cpf} · {formatDate(patient.birthDate)}</p></div><Link href={`/medico/paciente/${patient.id}`} className="text-xs font-semibold text-[#a3113a]">Abrir →</Link></div>)}</div></article>
+          </section>
+          </>}
+
+          {section === "pacientes" && <section className="mt-8 rounded-3xl border border-[#efe6e1] bg-white p-6 shadow-[0_12px_35px_rgba(80,30,45,0.04)]">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-xl font-bold text-[#433438]">Meus pacientes</h2>
@@ -276,6 +278,8 @@ export default function MedicoPage() {
               </div>
             )}
 
+            <div className="mt-5 flex flex-wrap gap-2">{([{ id: "todos", label: "Todos" }, ...statusMetrics.map((item) => ({ id: item.id, label: item.label }))] as { id: DoctorPatientFilter; label: string }[]).map((item) => <button key={item.id} type="button" onClick={() => setPatientFilter(item.id)} className={`rounded-full px-4 py-2 text-xs font-semibold ${patientFilter === item.id ? "bg-[#a3113a] text-white" : "bg-[#f6efec] text-[#716569]"}`}>{item.label} ({countByStatus(item.id)})</button>)}</div>
+
             <div className="mt-6 space-y-3">
               {visiblePatients.map((patient) => (
                 <article
@@ -291,12 +295,12 @@ export default function MedicoPage() {
                   <div className="flex flex-wrap items-center gap-3">
                     <span
                       className={`rounded-full px-3 py-2 text-xs font-semibold ${
-                        patient.status === "Aguardando secretaria"
+                        patient.registrationStatus === "pending-secretary"
                           ? "bg-[#fff4de] text-[#98671a]"
                           : "bg-[#edf8f3] text-[#187157]"
                       }`}
                     >
-                      {patient.status}
+                      {patient.registrationStatus === "pending-secretary" ? "Aguardando secretaria" : patient.status === "com-pedido" ? "Com pedido" : patient.status === "concluido" ? "Concluído" : patient.status === "perdido" ? "Perdido" : patient.status === "desistente" ? "Desistente" : "Ativo"}
                     </span>
                     <Link
                       href={`/medico/paciente/${patient.id}`}
@@ -314,7 +318,11 @@ export default function MedicoPage() {
                 </p>
               )}
             </div>
-          </section>
+          </section>}
+
+          {section === "financeiro" && <section className="space-y-6"><div><h2 className="text-2xl font-bold text-[#433438]">Financeiro dos meus pacientes</h2><p className="mt-2 text-sm text-[#817578]">Visão dos valores registrados para pacientes vinculados ao seu perfil.</p></div><div className="grid gap-4 sm:grid-cols-3">{[{ label: "Total registrado", value: allDoctorPatients.reduce((total, patient) => total + (patient.payments ?? []).reduce((sum, payment) => sum + payment.amount, 0), 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) }, { label: "Pacientes com pagamento", value: String(allDoctorPatients.filter((patient) => (patient.payments?.length ?? 0) > 0).length) }, { label: "Sem lançamento", value: String(allDoctorPatients.filter((patient) => (patient.payments?.length ?? 0) === 0).length) }].map((card) => <article key={card.label} className="rounded-3xl border border-[#efe6e1] bg-white p-6"><p className="text-sm text-[#817578]">{card.label}</p><p className="mt-3 text-3xl font-bold text-[#a3113a]">{card.value}</p></article>)}</div><article className="rounded-3xl border border-[#efe6e1] bg-white p-6"><h3 className="text-lg font-bold">Valores por paciente</h3><div className="mt-5 space-y-3">{allDoctorPatients.map((patient) => { const total = (patient.payments ?? []).reduce((sum, payment) => sum + payment.amount, 0); return <div key={patient.id} className="flex items-center justify-between rounded-2xl bg-[#fbf7f5] p-4"><div><p className="text-sm font-bold">{patient.name}</p><p className="mt-1 text-xs text-[#817578]">{patient.acquisitionMethod ?? "Aquisição não definida"}</p></div><strong className="text-sm text-[#a3113a]">{total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong></div>; })}</div></article></section>}
+
+          {section === "evolucao" && <section className="space-y-6"><div><h2 className="text-2xl font-bold text-[#433438]">Evolução dos pacientes</h2><p className="mt-2 text-sm text-[#817578]">Indicadores de adesão e autoavaliação para apoiar o acompanhamento clínico.</p></div><div className="grid gap-4 sm:grid-cols-4">{[{ label: "Regularidade média", value: `${averageRegularity}%` }, { label: "Boa adesão", value: `${percentage(evolution.filter((item) => item.regularity >= 70).length)}%` }, { label: "Precisam de atenção", value: String(evolution.filter((item) => item.regularity < 50).length) }, { label: "Relatos de desconforto", value: String(evolution.reduce((total, item) => total + item.discomfort, 0)) }].map((card) => <article key={card.label} className="rounded-3xl border border-[#efe6e1] bg-white p-6"><p className="text-sm text-[#817578]">{card.label}</p><p className="mt-3 text-3xl font-bold text-[#a3113a]">{card.value}</p></article>)}</div><article className="rounded-3xl border border-[#efe6e1] bg-white p-6"><h3 className="text-lg font-bold">Desenvolvimento por paciente</h3><div className="mt-6 space-y-5">{evolution.map((item) => <div key={item.patient.id}><div className="flex flex-wrap items-center justify-between gap-2 text-sm"><strong>{item.patient.name}</strong><span className={item.regularity >= 70 ? "text-[#187157]" : item.regularity >= 50 ? "text-[#966419]" : "text-[#a3113a]"}>{item.regularity}% de regularidade</span></div><div className="mt-2 h-3 overflow-hidden rounded-full bg-[#f0e9e6]"><div className={`h-full rounded-full ${item.regularity >= 70 ? "bg-[#24846b]" : item.regularity >= 50 ? "bg-[#d59a42]" : "bg-[#b21a45]"}`} style={{ width: `${item.regularity}%` }} /></div><p className="mt-2 text-xs text-[#817578]">Autoavaliações positivas: {item.positive} · desconfortos: {item.discomfort}</p></div>)}</div></article><p className="rounded-2xl bg-[#fff7ea] p-4 text-xs leading-6 text-[#806238]">Estes indicadores apoiam o acompanhamento, mas não substituem avaliação médica individual.</p></section>}
 
           <p className="mt-6 text-xs text-[#8a7d80]">
             Demonstração temporária: utilize somente dados fictícios. O armazenamento

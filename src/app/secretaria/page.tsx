@@ -10,6 +10,7 @@ import {
   PatientPaymentRecord,
   readDemoPatients,
   readDemoInvoices,
+  openDemoInvoicePdf,
   readDemoPrescriptions,
   saveDemoPatient,
   subscribeDemoPatients,
@@ -47,6 +48,14 @@ type Patient = {
   delivery: DeliveryMethod;
   status: PatientStatus;
   address?: string;
+  zipCode?: string;
+  street?: string;
+  addressNumber?: string;
+  addressComplement?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
+  deliveryNotes?: string;
   billingName?: string;
   billingCpf?: string;
   acquisitionMethod?: AcquisitionMethod;
@@ -64,6 +73,14 @@ type NewPatientForm = {
   birthDate: string;
   phone: string;
   address: string;
+  zipCode: string;
+  street: string;
+  addressNumber: string;
+  addressComplement: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+  deliveryNotes: string;
   billingName: string;
   billingCpf: string;
   doctor: string;
@@ -275,6 +292,14 @@ function createEmptyPatientForm(): NewPatientForm {
     birthDate: "",
     phone: "",
     address: "",
+    zipCode: "",
+    street: "",
+    addressNumber: "",
+    addressComplement: "",
+    neighborhood: "",
+    city: "",
+    state: "",
+    deliveryNotes: "",
     billingName: "",
     billingCpf: "",
     doctor: initialPatients[0]?.doctor ?? "",
@@ -324,6 +349,14 @@ function patientFromMedicalRecord(record: DemoPatientRecord): Patient {
     doctor: record.doctor,
     phone: record.phone ?? "",
     address: record.address ?? "",
+    zipCode: record.zipCode ?? "",
+    street: record.street ?? record.address ?? "",
+    addressNumber: record.addressNumber ?? "",
+    addressComplement: record.addressComplement ?? "",
+    neighborhood: record.neighborhood ?? "",
+    city: record.city ?? "",
+    state: record.state ?? "",
+    deliveryNotes: record.deliveryNotes ?? "",
     billingName: record.billingName ?? "",
     billingCpf: record.billingCpf ?? "",
     treatment: record.treatment ?? defaults.treatment,
@@ -424,6 +457,8 @@ export default function SecretariaPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState(() => dateDaysAgo(0));
   const [paymentNotes, setPaymentNotes] = useState("");
+  const [kanbanMenuOpen, setKanbanMenuOpen] = useState(false);
+  const [kanbanStatusFilter, setKanbanStatusFilter] = useState<PatientStatus | "todos">("todos");
 
   useEffect(() => {
     const syncPatients = () => {
@@ -500,9 +535,16 @@ export default function SecretariaPage() {
         matchesFilter = patient.status === "concluido";
       }
 
-      return matchesSearch && matchesDoctor && matchesFilter;
+      const matchesKanbanStatus = kanbanStatusFilter === "todos" || patient.status === kanbanStatusFilter;
+      return matchesSearch && matchesDoctor && matchesFilter && matchesKanbanStatus;
     });
-  }, [patients, search, selectedDoctor, filter]);
+  }, [filter, kanbanStatusFilter, patients, search, selectedDoctor]);
+
+  function openKanbanFilter(status: PatientStatus | "todos") {
+    setKanbanStatusFilter(status);
+    setFilter("todos");
+    window.setTimeout(() => document.getElementById("kanban-pacientes")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  }
 
   function updateNewPatient<Field extends keyof NewPatientForm>(
     field: Field,
@@ -526,6 +568,14 @@ export default function SecretariaPage() {
       birthDate: patient.birthDate,
       phone: patient.phone,
       address: patient.address ?? "",
+      zipCode: patient.zipCode ?? "",
+      street: patient.street ?? patient.address ?? "",
+      addressNumber: patient.addressNumber ?? "",
+      addressComplement: patient.addressComplement ?? "",
+      neighborhood: patient.neighborhood ?? "",
+      city: patient.city ?? "",
+      state: patient.state ?? "",
+      deliveryNotes: patient.deliveryNotes ?? "",
       billingName: patient.billingName ?? "",
       billingCpf: patient.billingCpf ?? "",
       doctor: patient.doctor,
@@ -644,6 +694,14 @@ export default function SecretariaPage() {
       delivery: newPatient.delivery,
       status: newPatient.status,
       address: newPatient.address.trim(),
+      zipCode: newPatient.zipCode.trim(),
+      street: newPatient.street.trim(),
+      addressNumber: newPatient.addressNumber.trim(),
+      addressComplement: newPatient.addressComplement.trim(),
+      neighborhood: newPatient.neighborhood.trim(),
+      city: newPatient.city.trim(),
+      state: newPatient.state.trim().toUpperCase(),
+      deliveryNotes: newPatient.deliveryNotes.trim(),
       billingName: newPatient.billingName.trim() || newPatient.name.trim(),
       billingCpf,
       acquisitionMethod: newPatient.acquisitionMethod,
@@ -780,9 +838,10 @@ export default function SecretariaPage() {
               Dashboard
             </button>
 
-            <Link href="/secretaria#kanban-pacientes" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
-              Kanban de pacientes
-            </Link>
+            <button type="button" onClick={() => setKanbanMenuOpen((open) => !open)} className="flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10"><span>Kanban de pacientes</span><span>{kanbanMenuOpen ? "⌃" : "⌄"}</span></button>
+            {kanbanMenuOpen && <div className="ml-3 space-y-1 border-l border-white/20 pl-3">{([
+              ["todos", "Visão geral"], ["com-pedido", "Com pedido"], ["em-conversa", "Em conversa"], ["ativo", "Ativos"], ["bacteriana", "Bacteriana"], ["tentar-novamente", "Tentar novamente"], ["perdido", "Perdidos"], ["desistente", "Desistentes"], ["concluido", "Concluídos"],
+            ] as [PatientStatus | "todos", string][]).map(([status, label]) => <button key={status} type="button" onClick={() => openKanbanFilter(status)} className={`block w-full rounded-xl px-3 py-2 text-left text-xs ${kanbanStatusFilter === status ? "bg-white/15 font-semibold text-white" : "text-white/70 hover:bg-white/10"}`}>{label}</button>)}</div>}
 
             <Link href="/secretaria/lotes" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
               Lotes
@@ -941,10 +1000,10 @@ export default function SecretariaPage() {
               </div>
             </div>
 
-            {filter !== "todos" && (
+            {(filter !== "todos" || kanbanStatusFilter !== "todos") && (
               <button
                 type="button"
-                onClick={() => setFilter("todos")}
+                onClick={() => { setFilter("todos"); setKanbanStatusFilter("todos"); }}
                 className="mt-4 rounded-full bg-[#fff0f3] px-4 py-2 text-xs font-semibold text-[#a3113a]"
               >
                 Limpar filtro selecionado ×
@@ -1168,9 +1227,9 @@ export default function SecretariaPage() {
                                 <p className="text-xs font-bold text-[#7351a3]">Notas fiscais · {patientInvoices.length}</p>
                                 <div className="mt-2 flex flex-wrap gap-2">
                                   {patientInvoices.slice(0, 2).map((invoice) => (
-                                    <a key={invoice.id} href={invoice.fileData} target="_blank" rel="noreferrer" className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#7351a3]">
+                                    <button key={invoice.id} type="button" onClick={() => void openDemoInvoicePdf(invoice)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#7351a3]">
                                       Abrir PDF
-                                    </a>
+                                    </button>
                                   ))}
                                   <Link href="/secretaria/notas-fiscais" className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#7351a3]">Ver todas</Link>
                                 </div>
@@ -1326,15 +1385,14 @@ export default function SecretariaPage() {
                       ))}
                     </select>
                   </label>
-                  <label className="text-sm font-medium text-[#544449] sm:col-span-2">
-                    Endereço
-                    <input
-                      value={newPatient.address}
-                      onChange={(event) => updateNewPatient("address", event.target.value)}
-                      placeholder="Rua, número, bairro e cidade"
-                      className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]"
-                    />
-                  </label>
+                  <label className="text-sm font-medium text-[#544449]">CEP<input value={newPatient.zipCode} onChange={(event) => updateNewPatient("zipCode", event.target.value)} placeholder="00000-000" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /></label>
+                  <label className="text-sm font-medium text-[#544449]">Rua<input value={newPatient.street} onChange={(event) => updateNewPatient("street", event.target.value)} placeholder="Nome da rua" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /></label>
+                  <label className="text-sm font-medium text-[#544449]">Número<input value={newPatient.addressNumber} onChange={(event) => updateNewPatient("addressNumber", event.target.value)} placeholder="Número" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /></label>
+                  <label className="text-sm font-medium text-[#544449]">Complemento<input value={newPatient.addressComplement} onChange={(event) => updateNewPatient("addressComplement", event.target.value)} placeholder="Apartamento, bloco..." className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /></label>
+                  <label className="text-sm font-medium text-[#544449]">Bairro<input value={newPatient.neighborhood} onChange={(event) => updateNewPatient("neighborhood", event.target.value)} placeholder="Bairro" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /></label>
+                  <label className="text-sm font-medium text-[#544449]">Cidade<input value={newPatient.city} onChange={(event) => updateNewPatient("city", event.target.value)} placeholder="Cidade" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /></label>
+                  <label className="text-sm font-medium text-[#544449]">Estado<input maxLength={2} value={newPatient.state} onChange={(event) => updateNewPatient("state", event.target.value.toUpperCase())} placeholder="PR" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 uppercase outline-none focus:border-[#b91142]" /></label>
+                  <label className="text-sm font-medium text-[#544449] sm:col-span-2">Observações de entrega<textarea value={newPatient.deliveryNotes} onChange={(event) => updateNewPatient("deliveryNotes", event.target.value)} rows={3} placeholder="Ponto de referência, melhor horário, pessoa autorizada a receber..." className="mt-2 w-full rounded-xl border border-[#e9dfda] px-4 py-3 outline-none focus:border-[#b91142]" /></label>
                 </div>
               </section>
 

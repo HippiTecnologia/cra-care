@@ -45,6 +45,7 @@ export type PatientPortalState = {
   dayOverrides?: Record<string, "off" | "nao-registrado">;
   assessments: PatientAssessment[];
   reminders: PatientReminderSettings;
+  readNotificationIds?: string[];
 };
 
 const ACTIVE_PATIENT_KEY = "cra-care-demo-active-patient";
@@ -85,6 +86,7 @@ export function createDefaultPortalState(patientId: string): PatientPortalState 
     useRecords: [],
     dayOverrides: {},
     assessments: [],
+    readNotificationIds: [],
     reminders: {
       enabled: false,
       weekdays: [1, 3, 5],

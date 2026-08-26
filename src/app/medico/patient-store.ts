@@ -8,6 +8,14 @@ export type DemoPatientRecord = {
   registrationStatus: "pending-secretary" | "completed";
   phone?: string;
   address?: string;
+  zipCode?: string;
+  street?: string;
+  addressNumber?: string;
+  addressComplement?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
+  deliveryNotes?: string;
   billingName?: string;
   billingCpf?: string;
   treatment?: string;
@@ -103,6 +111,9 @@ export type DemoBatchItem = {
   paymentRequired?: boolean;
   paymentConfirmedAt?: string;
   asaasConfirmedAt?: string;
+  preparedBy?: string;
+  doctorCrm?: string;
+  prescriptionStatus?: "aguardando-aprovacao" | "aprovada";
 };
 
 export type DemoBatch = {
@@ -204,6 +215,14 @@ export const demoMedicalPatients: DemoPatientRecord[] = [
     createdAt: "2025-02-10T12:00:00",
     registrationStatus: "completed",
     phone: "(41) 99999-1001",
+    zipCode: "80240-140",
+    street: "Rua Goiás",
+    addressNumber: "60",
+    addressComplement: "Apto. 12",
+    neighborhood: "Água Verde",
+    city: "Curitiba",
+    state: "PR",
+    deliveryNotes: "Entregar em horário comercial. Confirmar pelo WhatsApp antes da saída.",
     treatment: "Imunoterapia para rinite",
     startDate: "2025-02-10",
     totalMonths: 36,
@@ -225,6 +244,14 @@ export const demoMedicalPatients: DemoPatientRecord[] = [
     createdAt: "2025-05-03T12:00:00",
     registrationStatus: "completed",
     phone: "(41) 99999-1003",
+    zipCode: "80010-000",
+    street: "Rua XV de Novembro",
+    addressNumber: "850",
+    addressComplement: "Casa 2",
+    neighborhood: "Centro",
+    city: "Curitiba",
+    state: "PR",
+    deliveryNotes: "Recepção autorizada a receber.",
     treatment: "Imunoterapia para rinite",
     startDate: "2025-05-03",
     totalMonths: 36,
@@ -246,6 +273,13 @@ export const demoMedicalPatients: DemoPatientRecord[] = [
     createdAt: "2025-10-07T12:00:00",
     registrationStatus: "completed",
     phone: "(41) 99999-1005",
+    zipCode: "83005-420",
+    street: "Rua Joinville",
+    addressNumber: "325",
+    neighborhood: "São Pedro",
+    city: "São José dos Pinhais",
+    state: "PR",
+    deliveryNotes: "Ligar ao chegar.",
     treatment: "Imunobacteriana",
     startDate: "2025-10-07",
     totalMonths: 60,
@@ -362,6 +396,33 @@ export function removeDemoInvoice(invoiceId: string) {
   window.sessionStorage.setItem(INVOICES_KEY, JSON.stringify(current));
   window.dispatchEvent(new Event(UPDATE_EVENT));
   return current;
+}
+
+export function openDemoInvoicePdf(invoice: DemoInvoice) {
+  if (typeof window === "undefined") return false;
+
+  try {
+    const encoded = invoice.fileData.split(",")[1];
+    if (!encoded) return false;
+
+    const binary = window.atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+    const viewer = window.open(url, "_blank");
+    if (!viewer) {
+      URL.revokeObjectURL(url);
+      return false;
+    }
+
+    window.setTimeout(() => URL.revokeObjectURL(url), 120_000);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function findDemoPatient(id: string) {

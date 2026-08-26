@@ -20,6 +20,7 @@ import {
 
 type StockFilter = "todos" | DemoStockStatus;
 type StockOriginFilter = "todos" | "pedido-paciente" | "pronta-entrega";
+type DeliveryFilter = "todas" | NonNullable<DemoPatientRecord["delivery"]>;
 
 const stockStatuses: Record<
   DemoStockStatus,
@@ -67,16 +68,21 @@ export default function SecretariaEstoquePage() {
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [originFilter, setOriginFilter] = useState<StockOriginFilter>("todos");
+  const [deliveryFilter, setDeliveryFilter] = useState<DeliveryFilter>("todas");
+  const [batchFilter, setBatchFilter] = useState("todos");
+  const [selectedStockIds, setSelectedStockIds] = useState<string[]>([]);
   const [assignmentPatientId, setAssignmentPatientId] = useState("");
   const [assignmentPaymentConfirmed, setAssignmentPaymentConfirmed] = useState(false);
   const [assignmentAsaasConfirmed, setAssignmentAsaasConfirmed] = useState(false);
   const [assignmentError, setAssignmentError] = useState("");
+  const [deliveredRetentionCutoff, setDeliveredRetentionCutoff] = useState(0);
 
   useEffect(() => {
     const synchronize = () => {
       const savedPatients = readDemoPatients();
       const savedIds = new Set(savedPatients.map((patient) => patient.id));
       setStock(readDemoStock());
+      setDeliveredRetentionCutoff(new Date().getTime() - 30 * 86_400_000);
       setPatients([
         ...savedPatients,
         ...demoMedicalPatients.filter((patient) => !savedIds.has(patient.id)),
@@ -92,22 +98,27 @@ export default function SecretariaEstoquePage() {
     const normalized = normalizeSearch(search);
 
     return stock.filter((item) => {
+      if (item.status === "entregue" && item.deliveredAt && deliveredRetentionCutoff > 0 && new Date(item.deliveredAt).getTime() < deliveredRetentionCutoff) return false;
       if (filter !== "todos" && item.status !== filter) return false;
       if (originFilter === "pronta-entrega" && item.patientId) return false;
       if (originFilter === "pedido-paciente" && !item.patientId) return false;
+      if (deliveryFilter !== "todas" && item.delivery !== deliveryFilter) return false;
+      if (batchFilter !== "todos" && item.batchId !== batchFilter) return false;
       if (!normalized) return true;
 
       return normalizeSearch(
         `${item.patientName} ${item.patientCpf} ${item.batchCode} ${item.doctor} ${item.treatment}`,
       ).includes(normalized);
     });
-  }, [filter, originFilter, search, stock]);
+  }, [batchFilter, deliveredRetentionCutoff, deliveryFilter, filter, originFilter, search, stock]);
 
   const selectedItem =
     filteredStock.find((item) => item.id === selectedItemId) ?? filteredStock[0];
   const assignmentPatient = patients.find((patient) => patient.id === assignmentPatientId);
   const assignmentPrescription = assignmentPatient ? readDemoPrescriptions(assignmentPatient.id)[0] : undefined;
   const assignmentBilling = assignmentPatient ? getPatientBillingRequirement(assignmentPatient) : undefined;
+  const selectedPatient = selectedItem?.patientId ? patients.find((patient) => patient.id === selectedItem.patientId) : undefined;
+  const availableBatches = Array.from(new Map(stock.map((item) => [item.batchId, item.batchCode])).entries());
   const readyBottleCount = stock
     .filter((item) => item.origin === "pronta-entrega" && !item.patientId)
     .reduce((total, item) => total + item.bottles, 0);
@@ -228,6 +239,24 @@ export default function SecretariaEstoquePage() {
     } catch (cause) {
       setAssignmentError(cause instanceof Error ? cause.message : "Não foi possível vincular este frasco.");
     }
+  }
+
+  function toggleStockSelection(itemId: string) {
+    setSelectedStockIds((current) => current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]);
+  }
+
+  function selectAllFiltered() {
+    const selectableIds = filteredStock.filter((item) => item.patientId && item.status !== "entregue").map((item) => item.id);
+    const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedStockIds.includes(id));
+    setSelectedStockIds(allSelected ? [] : selectableIds);
+  }
+
+  function reserveSelected() {
+    const selected = stock.filter((item) => selectedStockIds.includes(item.id) && item.patientId && item.status === "disponivel");
+    const reservedAt = new Date().toISOString();
+    selected.forEach((item) => saveDemoStockItem({ ...item, status: "reservado", reservedAt }));
+    setSelectedStockIds([]);
+    setMessage(`${selected.length} envio(s) reservado(s) em conjunto.`);
   }
 
   return (
@@ -370,6 +399,18 @@ export default function SecretariaEstoquePage() {
                 </select>
               </div>
 
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <select value={batchFilter} onChange={(event) => { setBatchFilter(event.target.value); setSelectedStockIds([]); }} className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]">
+                  <option value="todos">Todos os lotes</option>
+                  {availableBatches.map(([id, code]) => <option key={id} value={id}>Lote {code}</option>)}
+                </select>
+                <select value={deliveryFilter} onChange={(event) => { setDeliveryFilter(event.target.value as DeliveryFilter); setSelectedStockIds([]); }} className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]">
+                  <option value="todas">Todas as entregas</option><option value="Motoboy">Motoboy</option><option value="Sedex">Sedex</option><option value="Retirada">Retirada</option><option value="Aéreo">Aéreo</option>
+                </select>
+                <button type="button" onClick={selectAllFiltered} className="h-11 rounded-xl border border-[#eadfd9] px-3 text-sm font-semibold text-[#a3113a]">Selecionar todos do filtro</button>
+              </div>
+              {selectedStockIds.length > 0 && <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-[#fff4e4] px-4 py-3 text-xs text-[#806238]"><strong>{selectedStockIds.length} envio(s) selecionado(s)</strong><button type="button" onClick={reserveSelected} className="rounded-lg bg-[#a3113a] px-3 py-2 font-semibold text-white">Reservar selecionados</button></div>}
+
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -397,8 +438,9 @@ export default function SecretariaEstoquePage() {
                     const status = stockStatuses[item.status];
 
                     return (
+                      <div key={item.id} className="flex items-start gap-2">
+                      {item.patientId && item.status !== "entregue" && <input type="checkbox" checked={selectedStockIds.includes(item.id)} onChange={() => toggleStockSelection(item.id)} aria-label={`Selecionar envio de ${item.patientName}`} className="mt-5 h-4 w-4 shrink-0 accent-[#a3113a]" />}
                       <button
-                        key={item.id}
                         type="button"
                         onClick={() => selectStockItem(item)}
                         className={`w-full rounded-2xl border p-4 text-left transition sm:p-5 ${
@@ -430,6 +472,7 @@ export default function SecretariaEstoquePage() {
                           <strong>Fase:</strong> {item.phase}
                         </p>
                       </button>
+                      </div>
                     );
                   })
                 )}
@@ -495,6 +538,23 @@ export default function SecretariaEstoquePage() {
                       </div>
                     )}
                   </div>
+
+                  {selectedPatient && (
+                    <div className="mt-6 rounded-2xl border border-[#eee5e0] bg-[#fcfaf8] p-4">
+                      <p className="text-sm font-bold text-[#433438]">Endereço completo para entrega</p>
+                      <div className="mt-4 grid gap-3 text-xs text-[#66595d] sm:grid-cols-2">
+                        <p><strong>CEP:</strong> {selectedPatient.zipCode ?? "Não informado"}</p>
+                        <p><strong>Rua:</strong> {selectedPatient.street ?? selectedPatient.address ?? "Não informada"}</p>
+                        <p><strong>Número:</strong> {selectedPatient.addressNumber ?? "Não informado"}</p>
+                        <p><strong>Complemento:</strong> {selectedPatient.addressComplement ?? "Não informado"}</p>
+                        <p><strong>Bairro:</strong> {selectedPatient.neighborhood ?? "Não informado"}</p>
+                        <p><strong>Cidade:</strong> {selectedPatient.city ?? "Não informada"}</p>
+                        <p><strong>Estado:</strong> {selectedPatient.state ?? "Não informado"}</p>
+                        <p><strong>Forma de envio:</strong> {selectedItem.delivery ?? "A definir"}</p>
+                      </div>
+                      <div className="mt-4 rounded-xl bg-white p-3 text-xs leading-5 text-[#66595d]"><strong>Observações:</strong> {selectedPatient.deliveryNotes ?? selectedPatient.notes ?? "Nenhuma observação cadastrada."}</div>
+                    </div>
+                  )}
 
                   <div className="mt-6 rounded-2xl bg-[#fbf5f2] p-4">
                     <p className="text-sm font-bold text-[#433438]">Composição da vacina</p>

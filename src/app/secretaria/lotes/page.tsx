@@ -11,6 +11,7 @@ import {
   DemoPrescription,
   availableFormulas,
   confirmDemoBatch,
+  demoDoctor,
   demoMedicalPatients,
   getPatientBillingRequirement,
   readDemoBatches,
@@ -109,6 +110,7 @@ export default function SecretariaLotesPage() {
   const [readyFormula, setReadyFormula] = useState(availableFormulas[0]);
   const [readyPhase, setReadyPhase] = useState(treatmentPhases[0]);
   const [readyBottles, setReadyBottles] = useState(1);
+  const [readyDoctor, setReadyDoctor] = useState(demoDoctor.name);
 
   useEffect(() => {
     const synchronize = () => {
@@ -364,7 +366,10 @@ export default function SecretariaLotesPage() {
         patientId: "",
         patientName: "Pronta entrega · sem paciente",
         patientCpf: "",
-        doctor: "Estoque CRA",
+        doctor: readyDoctor,
+        doctorCrm: demoDoctor.crm,
+        preparedBy: "Secretaria CRA",
+        prescriptionStatus: "aguardando-aprovacao",
         treatment: "Imunoterapia para pronta entrega",
         phase: readyPhase,
         bottles: readyBottles,
@@ -699,9 +704,15 @@ export default function SecretariaLotesPage() {
               ) : (
                 <div>
                   <h2 className="text-xl font-bold text-[#433438]">Frascos para pronta entrega</h2>
-                  <p className="mt-1 text-sm text-[#817578]">Cadastre fórmula, fase e quantidade sem vincular um paciente.</p>
+                  <p className="mt-1 text-sm text-[#817578]">A secretaria prepara a receita de pronta entrega e seleciona o médico que deverá conferi-la e aprová-la.</p>
 
                   <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                    <label className="text-sm font-semibold text-[#544449] sm:col-span-2">Médico solicitante
+                      <select value={readyDoctor} onChange={(event) => setReadyDoctor(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
+                        <option value={demoDoctor.name}>{demoDoctor.name} · CRM {demoDoctor.crm}</option>
+                      </select>
+                      <span className="mt-2 block text-xs font-normal leading-5 text-[#817578]">A receita será preparada pela secretaria e ficará aguardando a aprovação deste médico.</span>
+                    </label>
                     <label className="text-sm font-semibold text-[#544449]">Fórmula
                       <select value={readyFormula} onChange={(event) => setReadyFormula(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
                         {availableFormulas.map((formula) => <option key={formula} value={formula}>{formula}</option>)}
@@ -722,7 +733,7 @@ export default function SecretariaLotesPage() {
                     {readyItems.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-10 text-center"><p className="text-sm font-semibold text-[#53454a]">Nenhum frasco adicionado</p><p className="mt-2 text-xs text-[#817578]">Escolha a fórmula, a fase e a quantidade para criar o estoque de pronta entrega.</p></div>
                     ) : readyItems.map((item) => (
-                      <article key={item.prescriptionId} className="rounded-2xl border border-[#eee6e2] bg-[#fdfbf9] p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-bold text-[#433438]">{item.formulas[0]?.name}</p><p className="mt-2 text-xs text-[#776b6e]">{item.phase} · {item.bottles} frasco(s) · sem paciente</p></div><button type="button" onClick={() => setReadyItems((current) => current.filter((saved) => saved.prescriptionId !== item.prescriptionId))} className="rounded-lg px-2 py-1 text-[#a3113a]" aria-label="Remover item">×</button></div></article>
+                      <article key={item.prescriptionId} className="rounded-2xl border border-[#eee6e2] bg-[#fdfbf9] p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-bold text-[#433438]">{item.formulas[0]?.name}</p><p className="mt-2 text-xs text-[#776b6e]">{item.phase} · {item.bottles} frasco(s) · {item.doctor}</p><span className="mt-3 inline-flex rounded-full bg-[#fff4e4] px-2.5 py-1 text-[11px] font-semibold text-[#966419]">Receita preparada · aguardando aprovação médica</span></div><button type="button" onClick={() => setReadyItems((current) => current.filter((saved) => saved.prescriptionId !== item.prescriptionId))} className="rounded-lg px-2 py-1 text-[#a3113a]" aria-label="Remover item">×</button></div></article>
                     ))}
                   </div>
                 </div>
@@ -842,6 +853,7 @@ export default function SecretariaLotesPage() {
               <p className="mt-3 text-center text-xs text-[#817578]">
                 O laboratório só receberá o lote depois do envio manual pela secretaria.
               </p>
+              <p className="mt-2 rounded-xl bg-[#f8f5f2] px-3 py-2 text-center text-xs text-[#817578]">Financeiro do lote: módulo programado para a próxima etapa.</p>
             </section>
           </div>
 

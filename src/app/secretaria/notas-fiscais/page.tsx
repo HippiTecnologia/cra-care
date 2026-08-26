@@ -9,6 +9,7 @@ import {
   demoMedicalPatients,
   readDemoInvoices,
   readDemoPatients,
+  openDemoInvoicePdf,
   removeDemoInvoice,
   saveDemoInvoice,
   subscribeDemoPatients,
@@ -200,7 +201,7 @@ export default function SecretariaNotasFiscaisPage() {
                 {filteredInvoices.length === 0 ? <p className="rounded-2xl border border-dashed border-[#e6dbd6] px-5 py-10 text-center text-sm text-[#817578]">Nenhuma nota fiscal encontrada.</p> : filteredInvoices.map((invoice) => (
                   <article key={invoice.id} className="flex flex-col gap-4 rounded-2xl bg-[#fbf5f2] p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div><p className="text-sm font-bold text-[#433438]">{invoice.patientName}</p><p className="mt-1 text-xs text-[#716569]">CPF {invoice.patientCpf} · {invoice.fileName}</p><p className="mt-1 text-xs text-[#817578]">{formatSize(invoice.fileSize)} · Enviado em {formatDate(invoice.uploadedAt)}</p></div>
-                    <div className="flex flex-wrap gap-2"><a href={invoice.fileData} target="_blank" rel="noreferrer" className="rounded-xl border border-[#e6dbd6] px-4 py-2.5 text-xs font-semibold text-[#a3113a]">Abrir PDF</a><a href={invoice.fileData} download={invoice.fileName} className="rounded-xl bg-[#a3113a] px-4 py-2.5 text-xs font-semibold text-white">Baixar</a><button type="button" onClick={() => deleteInvoice(invoice)} className="rounded-xl bg-[#fff1f3] px-4 py-2.5 text-xs font-semibold text-[#a3113a]">Remover</button></div>
+                    <div className="flex flex-wrap gap-2"><button type="button" onClick={() => { if (!openDemoInvoicePdf(invoice)) setError("O navegador bloqueou a abertura do PDF. Permita pop-ups para este site ou use o botão Baixar."); }} className="rounded-xl border border-[#e6dbd6] px-4 py-2.5 text-xs font-semibold text-[#a3113a]">Abrir PDF</button><a href={invoice.fileData} download={invoice.fileName} className="rounded-xl bg-[#a3113a] px-4 py-2.5 text-xs font-semibold text-white">Baixar</a><button type="button" onClick={() => deleteInvoice(invoice)} className="rounded-xl bg-[#fff1f3] px-4 py-2.5 text-xs font-semibold text-[#a3113a]">Remover</button></div>
                   </article>
                 ))}
               </div>
