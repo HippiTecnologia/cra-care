@@ -14,6 +14,7 @@ import {
   subscribeDemoPatients,
 } from "../medico/patient-store";
 import { buildBottleHistory } from "./bottle-history";
+import { buildAutomaticPatientNotifications } from "./patient-notifications";
 import {
   PatientAssessment,
   PatientBottle,
@@ -694,19 +695,15 @@ export default function PatientPortalPage() {
         return scheduled && !recorded && override !== "off";
       }).filter(Boolean).length
     : 0;
+  const automaticNotifications = buildAutomaticPatientNotifications(patient, currentBottle, new Date());
   const notifications = [
-    { id: "prototype-notification-test-v1", icon: "🔔", title: "Teste do sistema", text: "Esta é uma notificação de demonstração do CRA Care. Ao abrir o sino, ela será marcada como lida." },
+    ...automaticNotifications,
     ...(currentBottle && portal.reminders.enabled && portal.reminders.weekdays.includes(new Date().getDay()) && !todayRecord
       ? [{ id: `reminder-${today}-${portal.reminders.time}`, icon: "💊", title: "Uso programado para hoje", text: `Seu lembrete está configurado para ${portal.reminders.time}. Registre o uso quando realizar o tratamento.` }]
       : []),
     ...(missedDays > 0
       ? [{ id: `missed-${currentBottle?.id}-${missedDays}`, icon: "📅", title: `${missedDays} ${missedDays === 1 ? "dia precisa" : "dias precisam"} de atenção`, text: "Confira o calendário e atualize os dias que ficaram sem registro." }]
       : []),
-    ...(currentBottleRecords.length >= 30
-      ? [{ id: `milestone-30-${currentBottle?.id}`, icon: "🌷", title: "30 dias de tratamento", text: "Pode ser um bom momento para solicitar o próximo frasco." }]
-      : currentBottleRecords.length >= 20
-        ? [{ id: `milestone-20-${currentBottle?.id}`, icon: "💗", title: "20 dias de tratamento", text: "Que tal verificar sua consulta de acompanhamento?" }]
-        : []),
     ...(pendingAssessmentBottle
       ? [{ id: `assessment-${pendingAssessmentBottle.id}`, icon: "📝", title: "Autoavaliação disponível", text: `Conte como você se sentiu durante o uso do frasco ${pendingAssessmentBottle.number}.` }]
       : []),
@@ -765,10 +762,10 @@ export default function PatientPortalPage() {
                   <Link href="/" className="rounded-xl border border-white/25 bg-white/10 px-4 py-2.5 text-xs font-semibold text-white hover:bg-white/20">Sair</Link>
                 </div>
                 {showNotifications && (
-                  <div className="absolute right-0 top-full z-[70] mt-3 w-[min(90vw,360px)] overflow-hidden rounded-2xl border border-[#eadfd9] bg-white text-[#34292d] shadow-[0_24px_70px_rgba(52,20,30,0.28)]">
+                  <div className="absolute right-0 top-full z-[70] mt-3 w-[min(92vw,460px)] overflow-hidden rounded-2xl border border-[#eadfd9] bg-white text-[#34292d] shadow-[0_24px_70px_rgba(52,20,30,0.28)]">
                     <div className="flex items-center justify-between border-b border-[#eee5e0] px-4 py-3"><div><p className="text-sm font-bold text-[#86203b]">Notificações</p><p className="mt-0.5 text-[11px] text-[#817578]">Avisos do seu tratamento</p></div><button type="button" onClick={() => setShowNotifications(false)} aria-label="Fechar notificações" className="rounded-lg px-2 py-1 text-lg text-[#817578]">×</button></div>
-                    <div className="max-h-80 overflow-y-auto p-2">
-                      {notifications.length === 0 ? <p className="px-4 py-8 text-center text-sm text-[#817578]">Tudo certo por aqui. Nenhum aviso no momento.</p> : notifications.map((notification) => <article key={notification.id} className="flex gap-3 rounded-xl px-3 py-3 hover:bg-[#fcf6f4]"><span className="text-xl">{notification.icon}</span><div><p className="text-sm font-bold text-[#433438]">{notification.title}</p><p className="mt-1 text-xs leading-5 text-[#74676a]">{notification.text}</p></div></article>)}
+                    <div className="max-h-[65vh] overflow-y-auto p-2">
+                      {notifications.length === 0 ? <p className="px-4 py-8 text-center text-sm text-[#817578]">Tudo certo por aqui. Nenhum aviso no momento.</p> : notifications.map((notification) => { const unread = !readNotificationIds.includes(notification.id); return <article key={notification.id} className={`flex gap-3 rounded-xl px-3 py-3 hover:bg-[#fcf6f4] ${unread ? "bg-[#fff8fa]" : ""}`}><span className="text-xl">{notification.icon}</span><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><p className="text-sm font-bold text-[#433438]">{notification.title}</p>{unread && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#b31340]" aria-label="Não lida" />}</div><p className="mt-1 whitespace-pre-line text-xs leading-5 text-[#74676a]">{notification.text}</p></div></article>; })}
                     </div>
                   </div>
                 )}
