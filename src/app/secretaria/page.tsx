@@ -25,8 +25,8 @@ type PatientStatus =
   | "desistente";
 
 type DeliveryMethod = "Motoboy" | "Retirada" | "Sedex" | "Aéreo";
-type AcquisitionMethod = "Por frasco" | "Tratamento de 6 meses" | "Recorrente — ASAAS" | "Método 1.0";
-type PaymentMethod = "A definir" | "Dinheiro" | "PIX" | "Asaas" | "Cartão de crédito" | "Cartão de débito";
+type AcquisitionMethod = string;
+type PaymentMethod = string;
 
 type Patient = {
   id: string;

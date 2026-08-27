@@ -5,14 +5,20 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { findPatientByCpf, setActivePortalPatient } from "./paciente/patient-portal-store";
 
-type UserRole = "Paciente" | "Médico" | "Secretaria" | "Laboratório";
+type UserRole = "Paciente" | "Médico" | "Secretaria" | "Laboratório" | "Administrador";
 
 const roles: UserRole[] = [
   "Paciente",
   "Médico",
   "Secretaria",
   "Laboratório",
+  "Administrador",
 ];
+
+const adminDemoCredentials = {
+  email: "adm@cracare.com",
+  password: "CraCare@2026",
+};
 
 export default function Home() {
   const router = useRouter();
@@ -45,6 +51,22 @@ export default function Home() {
 
   if (selectedRole === "Laboratório") {
     router.push("/laboratorio");
+    return;
+  }
+
+  if (selectedRole === "Administrador") {
+    if (
+      identifier.trim().toLowerCase() !== adminDemoCredentials.email ||
+      password !== adminDemoCredentials.password
+    ) {
+      setMessage("Acesso ADM inválido. Utilize as credenciais administrativas fornecidas pela Hippi.");
+      return;
+    }
+    window.sessionStorage.setItem(
+      "cra-care-demo-admin-session",
+      JSON.stringify({ email: adminDemoCredentials.email, signedInAt: new Date().toISOString() }),
+    );
+    router.push("/adm");
     return;
   }
 
@@ -153,7 +175,7 @@ export default function Home() {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#f8f2ef] p-2">
+            <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#f8f2ef] p-2 sm:grid-cols-3">
               {roles.map((role) => {
                 const active = selectedRole === role;
 

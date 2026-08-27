@@ -36,8 +36,12 @@ export type DemoPatientRecord = {
     | "perdido"
     | "concluido"
     | "desistente";
-  acquisitionMethod?: "Por frasco" | "Tratamento de 6 meses" | "Recorrente — ASAAS" | "Método 1.0";
-  paymentMethod?: "A definir" | "Dinheiro" | "PIX" | "Asaas" | "Cartão de crédito" | "Cartão de débito";
+  acquisitionMethod?: string;
+  agreedCondition?: "À vista" | "Parcelado";
+  methodSnapshotId?: string;
+  methodSnapshotVersion?: number;
+  discountAmount?: number;
+  paymentMethod?: string;
   paymentInstallments?: number;
   contractValue?: number;
   paymentDueDate?: string;
@@ -53,7 +57,7 @@ export type PatientPaymentRecord = {
   id: string;
   amount: number;
   paidAt: string;
-  method: NonNullable<DemoPatientRecord["paymentMethod"]>;
+  method: string;
   installments?: number;
   installmentNumber?: number;
   dueAt?: string;
