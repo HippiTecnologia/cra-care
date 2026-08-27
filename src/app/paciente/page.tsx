@@ -774,7 +774,7 @@ export default function PatientPortalPage() {
             </div>
           </header>
 
-          <section className="relative z-10 mx-auto -mt-6 max-w-5xl px-4 pb-8 sm:px-6 lg:px-10">
+          <section className="relative z-10 mx-auto mt-0 max-w-5xl px-4 pb-8 pt-5 sm:px-6 lg:px-10">
             {message && (
               <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-[#cfe9df] bg-[#edf8f3] px-4 py-3 text-sm text-[#187157] shadow-sm">
                 <span>{message}</span><button type="button" onClick={() => setMessage("")} aria-label="Fechar mensagem">×</button>
