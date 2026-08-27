@@ -175,6 +175,7 @@ const initialPatients: Patient[] = [
     name: "Maria Fernanda Lima",
     cpf: "123.456.789-00",
     phone: "(41) 99999-1001",
+    email: "maria.fernanda@exemplo.com",
     birthDate: birthdayToday(1994),
     doctor: "Dr. Flavio Mizoguchi",
     treatment: "Imunoterapia para rinite",
@@ -209,6 +210,7 @@ const initialPatients: Patient[] = [
     name: "Ana Clara Ribeiro",
     cpf: "345.678.901-22",
     phone: "(41) 99999-1003",
+    email: "ana.ribeiro@exemplo.com",
     birthDate: "1998-04-21",
     doctor: "Dr. Flavio Mizoguchi",
     treatment: "Imunoterapia para rinite",
@@ -243,6 +245,7 @@ const initialPatients: Patient[] = [
     name: "Juliana Carvalho",
     cpf: "567.890.123-44",
     phone: "(41) 99999-1005",
+    email: "juliana.carvalho@exemplo.com",
     birthDate: "1991-12-09",
     doctor: "Dr. Flavio Mizoguchi",
     treatment: "Imunobacteriana",
@@ -472,6 +475,11 @@ export default function SecretariaPage() {
       ).length,
     };
   }, [patients]);
+
+  const pendingAssessments = patients.reduce(
+    (total, patient) => total + readPortalState(patient.id).assessments.filter((assessment) => !assessment.response).length,
+    0,
+  );
 
   const filteredPatients = useMemo(() => {
     const normalizedSearch = search
@@ -787,6 +795,11 @@ export default function SecretariaPage() {
             </Link>
 
             <Link href="/secretaria/cadastros" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">Cadastros</Link>
+
+            <Link href="/secretaria/avaliacoes" className="flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
+              <span>Avaliações</span>
+              {pendingAssessments > 0 && <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-[#a3113a]">{pendingAssessments}</span>}
+            </Link>
 
             <Link href="/secretaria/estoque" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
               Vacinas em estoque

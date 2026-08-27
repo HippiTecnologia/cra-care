@@ -17,7 +17,7 @@ import {
   subscribeDemoPatients,
   treatmentPhases,
 } from "../../patient-store";
-import { PatientPortalState, readPortalState, savePortalState, subscribePortalState } from "../../../paciente/patient-portal-store";
+import { PatientPortalState, readPortalState, subscribePortalState } from "../../../paciente/patient-portal-store";
 
 type Tab = "receitas" | "resumo" | "historico" | "avaliacoes";
 
@@ -29,6 +29,15 @@ function formatDate(value?: string) {
     : new Date(`${value}T12:00:00`);
 
   return date.toLocaleDateString("pt-BR");
+}
+
+function escapeHtml(value: string | number) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function treatmentProgress(patient: DemoPatientRecord) {
@@ -82,7 +91,6 @@ export default function MedicalPatientPage() {
     string | null
   >(null);
   const [portal, setPortal] = useState<PatientPortalState | null>(null);
-  const [assessmentResponses, setAssessmentResponses] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const syncPatient = () => {
@@ -105,12 +113,6 @@ export default function MedicalPatientPage() {
     const unsubscribePortal = subscribePortalState(syncPatient);
     return () => { unsubscribePatients(); unsubscribePortal(); };
   }, [patientId]);
-
-  function updateAssessment(assessmentId: string, respond = false) {
-    if (!portal) return;
-    const now = new Date().toISOString();
-    savePortalState({ ...portal, assessments: portal.assessments.map((assessment) => assessment.id === assessmentId ? { ...assessment, viewedAt: assessment.viewedAt ?? now, viewedBy: assessment.viewedBy ?? demoDoctor.name, ...(respond && assessmentResponses[assessmentId]?.trim() ? { response: assessmentResponses[assessmentId].trim(), respondedAt: now, respondedBy: demoDoctor.name } : {}) } : assessment) });
-  }
 
   const totalPercentage = useMemo(
     () => formulas.reduce((total, formula) => total + formula.percentage, 0),
@@ -280,6 +282,73 @@ export default function MedicalPatientPage() {
   };
 
   const progress = treatmentProgress(patient);
+  const printablePatient = patient;
+
+  function printPrescription() {
+    if (preview.formulas.length === 0) {
+      setError("Adicione a composição antes de imprimir a receita.");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=900,height=760");
+
+    if (!printWindow) {
+      setError("Permita a abertura de janelas no navegador para imprimir a receita.");
+      return;
+    }
+
+    const formulaRows = preview.formulas
+      .map((formula) => `<tr><td>${escapeHtml(formula.name)}</td><td>${escapeHtml(formula.percentage)}%</td></tr>`)
+      .join("");
+
+    printWindow.onload = () => {
+      printWindow.focus();
+      printWindow.print();
+    };
+
+    printWindow.document.write(`<!doctype html>
+      <html lang="pt-BR">
+        <head>
+          <meta charset="utf-8" />
+          <title>Receita - ${escapeHtml(printablePatient.name)}</title>
+          <style>
+            @page { size: A4; margin: 16mm; }
+            * { box-sizing: border-box; }
+            body { margin: 0; color: #34292d; font-family: Arial, sans-serif; font-size: 13px; }
+            header { display: flex; align-items: center; justify-content: space-between; border-radius: 16px; background: #a3113a; padding: 18px 22px; color: white; }
+            header img { width: 112px; height: auto; }
+            h1 { margin: 0; font-size: 22px; }
+            h2 { margin: 28px 0 18px; border-block: 1px solid #45383c; padding: 9px; text-align: center; font-size: 14px; letter-spacing: .22em; }
+            .meta { margin-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; }
+            .section { margin-top: 24px; }
+            .section-title { color: #a3113a; font-weight: 700; margin-bottom: 10px; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border-bottom: 1px solid #eadfd9; padding: 9px 4px; text-align: left; }
+            th:last-child, td:last-child { text-align: right; }
+            .signature { margin: 70px auto 0; width: 320px; border-top: 1px solid #45383c; padding-top: 9px; text-align: center; line-height: 1.6; }
+            .footer { margin-top: 36px; color: #817578; font-size: 10px; text-align: center; }
+            @media print { .footer { position: fixed; bottom: 0; left: 0; right: 0; } }
+          </style>
+        </head>
+        <body>
+          <header><div><h1>Receita médica</h1><p>CRA Care · Centro de Rinite e Alergia</p></div><img src="${window.location.origin}/logo-cra-branca.png" alt="CRA" /></header>
+          <div class="meta">
+            <div><strong>Paciente:</strong> ${escapeHtml(printablePatient.name)}</div>
+            <div><strong>CPF:</strong> ${escapeHtml(printablePatient.cpf)}</div>
+            <div><strong>Atendimento:</strong> ${escapeHtml(formatDate(preview.createdAt))}</div>
+            <div><strong>Médico:</strong> ${escapeHtml(preview.doctor)}</div>
+          </div>
+          <h2>RECEITA</h2>
+          <div class="section"><div class="section-title">${escapeHtml(preview.treatment.toUpperCase())}</div><p><strong>Frascos:</strong> ${escapeHtml(preview.bottles)}</p><p><strong>Fase:</strong> ${escapeHtml(preview.phase)}</p></div>
+          <div class="section"><div class="section-title">Composição</div><table><thead><tr><th>Componente</th><th>%</th></tr></thead><tbody>${formulaRows}</tbody></table></div>
+          <div class="section"><div class="section-title">Posologia</div><p>${escapeHtml(preview.posology)}</p></div>
+          ${preview.notes ? `<div class="section"><div class="section-title">Observações</div><p>${escapeHtml(preview.notes)}</p></div>` : ""}
+          <div class="signature"><strong>${escapeHtml(preview.doctor)}</strong><br />CRM PR ${escapeHtml(preview.doctorCrm)}</div>
+          <p class="footer">Documento gerado pelo CRA Care.</p>
+        </body>
+      </html>`);
+    printWindow.document.close();
+  }
 
   return (
     <main className="min-h-screen bg-[#f8f5f2] px-4 py-6 text-[#34292d] sm:px-7 lg:px-10">
@@ -332,7 +401,7 @@ export default function MedicalPatientPage() {
             { id: "receitas", label: "Receitas" },
             { id: "resumo", label: "Resumo clínico" },
             { id: "historico", label: "Histórico de receitas" },
-            { id: "avaliacoes", label: `Avaliações${portal?.assessments.some((assessment) => !assessment.viewedAt) ? " · nova" : ""}` },
+            { id: "avaliacoes", label: "Avaliações" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -465,6 +534,9 @@ export default function MedicalPatientPage() {
                 <button type="button" onClick={clearPrescription} className="rounded-xl border border-[#e6dbd6] px-5 py-3 text-sm font-semibold text-[#76686c]">
                   Limpar receita
                 </button>
+                <button type="button" onClick={printPrescription} disabled={preview.formulas.length === 0} className="rounded-xl border border-[#a3113a] px-5 py-3 text-sm font-semibold text-[#a3113a] disabled:cursor-not-allowed disabled:opacity-45">
+                  Imprimir receita
+                </button>
               </div>
             </div>
 
@@ -562,7 +634,49 @@ export default function MedicalPatientPage() {
           </section>
         )}
 
-        {activeTab === "avaliacoes" && <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8"><h2 className="text-2xl font-bold text-[#433438]">Avaliações do paciente</h2><p className="mt-2 text-sm text-[#817578]">Acompanhe os sintomas relatados ao final de cada frasco e registre o retorno da equipe.</p><div className="mt-6 space-y-4">{!portal?.assessments.length && <p className="rounded-2xl border border-dashed border-[#e6dbd6] p-8 text-center text-sm text-[#817578]">Nenhuma avaliação enviada.</p>}{portal?.assessments.map((assessment) => <article key={assessment.id} className={`rounded-2xl border p-5 ${assessment.viewedAt ? "border-[#e5ddd8] bg-[#fdfbf9]" : "border-[#efc2cd] bg-[#fff5f7]"}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Frasco {assessment.bottleNumber}</h3><p className="mt-1 text-xs text-[#817578]">Enviada em {formatDate(assessment.createdAt)}</p></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${assessment.response ? "bg-[#edf8f3] text-[#187157]" : assessment.viewedAt ? "bg-[#eef3ff] text-[#3c5da0]" : "bg-[#fff0f3] text-[#a3113a]"}`}>{assessment.response ? "Respondida" : assessment.viewedAt ? "Visualizada" : "Nova avaliação"}</span></div><div className="mt-5 grid gap-3 rounded-xl bg-white p-4 text-sm sm:grid-cols-3"><p><strong>Frequência:</strong><br />{assessment.symptomFrequency ?? "Avaliação anterior"}</p><p><strong>Severidade:</strong><br />{assessment.symptomSeverity ?? assessment.feeling ?? "Não informada"}</p><p><strong>Medicamentos:</strong><br />{assessment.medicationFrequency ?? "Não informado"}</p>{assessment.notes && <p className="sm:col-span-3"><strong>Experiência:</strong><br />{assessment.notes}</p>}</div>{!assessment.viewedAt && <button type="button" onClick={() => updateAssessment(assessment.id)} className="mt-4 rounded-xl border border-[#a3113a] px-4 py-2 text-xs font-semibold text-[#a3113a]">Marcar como visualizada</button>}<label className="mt-4 block text-sm font-semibold">Resposta da equipe<textarea value={assessmentResponses[assessment.id] ?? assessment.response ?? ""} onChange={(event) => setAssessmentResponses((current) => ({ ...current, [assessment.id]: event.target.value }))} rows={3} className="mt-2 w-full rounded-xl border border-[#e9dfda] px-3 py-2 font-normal" /></label><button type="button" onClick={() => updateAssessment(assessment.id, true)} className="mt-3 rounded-xl bg-[#a3113a] px-4 py-2.5 text-xs font-semibold text-white">Salvar resposta</button>{assessment.response && <p className="mt-3 text-xs text-[#187157]">Respondida por {assessment.respondedBy} em {formatDate(assessment.respondedAt)}</p>}</article>)}</div></section>}
+        {activeTab === "avaliacoes" && (
+          <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
+            <h2 className="text-2xl font-bold text-[#433438]">Avaliações do paciente</h2>
+            <p className="mt-2 text-sm text-[#817578]">
+              Acompanhe os sintomas e o retorno registrado pela Secretaria. Esta área é somente para consulta médica.
+            </p>
+            <div className="mt-6 space-y-4">
+              {!portal?.assessments.length && (
+                <p className="rounded-2xl border border-dashed border-[#e6dbd6] p-8 text-center text-sm text-[#817578]">
+                  Nenhuma avaliação enviada.
+                </p>
+              )}
+              {portal?.assessments.map((assessment) => (
+                <article key={assessment.id} className={`rounded-2xl border p-5 ${assessment.response ? "border-[#cfe9de] bg-[#f7fcf9]" : assessment.viewedAt ? "border-[#dce4f3] bg-[#f8faff]" : "border-[#efc2cd] bg-[#fff5f7]"}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-bold">Frasco {assessment.bottleNumber}</h3>
+                      <p className="mt-1 text-xs text-[#817578]">Enviada em {formatDate(assessment.createdAt)}</p>
+                    </div>
+                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${assessment.response ? "bg-[#edf8f3] text-[#187157]" : assessment.viewedAt ? "bg-[#eef3ff] text-[#3c5da0]" : "bg-[#fff0f3] text-[#a3113a]"}`}>
+                      {assessment.response ? "Respondida pela Secretaria" : assessment.viewedAt ? "Em análise pela Secretaria" : "Aguardando Secretaria"}
+                    </span>
+                  </div>
+                  <div className="mt-5 grid gap-3 rounded-xl bg-white p-4 text-sm sm:grid-cols-3">
+                    <p><strong>Frequência:</strong><br />{assessment.symptomFrequency ?? "Avaliação anterior"}</p>
+                    <p><strong>Severidade:</strong><br />{assessment.symptomSeverity ?? assessment.feeling ?? "Não informada"}</p>
+                    <p><strong>Medicamentos:</strong><br />{assessment.medicationFrequency ?? "Não informado"}</p>
+                    {assessment.notes && <p className="sm:col-span-3"><strong>Experiência:</strong><br />{assessment.notes}</p>}
+                  </div>
+                  {assessment.response ? (
+                    <div className="mt-4 rounded-xl border border-[#cfe9de] bg-[#edf8f3] p-4 text-sm text-[#187157]">
+                      <strong>Retorno da Secretaria</strong>
+                      <p className="mt-2 whitespace-pre-wrap">{assessment.response}</p>
+                      <p className="mt-3 text-xs">Respondida por {assessment.respondedBy ?? "Secretaria CRA"} em {formatDate(assessment.respondedAt)}</p>
+                    </div>
+                  ) : (
+                    <p className="mt-4 text-xs text-[#817578]">A Secretaria ainda não registrou um retorno para esta avaliação.</p>
+                  )}
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
 
         {activeTab === "historico" && (
           <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">

@@ -186,6 +186,22 @@ export function saveAdminCost(cost: AdminFixedCost) {
   return saved;
 }
 
+export function removeAdminCost(costId: string) {
+  const current = readAdminCosts();
+  const removed = current.find((item) => item.id === costId);
+
+  if (!removed) return false;
+
+  audit(
+    "custo",
+    removed.id,
+    "Remoção",
+    `${removed.description} · R$ ${removed.amount.toFixed(2)}`,
+  );
+  writeStored(COSTS_KEY, current.filter((item) => item.id !== costId));
+  return true;
+}
+
 export function readAdminDoctors() {
   return readStored(DOCTORS_KEY, initialDoctors);
 }

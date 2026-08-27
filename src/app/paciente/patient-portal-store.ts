@@ -61,6 +61,34 @@ const ACTIVE_PATIENT_KEY = "cra-care-demo-active-patient";
 const PORTAL_KEY_PREFIX = "cra-care-demo-patient-portal-";
 const PORTAL_UPDATE_EVENT = "cra-care-demo-patient-portal-updated";
 
+const demoAssessments: PatientAssessment[] = [
+  {
+    id: "assessment-demo-pending",
+    bottleId: "bottle-demo-2",
+    bottleNumber: 2,
+    symptomFrequency: "as-vezes",
+    symptomSeverity: "moderados",
+    medicationFrequency: "1-2",
+    notes: "Senti melhora na respiração, mas ainda tenho espirros nos dias mais frios.",
+    createdAt: "2026-08-27T08:30:00",
+  },
+  {
+    id: "assessment-demo-answered",
+    bottleId: "bottle-demo-1",
+    bottleNumber: 1,
+    symptomFrequency: "frequentemente",
+    symptomSeverity: "moderados",
+    medicationFrequency: "3-5",
+    notes: "Nas primeiras semanas ainda precisei usar antialérgico.",
+    createdAt: "2026-07-24T16:00:00",
+    viewedAt: "2026-07-25T09:10:00",
+    viewedBy: "Secretaria CRA",
+    response: "Relato recebido. A equipe continuará acompanhando sua evolução e avisará o médico responsável.",
+    respondedAt: "2026-07-25T09:15:00",
+    respondedBy: "Secretaria CRA",
+  },
+];
+
 export function normalizeCpf(value: string) {
   return value.replace(/\D/g, "");
 }
@@ -94,7 +122,7 @@ export function createDefaultPortalState(patientId: string): PatientPortalState 
     bottles: [],
     useRecords: [],
     dayOverrides: {},
-    assessments: [],
+    assessments: patientId === "001" ? demoAssessments.map((assessment) => ({ ...assessment })) : [],
     readNotificationIds: [],
     reminders: {
       enabled: false,
@@ -111,10 +139,13 @@ export function readPortalState(patientId: string): PatientPortalState {
 
   try {
     const stored = window.sessionStorage.getItem(`${PORTAL_KEY_PREFIX}${patientId}`);
+    const parsed = stored ? (JSON.parse(stored) as PatientPortalState) : undefined;
 
-    return stored
-      ? (JSON.parse(stored) as PatientPortalState)
-      : createDefaultPortalState(patientId);
+    if (parsed && patientId === "001" && parsed.assessments.length === 0) {
+      return { ...parsed, assessments: demoAssessments.map((assessment) => ({ ...assessment })) };
+    }
+
+    return parsed ?? createDefaultPortalState(patientId);
   } catch {
     return createDefaultPortalState(patientId);
   }
