@@ -811,9 +811,7 @@ export default function SecretariaPage() {
 
             <Link href="/secretaria/contratos" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">Contratos</Link>
 
-            <button className="w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
-              Configurações
-            </button>
+            <Link href="/secretaria/configuracoes" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">Configurações</Link>
 
             <Link href="/" className="block w-full rounded-2xl px-4 py-3 text-left text-sm font-semibold text-white/85 hover:bg-white/10">
               Sair

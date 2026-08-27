@@ -55,6 +55,16 @@ export type PatientPortalState = {
   assessments: PatientAssessment[];
   reminders: PatientReminderSettings;
   readNotificationIds?: string[];
+  /** Correções administrativas no histórico, sempre acompanhadas do motivo. */
+  bottleHistoryAdjustments?: Record<number, {
+    receivedAt?: string;
+    startedAt?: string;
+    finishedAt?: string;
+    status?: "recebido" | "em-uso" | "finalizado";
+    reason: string;
+    updatedAt: string;
+    updatedBy: string;
+  }>;
 };
 
 const ACTIVE_PATIENT_KEY = "cra-care-demo-active-patient";
@@ -124,6 +134,7 @@ export function createDefaultPortalState(patientId: string): PatientPortalState 
     dayOverrides: {},
     assessments: patientId === "001" ? demoAssessments.map((assessment) => ({ ...assessment })) : [],
     readNotificationIds: [],
+    bottleHistoryAdjustments: {},
     reminders: {
       enabled: false,
       weekdays: [1, 3, 5],

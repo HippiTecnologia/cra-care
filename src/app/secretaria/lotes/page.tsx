@@ -210,6 +210,14 @@ export default function SecretariaLotesPage() {
   }
 
   function validateSelectedPayments() {
+    const delinquent = orderType === "pedido-paciente"
+      ? selectedPrescriptions.find((prescription) => patientById.get(prescription.patientId)?.paymentStatus === "Vencido")
+      : undefined;
+    if (delinquent) {
+      const patient = patientById.get(delinquent.patientId);
+      setError(`${patient?.name ?? "Paciente"} está inadimplente. Regularize a situação financeira antes de incluir no lote.`);
+      return false;
+    }
     const missingPayment = orderType === "pedido-paciente"
       ? selectedPrescriptions.find((prescription) => {
           const patient = patientById.get(prescription.patientId);
@@ -695,6 +703,7 @@ export default function SecretariaLotesPage() {
                             <p className="mt-1">{billing.explanation}</p>
                           </div>
                         )}
+                        <div className={`mt-2 inline-flex rounded-full px-3 py-1 text-[11px] font-bold ${patient?.paymentStatus === "Vencido" ? "bg-[#ffe6e8] text-[#a3113a]" : "bg-[#eaf8f3] text-[#187157]"}`}>{patient?.paymentStatus === "Vencido" ? "● Inadimplente" : "● Em dia"}</div>
                       </button>
                     );
                   })
@@ -785,9 +794,10 @@ export default function SecretariaLotesPage() {
                     const confirmation = paymentConfirmations[prescription.id] ?? { payment: false, asaas: false };
 
                     return (
-                      <div key={prescription.id} className={`rounded-2xl border p-4 ${billing.paymentRequired ? "border-[#f0dfc0] bg-[#fff9ef]" : "border-[#d7e9df] bg-[#f5fbf7]"}`}>
+                      <div key={prescription.id} className={`rounded-2xl border p-4 ${patient.paymentStatus === "Vencido" ? "border-[#f0bcc5] bg-[#fff2f3]" : billing.paymentRequired ? "border-[#f0dfc0] bg-[#fff9ef]" : "border-[#d7e9df] bg-[#f5fbf7]"}`}>
                         <p className="text-xs font-bold text-[#433438]">{patient.name}</p>
                         <p className="mt-1 text-xs text-[#66595d]">{billing.acquisitionMethod} · {billing.nextBottleNumber}º frasco</p>
+                        <p className={`mt-2 text-xs font-bold ${patient.paymentStatus === "Vencido" ? "text-[#a3113a]" : "text-[#187157]"}`}>{patient.paymentStatus === "Vencido" ? "● INADIMPLENTE — não liberar até regularizar" : "● EM DIA"}</p>
                         <p className={`mt-2 text-xs font-semibold ${billing.paymentRequired ? "text-[#966419]" : "text-[#187157]"}`}>{billing.explanation}</p>
                         {billing.paymentRequired && (
                           <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-[#544449]"><input type="checkbox" checked={confirmation.payment} onChange={(event) => setPaymentConfirmations((current) => ({ ...current, [prescription.id]: { ...confirmation, payment: event.target.checked } }))} className="mt-0.5 accent-[#a3113a]" />Confirmo que a cobrança deste frasco foi realizada e paga.</label>

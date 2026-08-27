@@ -55,13 +55,14 @@ export function buildBottleHistory(
   return Array.from({ length: total }, (_, index) => {
     const number = index + 1;
     const bottle = portal.bottles.find((item) => item.number === number);
+    const adjustment = portal.bottleHistoryAdjustments?.[number];
 
     return {
       number,
-      receivedAt: bottle?.receivedAt ?? receiptDates[index],
-      startedAt: bottle?.startedAt,
-      finishedAt: bottle?.finishedAt,
-      status: bottle?.status ?? "recebido",
+      receivedAt: adjustment?.receivedAt ?? bottle?.receivedAt ?? receiptDates[index],
+      startedAt: adjustment?.startedAt ?? bottle?.startedAt,
+      finishedAt: adjustment?.finishedAt ?? bottle?.finishedAt,
+      status: adjustment?.status ?? bottle?.status ?? "recebido",
     };
   });
 }

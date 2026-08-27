@@ -24,3 +24,9 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Segurança mobile: impede que conteúdos longos criem zoom/horizontais involuntários. */
+html, body { max-width: 100%; overflow-x: hidden; }
+button, input, select, textarea { font-size: 16px; }
+@media (min-width: 640px) { button, input, select, textarea { font-size: inherit; } }
+img, svg { max-width: 100%; }

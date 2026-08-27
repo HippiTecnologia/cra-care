@@ -20,6 +20,7 @@ import {
   PatientPortalState,
   createDefaultPortalState,
   readPortalState,
+  savePortalState,
   subscribePortalState,
 } from "../../paciente/patient-portal-store";
 import {
@@ -103,6 +104,9 @@ export default function PatientRecordsPage() {
   const [paymentNotes, setPaymentNotes] = useState("");
   const [paymentReference, setPaymentReference] = useState("");
   const [installmentNumber, setInstallmentNumber] = useState(1);
+  const [editingBottle, setEditingBottle] = useState<number | null>(null);
+  const [bottleReason, setBottleReason] = useState("");
+  const [bottleDraft, setBottleDraft] = useState<{ receivedAt: string; startedAt: string; finishedAt: string; status: "recebido" | "em-uso" | "finalizado" }>({ receivedAt: "", startedAt: "", finishedAt: "", status: "recebido" });
 
   useEffect(() => {
     const synchronize = () => {
@@ -214,6 +218,7 @@ export default function PatientRecordsPage() {
       methodSnapshotId: method.id,
       methodSnapshotVersion: method.version,
       contractValue: agreedValue,
+      installmentValue: condition === "À vista" ? agreedValue : agreedValue / Math.max(1, method.maxInstallments),
       discountAmount: Math.max(0, total - agreedValue),
       paymentMethod: method.paymentMethod,
       paymentInstallments: condition === "À vista" ? 1 : method.maxInstallments,
@@ -221,6 +226,22 @@ export default function PatientRecordsPage() {
     } : current);
     setEditing(true);
     setMessage(`${method.name} selecionado: ${condition.toLowerCase()} por ${money(agreedValue)}.`);
+  }
+
+  function openBottleEditor(number: number) {
+    const item = bottleHistory.find((entry) => entry.number === number);
+    if (!item) return;
+    setEditingBottle(number);
+    setBottleReason("");
+    setBottleDraft({ receivedAt: item.receivedAt?.slice(0, 10) ?? "", startedAt: item.startedAt?.slice(0, 10) ?? "", finishedAt: item.finishedAt?.slice(0, 10) ?? "", status: item.status });
+  }
+
+  function saveBottleAdjustment() {
+    if (!portal || !editingBottle) return;
+    if (!bottleReason.trim()) { setMessage("Informe o motivo do ajuste no histórico do frasco."); return; }
+    savePortalState({ ...portal, bottleHistoryAdjustments: { ...(portal.bottleHistoryAdjustments ?? {}), [editingBottle]: { ...bottleDraft, reason: bottleReason.trim(), updatedAt: new Date().toISOString(), updatedBy: "Secretaria CRA" } } });
+    setEditingBottle(null);
+    setMessage(`Histórico do frasco ${editingBottle} atualizado pela Secretaria.`);
   }
 
   return (
@@ -293,7 +314,7 @@ export default function PatientRecordsPage() {
               <Info title="Observações dos médicos">{prescriptions.filter((item) => item.notes.trim()).map((item) => `${formatDate(item.createdAt)} · ${item.doctor}\n${item.notes}`).join("\n\n") || "Nenhuma observação médica registrada nas receitas."}</Info>
               <div className="rounded-2xl bg-[#fbf7f5] p-5"><h3 className="font-bold">Histórico completo de receitas e fórmulas ({prescriptions.length})</h3><div className="mt-4 space-y-3">{prescriptions.map((item) => <article key={item.id} className="rounded-xl border border-[#eadfd9] bg-white p-4 text-sm"><div className="flex flex-wrap justify-between gap-2"><strong>{formatDate(item.createdAt)} · {item.phase}</strong><span>{item.bottles} frasco(s)</span></div><p className="mt-2 text-[#66595d]">{item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ")}</p><p className="mt-2 text-xs text-[#817578]">{item.posology} · {item.doctor} · CRM {item.doctorCrm}</p></article>)}{prescriptions.length === 0 && <p className="text-sm text-[#817578]">Nenhuma receita registrada.</p>}</div></div>
               <div className="rounded-2xl bg-[#fbf7f5] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold">Histórico das avaliações ({portal?.assessments.length ?? 0})</h3><Link href="/secretaria/avaliacoes" className="rounded-xl border border-[#e5d9d4] bg-white px-4 py-2 text-xs font-bold text-[#a3113a]">Gerenciar avaliações</Link></div><div className="mt-4 space-y-3">{portal?.assessments.map((item) => <article key={item.id} className="rounded-xl border border-[#eadfd9] bg-white p-4 text-sm leading-6"><strong>Frasco {item.bottleNumber} · {formatDate(item.createdAt)}</strong><p>Frequência: {item.symptomFrequency ?? "Avaliação anterior"}</p><p>Severidade: {item.symptomSeverity ?? item.feeling ?? "Não informada"}</p><p>Uso de medicamentos: {item.medicationFrequency ?? "Não informado"}</p><p>Relato: {item.notes || "Sem comentário"}</p><p className="mt-2 text-xs text-[#817578]">{item.viewedAt ? `Conferida por ${item.viewedBy ?? "equipe"} em ${formatDate(item.viewedAt, true)}` : "Aguardando conferência da equipe"}</p>{item.response && <p className="mt-2 rounded-lg bg-[#edf8f3] px-3 py-2 text-[#187157]">Resposta: {item.response}</p>}</article>)}{!portal?.assessments.length && <p className="text-sm text-[#817578]">Nenhuma avaliação registrada.</p>}</div></div>
-              <div className="rounded-2xl bg-[#fbf7f5] p-5"><h3 className="font-bold">Histórico por frasco</h3><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead className="text-xs uppercase text-[#817578]"><tr><th className="pb-3">Frasco</th><th className="pb-3">Recebimento</th><th className="pb-3">Início</th><th className="pb-3">Conclusão</th><th className="pb-3">Status</th></tr></thead><tbody>{bottleHistory.slice().reverse().map((item) => <tr key={item.number} className="border-t border-[#eadfd9]"><td className="py-3 font-bold">{item.number}</td><td>{formatDate(item.receivedAt)}</td><td>{formatDate(item.startedAt)}</td><td>{formatDate(item.finishedAt)}</td><td>{item.status === "finalizado" ? "Concluído" : item.status === "em-uso" ? "Em uso" : "Recebido"}</td></tr>)}</tbody></table>{bottleHistory.length === 0 && <p className="py-5 text-sm text-[#817578]">Nenhum frasco recebido.</p>}</div></div>
+              <div className="rounded-2xl bg-[#fbf7f5] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Histórico por frasco</h3><p className="mt-1 text-xs text-[#817578]">A Secretaria pode corrigir datas e status, sempre registrando o motivo.</p></div></div><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="text-xs uppercase text-[#817578]"><tr><th className="pb-3">Frasco</th><th className="pb-3">Recebimento</th><th className="pb-3">Início</th><th className="pb-3">Conclusão</th><th className="pb-3">Status</th><th className="pb-3">Ação</th></tr></thead><tbody>{bottleHistory.slice().reverse().map((item) => <tr key={item.number} className="border-t border-[#eadfd9]"><td className="py-3 font-bold">{item.number}</td><td>{formatDate(item.receivedAt)}</td><td>{formatDate(item.startedAt)}</td><td>{formatDate(item.finishedAt)}</td><td>{item.status === "finalizado" ? "Concluído" : item.status === "em-uso" ? "Em uso" : "Recebido"}</td><td><button type="button" onClick={() => openBottleEditor(item.number)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-[#a3113a] ring-1 ring-[#e9dfda]">Ajustar</button></td></tr>)}</tbody></table>{bottleHistory.length === 0 && <p className="py-5 text-sm text-[#817578]">Nenhum frasco recebido.</p>}</div></div>
               <Info title={`Pedidos e entregas (${stock.length})`}>{stock.map((item) => `${item.batchCode} — ${item.bottles} frasco(s) — ${item.status} — recebido no estoque em ${formatDate(item.receivedAt)} — entregue em ${formatDate(item.deliveredAt)}`).join("\n") || "Nenhum pedido ou entrega registrado."}</Info>
             </div>}
 
@@ -304,10 +325,11 @@ export default function PatientRecordsPage() {
                 {editing ? <div className="mt-5 grid gap-4 sm:grid-cols-2">
                   <Field label="Método de aquisição"><select value={draft.acquisitionMethod ?? availableMethodNames[0] ?? ""} onChange={(event) => updateDraft("acquisitionMethod", event.target.value)} className={inputClass}>{availableMethodNames.map((value) => <option key={value}>{value}</option>)}</select></Field>
                   <Field label="Forma de pagamento"><select value={draft.paymentMethod ?? "A definir"} onChange={(event) => updateDraft("paymentMethod", event.target.value)} className={inputClass}>{availablePaymentMethods.map((value) => <option key={value}>{value}</option>)}</select></Field>
-                  <Field label="Valor contratado (R$)"><input type="number" min={0} step="0.01" value={draft.contractValue ?? 0} onChange={(event) => updateDraft("contractValue", Number(event.target.value))} className={inputClass} /></Field>
+                  <Field label="Valor da parcela (R$)"><input type="number" min={0} step="0.01" value={draft.installmentValue ?? ((draft.contractValue ?? 0) / Math.max(1, draft.paymentInstallments ?? 1))} onChange={(event) => { const installmentValue = Number(event.target.value); setDraft((current) => current ? { ...current, installmentValue, contractValue: installmentValue * Math.max(1, current.paymentInstallments ?? 1) } : current); }} className={inputClass} /></Field>
                   <Field label="Situação do pagamento"><select value={draft.paymentStatus ?? "A definir"} onChange={(event) => updateDraft("paymentStatus", event.target.value as DemoPatientRecord["paymentStatus"])} className={inputClass}>{paymentStatusOptions.map((value) => <option key={value}>{value}</option>)}</select></Field>
                   <Field label="Vencimento / próximo vencimento"><input type="date" value={draft.paymentDueDate ?? ""} onChange={(event) => updateDraft("paymentDueDate", event.target.value)} className={inputClass} /></Field>
-                  <Field label="Número de parcelas"><input type="number" min={1} value={draft.paymentInstallments ?? 1} onChange={(event) => updateDraft("paymentInstallments", Math.max(1, Number(event.target.value)))} className={inputClass} /></Field>
+                  <Field label="Número de parcelas"><input type="number" min={1} value={draft.paymentInstallments ?? 1} onChange={(event) => { const paymentInstallments = Math.max(1, Number(event.target.value)); setDraft((current) => current ? { ...current, paymentInstallments, contractValue: (current.installmentValue ?? ((current.contractValue ?? 0) / Math.max(1, current.paymentInstallments ?? 1))) * paymentInstallments } : current); }} className={inputClass} /></Field>
+                  <Field label="Valor total contratado"><div className="mt-2 flex h-11 items-center rounded-xl bg-[#edf8f3] px-3 font-bold text-[#187157]">{money(draft.contractValue ?? 0)}</div></Field>
                   <Field label="Referência do ASAAS"><input value={draft.asaasReference ?? ""} onChange={(event) => updateDraft("asaasReference", event.target.value)} placeholder="Cliente, assinatura ou cobrança" className={inputClass} /></Field>
                   <Field label="Observações financeiras" wide><textarea rows={3} value={draft.financialNotes ?? ""} onChange={(event) => updateDraft("financialNotes", event.target.value)} className={textareaClass} /></Field>
                   <div className="flex justify-end sm:col-span-2"><button type="button" onClick={() => saveDraft("Dados financeiros")} className={primaryButtonClass}>Salvar financeiro</button></div>
@@ -320,6 +342,7 @@ export default function PatientRecordsPage() {
           </section> : <section className="rounded-3xl border border-[#eee5e0] bg-white p-12 text-center text-sm text-[#817578]">Selecione um paciente para abrir o cadastro completo.</section>}
         </div>
       </div>
+      {editingBottle && <div className="fixed inset-0 z-[100] flex items-end bg-[#29151b]/55 p-3 sm:items-center sm:justify-center"><div role="dialog" aria-modal="true" className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl sm:p-7"><div className="flex items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-wide text-[#a3113a]">Ajuste administrativo</p><h2 className="mt-1 text-xl font-bold">Frasco {editingBottle}</h2></div><button type="button" onClick={() => setEditingBottle(null)} className="rounded-full bg-[#f7f1ee] px-3 py-2">×</button></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Data de recebimento"><input type="date" value={bottleDraft.receivedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, receivedAt: event.target.value }))} className={inputClass} /></Field><Field label="Data de início"><input type="date" value={bottleDraft.startedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, startedAt: event.target.value }))} className={inputClass} /></Field><Field label="Data de conclusão"><input type="date" value={bottleDraft.finishedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, finishedAt: event.target.value }))} className={inputClass} /></Field><Field label="Status"><select value={bottleDraft.status} onChange={(event) => setBottleDraft((item) => ({ ...item, status: event.target.value as typeof item.status }))} className={inputClass}><option value="recebido">Recebido</option><option value="em-uso">Em uso</option><option value="finalizado">Concluído</option></select></Field><Field label="Motivo do ajuste *" wide><textarea rows={3} value={bottleReason} onChange={(event) => setBottleReason(event.target.value)} placeholder="Ex.: paciente iniciou em outra data." className={textareaClass} /></Field></div><div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><button type="button" onClick={() => setEditingBottle(null)} className="rounded-xl border border-[#e6dbd6] px-4 py-3 text-sm font-semibold">Cancelar</button><button type="button" onClick={saveBottleAdjustment} className={primaryButtonClass}>Salvar ajuste</button></div></div></div>}
     </main>
   );
 }

@@ -43,6 +43,8 @@ export type DemoPatientRecord = {
   discountAmount?: number;
   paymentMethod?: string;
   paymentInstallments?: number;
+  /** Valor de cada parcela acordada; o total do contrato é preservado separadamente. */
+  installmentValue?: number;
   contractValue?: number;
   paymentDueDate?: string;
   paymentStatus?: "A definir" | "Pendente" | "Em dia" | "Vencido" | "Cancelado";

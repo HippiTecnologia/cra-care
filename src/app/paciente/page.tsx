@@ -28,13 +28,14 @@ import {
   subscribePortalState,
 } from "./patient-portal-store";
 
-type PatientSection = "inicio" | "frasco" | "alertas" | "calendario" | "notas" | "notas-fiscais" | "termo";
+type PatientSection = "inicio" | "frasco" | "alertas" | "calendario" | "receitas" | "notas" | "notas-fiscais" | "termo";
 
 const navigation: { id: PatientSection; icon: string; label: string; short: string }[] = [
   { id: "inicio", icon: "⌂", label: "Página inicial", short: "Início" },
   { id: "frasco", icon: "◉", label: "Frasco", short: "Frasco" },
   { id: "alertas", icon: "◷", label: "Alertas", short: "Alertas" },
   { id: "calendario", icon: "▦", label: "Calendário geral", short: "Dias" },
+  { id: "receitas", icon: "▤", label: "Receitas", short: "Receitas" },
   { id: "notas", icon: "☰", label: "Notas", short: "Notas" },
   { id: "notas-fiscais", icon: "▧", label: "Notas fiscais", short: "NFs" },
   { id: "termo", icon: "▤", label: "Termo", short: "Termo" },
@@ -899,6 +900,13 @@ export default function PatientPortalPage() {
               </article>
             )}
 
+            {section === "receitas" && (
+              <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Prescrições médicas</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">Minhas receitas</h2><p className="mt-2 text-sm leading-6 text-[#817578]">Consulte as receitas emitidas pelo seu médico durante o tratamento.</p>
+                <div className="mt-6 space-y-3">{prescriptions.length === 0 ? <p className="rounded-2xl border border-dashed border-[#e6dbd6] px-5 py-10 text-center text-sm text-[#817578]">Nenhuma receita disponível no momento.</p> : prescriptions.map((prescription, index) => <article key={prescription.id} className="rounded-2xl bg-[#fbf5f2] p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold text-[#433438]">Receita {String(prescriptions.length - index).padStart(2, "0")}</p><p className="mt-1 text-xs text-[#817578]">{formatDate(prescription.createdAt)} · {prescription.doctor}</p></div><span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#a3113a]">{prescription.bottles} frasco(s)</span></div><p className="mt-3 text-sm text-[#66595d]">{prescription.treatment} · {prescription.phase}</p><p className="mt-2 text-xs text-[#817578]">{prescription.formulas.map((item) => `${item.name} ${item.percentage}%`).join(" · ")}</p></article>)}</div>
+              </article>
+            )}
+
             {section === "notas-fiscais" && (
               <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Meus documentos</p>
@@ -944,7 +952,7 @@ export default function PatientPortalPage() {
       </a>
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-[#eee5e0] bg-white/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_30px_rgba(52,41,45,0.07)] backdrop-blur lg:hidden">
-        <div className="mx-auto grid max-w-lg grid-cols-7">{navigation.map((item) => <button key={item.id} type="button" onClick={() => setSection(item.id)} className={`flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-[10px] font-semibold ${section === item.id ? "text-[#a3113a]" : "text-[#8a7d80]"}`}><span className="text-lg leading-none">{item.icon}</span>{item.short}</button>)}</div>
+        <div className="mx-auto flex max-w-lg overflow-x-auto">{navigation.map((item) => <button key={item.id} type="button" onClick={() => setSection(item.id)} className={`flex min-h-16 min-w-[68px] flex-1 flex-col items-center justify-center gap-1 px-1 text-[10px] font-semibold ${section === item.id ? "text-[#a3113a]" : "text-[#8a7d80]"}`}><span className="text-lg leading-none">{item.icon}</span>{item.short}</button>)}</div>
       </nav>
 
       {pendingAssessmentBottle && (
