@@ -7,6 +7,7 @@ export type DemoPatientRecord = {
   createdAt: string;
   registrationStatus: "pending-secretary" | "completed";
   phone?: string;
+  email?: string;
   address?: string;
   zipCode?: string;
   street?: string;
@@ -35,9 +36,14 @@ export type DemoPatientRecord = {
     | "perdido"
     | "concluido"
     | "desistente";
-  acquisitionMethod?: "Por frasco" | "Tratamento de 6 meses" | "Recorrente — ASAAS";
+  acquisitionMethod?: "Por frasco" | "Tratamento de 6 meses" | "Recorrente — ASAAS" | "Método 1.0";
   paymentMethod?: "A definir" | "Dinheiro" | "PIX" | "Asaas" | "Cartão de crédito" | "Cartão de débito";
   paymentInstallments?: number;
+  contractValue?: number;
+  paymentDueDate?: string;
+  paymentStatus?: "A definir" | "Pendente" | "Em dia" | "Vencido" | "Cancelado";
+  asaasReference?: string;
+  financialNotes?: string;
   payments?: PatientPaymentRecord[];
   notes?: string;
   abandonmentReason?: string;
@@ -49,6 +55,9 @@ export type PatientPaymentRecord = {
   paidAt: string;
   method: NonNullable<DemoPatientRecord["paymentMethod"]>;
   installments?: number;
+  installmentNumber?: number;
+  dueAt?: string;
+  asaasReference?: string;
   notes?: string;
 };
 

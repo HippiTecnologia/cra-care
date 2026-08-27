@@ -7,6 +7,7 @@ import {
 export type PatientBottle = {
   id: string;
   number: number;
+  receivedAt?: string;
   startedAt: string;
   finishedAt?: string;
   status: "em-uso" | "finalizado";
@@ -24,9 +25,17 @@ export type PatientAssessment = {
   id: string;
   bottleId: string;
   bottleNumber: number;
-  feeling: "muito-bem" | "bem" | "sem-mudancas" | "desconfortos" | "nao-bem";
+  feeling?: "muito-bem" | "bem" | "sem-mudancas" | "desconfortos" | "nao-bem";
+  symptomFrequency?: "raramente" | "as-vezes" | "frequentemente" | "quase-diariamente";
+  symptomSeverity?: "leves" | "moderados" | "severos" | "muito-severos";
+  medicationFrequency?: "nunca" | "1-2" | "3-5" | "todos-os-dias";
   notes: string;
   createdAt: string;
+  viewedAt?: string;
+  viewedBy?: string;
+  response?: string;
+  respondedAt?: string;
+  respondedBy?: string;
 };
 
 export type PatientReminderSettings = {

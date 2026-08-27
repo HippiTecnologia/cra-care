@@ -10,8 +10,10 @@ import {
   readDemoInvoices,
   openDemoInvoicePdf,
   readDemoPrescriptions,
+  readDemoStock,
   subscribeDemoPatients,
 } from "../medico/patient-store";
+import { buildBottleHistory } from "./bottle-history";
 import {
   PatientAssessment,
   PatientBottle,
@@ -62,6 +64,14 @@ const assessmentOptions: {
   { value: "desconfortos", emoji: "😕", label: "Tive alguns desconfortos" },
   { value: "nao-bem", emoji: "😟", label: "Não me senti bem" },
 ];
+
+const symptomFrequencyOptions = [
+  ["raramente", "Raramente (menos de 1 dia por semana)"], ["as-vezes", "Às vezes (1–3 dias por semana)"], ["frequentemente", "Frequentemente (4–6 dias por semana)"], ["quase-diariamente", "Quase diariamente"],
+] as const;
+const symptomSeverityOptions = [
+  ["leves", "Leves (não afetam as atividades diárias)"], ["moderados", "Moderados (algumas limitações nas atividades diárias)"], ["severos", "Severos (limitações significativas nas atividades diárias)"], ["muito-severos", "Muito severos (incapacidade)"],
+] as const;
+const medicationFrequencyOptions = [["nunca", "Nunca"], ["1-2", "1–2 vezes"], ["3-5", "3–5 vezes"], ["todos-os-dias", "Todos os dias"]] as const;
 
 function dateKey(date: Date) {
   const year = date.getFullYear();
@@ -131,7 +141,7 @@ function contractSections(patient: DemoPatientRecord, portal: PatientPortalState
   return [
     {
       heading: "Identificação do paciente",
-      text: `Nome do paciente: ${patient.name}\nCPF: ${patient.cpf}\nData de nascimento: ${formatDate(patient.birthDate)}\nInício do tratamento: ${formatDate(patient.startDate)}\nTelefone: ${patient.phone ?? "Não informado"}\nE-mail: Não informado\nMédico solicitante: ${patient.doctor}`,
+      text: `Nome do paciente: ${patient.name}\nCPF: ${patient.cpf}\nData de nascimento: ${formatDate(patient.birthDate)}\nInício do tratamento: ${formatDate(patient.startDate)}\nTelefone: ${patient.phone ?? "Não informado"}\nE-mail: ${patient.email ?? "Não informado"}\nMédico solicitante: ${patient.doctor}`,
     },
     {
       heading: "Adesão ao tratamento",
@@ -187,6 +197,10 @@ function countScheduledDays(bottle: PatientBottle | undefined, reminders: Patien
   return count;
 }
 
+function AssessmentQuestion<T extends string>({ title, options, value, onChange }: { title: string; options: readonly (readonly [T, string])[]; value: T | ""; onChange: (value: T) => void }) {
+  return <fieldset className="mt-6"><legend className="text-sm font-bold leading-6 text-[#544449]">{title}</legend><div className="mt-3 space-y-2">{options.map(([optionValue, label]) => <button key={optionValue} type="button" onClick={() => onChange(optionValue)} className={`w-full rounded-2xl border px-4 py-3 text-left text-sm ${value === optionValue ? "border-[#b91142] bg-[#fff5f7] font-semibold text-[#a3113a]" : "border-[#eee6e2] text-[#544449]"}`}>{label}</button>)}</div></fieldset>;
+}
+
 export default function PatientPortalPage() {
   const [patient, setPatient] = useState<DemoPatientRecord | null>(null);
   const [portal, setPortal] = useState<PatientPortalState | null>(null);
@@ -212,7 +226,9 @@ export default function PatientPortalPage() {
   const [selectedDate, setSelectedDate] = useState(() => dateKey(new Date()));
   const [finishDate, setFinishDate] = useState(() => dateKey(new Date()));
   const [showFinishForm, setShowFinishForm] = useState(false);
-  const [assessmentFeeling, setAssessmentFeeling] = useState<PatientAssessment["feeling"] | "">("");
+  const [assessmentSymptomFrequency, setAssessmentSymptomFrequency] = useState<NonNullable<PatientAssessment["symptomFrequency"]> | "">("");
+  const [assessmentSymptomSeverity, setAssessmentSymptomSeverity] = useState<NonNullable<PatientAssessment["symptomSeverity"]> | "">("");
+  const [assessmentMedicationFrequency, setAssessmentMedicationFrequency] = useState<NonNullable<PatientAssessment["medicationFrequency"]> | "">("");
   const [assessmentNotes, setAssessmentNotes] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -254,6 +270,9 @@ export default function PatientPortalPage() {
   }, []);
 
   const safePortal = portal ?? createDefaultPortalState(patient?.id ?? "");
+  const bottleHistory = patient
+    ? buildBottleHistory(patient, safePortal, readDemoStock())
+    : [];
   const currentBottle = safePortal.bottles.find((bottle) => bottle.status === "em-uso");
   const lastBottle = safePortal.bottles[0];
   const pendingAssessmentBottle = safePortal.bottles.find(
@@ -400,6 +419,9 @@ export default function PatientPortalPage() {
     const bottle: PatientBottle = {
       id: crypto.randomUUID(),
       number: portal.bottles.length + 1,
+      receivedAt: bottleHistory.find(
+        (item) => item.number === portal.bottles.length + 1,
+      )?.receivedAt,
       startedAt: today,
       status: "em-uso",
     };
@@ -491,12 +513,11 @@ export default function PatientPortalPage() {
       ),
     });
     setShowFinishForm(false);
-    setAssessmentFeeling("");
     setAssessmentNotes("");
   }
 
   function saveAssessment() {
-    if (!portal || !pendingAssessmentBottle || !assessmentFeeling) return;
+    if (!portal || !pendingAssessmentBottle || !assessmentSymptomFrequency || !assessmentSymptomSeverity || !assessmentMedicationFrequency) return;
 
     updatePortal({
       ...portal,
@@ -505,14 +526,18 @@ export default function PatientPortalPage() {
           id: crypto.randomUUID(),
           bottleId: pendingAssessmentBottle.id,
           bottleNumber: pendingAssessmentBottle.number,
-          feeling: assessmentFeeling,
+          symptomFrequency: assessmentSymptomFrequency,
+          symptomSeverity: assessmentSymptomSeverity,
+          medicationFrequency: assessmentMedicationFrequency,
           notes: assessmentNotes.trim(),
           createdAt: new Date().toISOString(),
         },
         ...portal.assessments,
       ],
     });
-    setAssessmentFeeling("");
+    setAssessmentSymptomFrequency("");
+    setAssessmentSymptomSeverity("");
+    setAssessmentMedicationFrequency("");
     setAssessmentNotes("");
     setMessage("Autoavaliação registrada! Quando estiver pronto, adicione o próximo frasco.");
   }
@@ -791,7 +816,7 @@ export default function PatientPortalPage() {
 
                 <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                   <h2 className="text-lg font-bold text-[#433438]">Suas autoavaliações</h2>
-                  {portal.assessments.length === 0 ? <p className="mt-3 text-sm text-[#817578]">Ao finalizar um frasco, você poderá contar como se sentiu durante o período.</p> : <div className="mt-4 space-y-3">{portal.assessments.slice(0, 3).map((assessment) => { const feeling = assessmentOptions.find((option) => option.value === assessment.feeling); return <div key={assessment.id} className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-sm font-semibold">{feeling?.emoji} {feeling?.label}</p><p className="mt-1 text-xs text-[#817578]">Frasco {assessment.bottleNumber} · {formatDate(assessment.createdAt)}</p>{assessment.notes && <p className="mt-2 text-xs text-[#66595d]">{assessment.notes}</p>}</div>; })}</div>}
+                  {portal.assessments.length === 0 ? <p className="mt-3 text-sm text-[#817578]">Ao finalizar um frasco, você poderá contar como se sentiu durante o período.</p> : <div className="mt-4 space-y-3">{portal.assessments.slice(0, 3).map((assessment) => { const feeling = assessmentOptions.find((option) => option.value === assessment.feeling); return <div key={assessment.id} className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-sm font-semibold">{assessment.symptomSeverity ? `Sintomas ${assessment.symptomSeverity}` : `${feeling?.emoji ?? "📝"} ${feeling?.label ?? "Avaliação registrada"}`}</p><p className="mt-1 text-xs text-[#817578]">Frasco {assessment.bottleNumber} · {formatDate(assessment.createdAt)}</p>{assessment.notes && <p className="mt-2 text-xs text-[#66595d]">{assessment.notes}</p>}<p className={`mt-3 text-xs font-semibold ${assessment.response ? "text-[#187157]" : assessment.viewedAt ? "text-[#3c5da0]" : "text-[#966419]"}`}>{assessment.response ? `✓ Equipe respondeu: ${assessment.response}` : assessment.viewedAt ? "✓ Sua avaliação foi visualizada pela equipe" : "Aguardando visualização da equipe"}</p></div>; })}</div>}
                 </article>
               </div>
             )}
@@ -801,10 +826,34 @@ export default function PatientPortalPage() {
                 <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Acompanhamento do tratamento</p>
                   <h2 className="mt-2 text-2xl font-bold text-[#433438]">Meu frasco</h2>
+                  <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{[{ label: "Recebidos", value: patient.bottlesReceived ?? 0 }, { label: "Iniciados", value: portal.bottles.length }, { label: "Concluídos", value: portal.bottles.filter((bottle) => bottle.status === "finalizado").length }, { label: "Aguardando início", value: Math.max(0, (patient.bottlesReceived ?? 0) - portal.bottles.length) }].map((item) => <div key={item.label} className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">{item.label}</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{item.value}</p></div>)}</div>
                   {currentBottle ? <><div className="mt-6 rounded-[24px] bg-gradient-to-br from-[#fff3f5] to-[#faf5f1] p-5"><div className="flex items-center justify-between gap-3"><span className="text-3xl">💊</span><span className="rounded-full bg-[#eaf8f3] px-3 py-1 text-xs font-semibold text-[#187157]">Em uso</span></div><h3 className="mt-4 text-xl font-bold text-[#86203b]">Frasco {currentBottle.number}</h3><p className="mt-2 text-sm text-[#66595d]">Iniciado em {formatDate(currentBottle.startedAt)}</p><p className="mt-1 text-sm text-[#66595d]">Fase: {latestPrescription?.phase ?? patient.phase ?? "A definir"}</p><p className="mt-1 text-sm text-[#66595d]">{latestPrescription?.posology ?? `${patient.drops ?? 6} gotas, conforme orientação médica.`}</p></div><div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Dias registrados</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{currentBottleRecords.length}</p></div><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Regularidade</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{regularity}%</p></div></div><button type="button" onClick={() => toggleUse(today)} className={`mt-5 w-full rounded-2xl px-4 py-3.5 text-sm font-semibold ${todayRecord ? "bg-[#edf8f3] text-[#187157]" : "bg-[#a3113a] text-white"}`}>{todayRecord ? "✓ Uso de hoje registrado" : "Registrar uso de hoje"}</button><button type="button" onClick={() => setShowFinishForm(!showFinishForm)} className="mt-3 w-full rounded-2xl border border-[#eadfd9] px-4 py-3.5 text-sm font-semibold text-[#a3113a]">Finalizar frasco</button>{showFinishForm && <div className="mt-4 rounded-2xl border border-[#eee5e0] bg-[#fcfaf8] p-4"><label className="block text-sm font-semibold text-[#544449]">Data de finalização<input type="date" min={currentBottle.startedAt} max={today} value={finishDate} onChange={(event) => setFinishDate(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal" /></label><button type="button" onClick={finishBottle} className="mt-4 w-full rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">Confirmar finalização</button></div>}</> : <div className="mt-6 rounded-[24px] border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-10 text-center"><p className="text-3xl">💊</p><h3 className="mt-4 text-lg font-bold text-[#433438]">{lastBottle ? "Tudo pronto para a próxima etapa" : "Vamos começar o seu acompanhamento?"}</h3><p className="mt-2 text-sm leading-6 text-[#817578]">{lastBottle ? "Adicione o próximo frasco para continuar registrando seu tratamento." : "Inicie seu frasco e acompanhe seus dias de uso de um jeito simples."}</p><button type="button" onClick={startBottle} disabled={Boolean(pendingAssessmentBottle)} className="mt-5 rounded-2xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-45">{lastBottle ? "Adicionar próximo frasco" : "Iniciar frasco"}</button></div>}
                 </article>
 
-                {portal.bottles.some((bottle) => bottle.status === "finalizado") && <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7"><h2 className="text-lg font-bold text-[#433438]">Histórico dos frascos</h2><div className="mt-4 space-y-3">{portal.bottles.filter((bottle) => bottle.status === "finalizado").map((bottle) => { const assessment = portal.assessments.find((item) => item.bottleId === bottle.id); const feeling = assessmentOptions.find((item) => item.value === assessment?.feeling); return <div key={bottle.id} className="rounded-2xl bg-[#fbf5f2] p-4"><div className="flex items-center justify-between gap-2"><p className="text-sm font-bold">Frasco {bottle.number}</p><span className="rounded-full bg-[#edf8f3] px-2 py-1 text-[11px] text-[#187157]">Finalizado</span></div><p className="mt-2 text-xs text-[#817578]">{formatDate(bottle.startedAt)} até {formatDate(bottle.finishedAt)}</p>{feeling && <p className="mt-2 text-xs text-[#65585c]">{feeling.emoji} {feeling.label}</p>}</div>; })}</div></article>}
+                {bottleHistory.length > 0 && (
+                  <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
+                    <h2 className="text-lg font-bold text-[#433438]">Histórico completo dos frascos</h2>
+                    <p className="mt-1 text-xs text-[#817578]">Datas de entrega registradas individualmente a partir do estoque.</p>
+                    <div className="mt-4 space-y-3">
+                      {bottleHistory.slice().reverse().map((item) => {
+                        const status = item.status === "finalizado" ? "Concluído" : item.status === "em-uso" ? "Em uso" : "Recebido · aguardando início";
+                        return (
+                          <div key={item.number} className="rounded-2xl bg-[#fbf5f2] p-4">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-bold">Frasco {item.number}</p>
+                              <span className={`rounded-full px-2 py-1 text-[11px] ${status === "Concluído" ? "bg-[#edf8f3] text-[#187157]" : status === "Em uso" ? "bg-[#fff4e4] text-[#966419]" : "bg-[#eef3ff] text-[#3c5da0]"}`}>{status}</span>
+                            </div>
+                            <div className="mt-3 grid gap-2 text-xs text-[#817578] sm:grid-cols-3">
+                              <p><strong>Recebimento:</strong> {formatDate(item.receivedAt)}</p>
+                              <p><strong>Início:</strong> {formatDate(item.startedAt)}</p>
+                              <p><strong>Conclusão:</strong> {formatDate(item.finishedAt)}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </article>
+                )}
               </div>
             )}
 
@@ -905,11 +954,13 @@ export default function PatientPortalPage() {
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#2c1b20]/55 p-3 sm:items-center sm:p-5">
           <section className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-[30px] bg-white p-6 shadow-2xl sm:p-8">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Autoavaliação · frasco {pendingAssessmentBottle.number}</p>
-            <h2 className="mt-3 text-xl font-bold text-[#433438] sm:text-2xl">Como você se sentiu durante o uso deste frasco?</h2>
+            <h2 className="mt-3 text-xl font-bold text-[#433438] sm:text-2xl">Avaliação dos sintomas durante este frasco</h2>
             <p className="mt-2 text-sm text-[#817578]">Sua resposta ajuda a equipe a acompanhar a sua evolução.</p>
-            <div className="mt-6 space-y-2">{assessmentOptions.map((option) => <button key={option.value} type="button" onClick={() => setAssessmentFeeling(option.value)} className={`flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm ${assessmentFeeling === option.value ? "border-[#b91142] bg-[#fff5f7] font-semibold text-[#a3113a]" : "border-[#eee6e2] text-[#544449]"}`}><span className="text-xl">{option.emoji}</span>{option.label}</button>)}</div>
-            <label className="mt-5 block text-sm font-semibold text-[#544449]">Gostaria de contar algo sobre esse período?<textarea value={assessmentNotes} onChange={(event) => setAssessmentNotes(event.target.value)} rows={3} placeholder="Escreva aqui, se quiser compartilhar algo com sua equipe." className="mt-2 w-full rounded-xl border border-[#e9dfda] px-3 py-3 text-sm font-normal outline-none focus:border-[#b91142]" /></label>
-            <button type="button" onClick={saveAssessment} disabled={!assessmentFeeling} className="mt-5 w-full rounded-2xl bg-[#a3113a] px-4 py-3.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">Salvar minha autoavaliação</button>
+            <AssessmentQuestion title="Com que frequência você apresenta sintomas de rinite alérgica durante a semana? *" options={symptomFrequencyOptions} value={assessmentSymptomFrequency} onChange={setAssessmentSymptomFrequency} />
+            <AssessmentQuestion title="Quão severos são os sintomas de rinite alérgica? *" options={symptomSeverityOptions} value={assessmentSymptomSeverity} onChange={setAssessmentSymptomSeverity} />
+            <AssessmentQuestion title="Quantas vezes por semana você usa medicamentos para controlar os sintomas? *" options={medicationFrequencyOptions} value={assessmentMedicationFrequency} onChange={setAssessmentMedicationFrequency} />
+            <label className="mt-6 block text-sm font-semibold text-[#544449]">Gostaria de compartilhar sua experiência?<textarea value={assessmentNotes} onChange={(event) => setAssessmentNotes(event.target.value)} rows={3} placeholder="Escreva aqui, se quiser compartilhar algo com sua equipe." className="mt-2 w-full rounded-xl border border-[#e9dfda] px-3 py-3 text-sm font-normal outline-none focus:border-[#b91142]" /></label>
+            <button type="button" onClick={saveAssessment} disabled={!assessmentSymptomFrequency || !assessmentSymptomSeverity || !assessmentMedicationFrequency} className="mt-5 w-full rounded-2xl bg-[#a3113a] px-4 py-3.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">Enviar avaliação para a equipe</button>
           </section>
         </div>
       )}

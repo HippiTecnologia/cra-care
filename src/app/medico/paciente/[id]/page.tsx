@@ -17,8 +17,9 @@ import {
   subscribeDemoPatients,
   treatmentPhases,
 } from "../../patient-store";
+import { PatientPortalState, readPortalState, savePortalState, subscribePortalState } from "../../../paciente/patient-portal-store";
 
-type Tab = "receitas" | "resumo" | "historico";
+type Tab = "receitas" | "resumo" | "historico" | "avaliacoes";
 
 function formatDate(value?: string) {
   if (!value) return "Não informado";
@@ -80,6 +81,8 @@ export default function MedicalPatientPage() {
   const [selectedPrescriptionId, setSelectedPrescriptionId] = useState<
     string | null
   >(null);
+  const [portal, setPortal] = useState<PatientPortalState | null>(null);
+  const [assessmentResponses, setAssessmentResponses] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const syncPatient = () => {
@@ -87,6 +90,7 @@ export default function MedicalPatientPage() {
 
       setPatient(current ?? null);
       setPrescriptions(readDemoPrescriptions(patientId));
+      setPortal(readPortalState(patientId));
       setLoaded(true);
 
       if (current) {
@@ -97,8 +101,16 @@ export default function MedicalPatientPage() {
 
     queueMicrotask(syncPatient);
 
-    return subscribeDemoPatients(syncPatient);
+    const unsubscribePatients = subscribeDemoPatients(syncPatient);
+    const unsubscribePortal = subscribePortalState(syncPatient);
+    return () => { unsubscribePatients(); unsubscribePortal(); };
   }, [patientId]);
+
+  function updateAssessment(assessmentId: string, respond = false) {
+    if (!portal) return;
+    const now = new Date().toISOString();
+    savePortalState({ ...portal, assessments: portal.assessments.map((assessment) => assessment.id === assessmentId ? { ...assessment, viewedAt: assessment.viewedAt ?? now, viewedBy: assessment.viewedBy ?? demoDoctor.name, ...(respond && assessmentResponses[assessmentId]?.trim() ? { response: assessmentResponses[assessmentId].trim(), respondedAt: now, respondedBy: demoDoctor.name } : {}) } : assessment) });
+  }
 
   const totalPercentage = useMemo(
     () => formulas.reduce((total, formula) => total + formula.percentage, 0),
@@ -320,6 +332,7 @@ export default function MedicalPatientPage() {
             { id: "receitas", label: "Receitas" },
             { id: "resumo", label: "Resumo clínico" },
             { id: "historico", label: "Histórico de receitas" },
+            { id: "avaliacoes", label: `Avaliações${portal?.assessments.some((assessment) => !assessment.viewedAt) ? " · nova" : ""}` },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -545,8 +558,11 @@ export default function MedicalPatientPage() {
                 <div className="h-full rounded-full bg-gradient-to-r from-[#a3113a] to-[#dc4770]" style={{ width: `${progress}%` }} />
               </div>
             </article>
+            <article className="rounded-3xl border border-[#eee5e0] bg-white p-7 shadow-sm"><h2 className="text-xl font-bold text-[#433438]">Última avaliação do paciente</h2>{!portal?.assessments[0] ? <p className="mt-4 text-sm text-[#817578]">Aguardando autoavaliação do paciente.</p> : <div className="mt-4 grid gap-3 text-sm text-[#635559] sm:grid-cols-3"><p><strong>Frequência:</strong> {portal.assessments[0].symptomFrequency ?? "Avaliação anterior"}</p><p><strong>Severidade:</strong> {portal.assessments[0].symptomSeverity ?? portal.assessments[0].feeling ?? "Não informada"}</p><p><strong>Medicamentos:</strong> {portal.assessments[0].medicationFrequency ?? "Não informado"}</p>{portal.assessments[0].notes && <p className="sm:col-span-3"><strong>Comentário:</strong> {portal.assessments[0].notes}</p>}</div>}</article>
           </section>
         )}
+
+        {activeTab === "avaliacoes" && <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8"><h2 className="text-2xl font-bold text-[#433438]">Avaliações do paciente</h2><p className="mt-2 text-sm text-[#817578]">Acompanhe os sintomas relatados ao final de cada frasco e registre o retorno da equipe.</p><div className="mt-6 space-y-4">{!portal?.assessments.length && <p className="rounded-2xl border border-dashed border-[#e6dbd6] p-8 text-center text-sm text-[#817578]">Nenhuma avaliação enviada.</p>}{portal?.assessments.map((assessment) => <article key={assessment.id} className={`rounded-2xl border p-5 ${assessment.viewedAt ? "border-[#e5ddd8] bg-[#fdfbf9]" : "border-[#efc2cd] bg-[#fff5f7]"}`}><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Frasco {assessment.bottleNumber}</h3><p className="mt-1 text-xs text-[#817578]">Enviada em {formatDate(assessment.createdAt)}</p></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${assessment.response ? "bg-[#edf8f3] text-[#187157]" : assessment.viewedAt ? "bg-[#eef3ff] text-[#3c5da0]" : "bg-[#fff0f3] text-[#a3113a]"}`}>{assessment.response ? "Respondida" : assessment.viewedAt ? "Visualizada" : "Nova avaliação"}</span></div><div className="mt-5 grid gap-3 rounded-xl bg-white p-4 text-sm sm:grid-cols-3"><p><strong>Frequência:</strong><br />{assessment.symptomFrequency ?? "Avaliação anterior"}</p><p><strong>Severidade:</strong><br />{assessment.symptomSeverity ?? assessment.feeling ?? "Não informada"}</p><p><strong>Medicamentos:</strong><br />{assessment.medicationFrequency ?? "Não informado"}</p>{assessment.notes && <p className="sm:col-span-3"><strong>Experiência:</strong><br />{assessment.notes}</p>}</div>{!assessment.viewedAt && <button type="button" onClick={() => updateAssessment(assessment.id)} className="mt-4 rounded-xl border border-[#a3113a] px-4 py-2 text-xs font-semibold text-[#a3113a]">Marcar como visualizada</button>}<label className="mt-4 block text-sm font-semibold">Resposta da equipe<textarea value={assessmentResponses[assessment.id] ?? assessment.response ?? ""} onChange={(event) => setAssessmentResponses((current) => ({ ...current, [assessment.id]: event.target.value }))} rows={3} className="mt-2 w-full rounded-xl border border-[#e9dfda] px-3 py-2 font-normal" /></label><button type="button" onClick={() => updateAssessment(assessment.id, true)} className="mt-3 rounded-xl bg-[#a3113a] px-4 py-2.5 text-xs font-semibold text-white">Salvar resposta</button>{assessment.response && <p className="mt-3 text-xs text-[#187157]">Respondida por {assessment.respondedBy} em {formatDate(assessment.respondedAt)}</p>}</article>)}</div></section>}
 
         {activeTab === "historico" && (
           <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">

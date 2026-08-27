@@ -2,20 +2,17 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   DemoPatientRecord,
-  DemoPrescription,
-  DemoInvoice,
   PatientPaymentRecord,
   readDemoPatients,
-  readDemoInvoices,
-  openDemoInvoicePdf,
-  readDemoPrescriptions,
   saveDemoPatient,
   subscribeDemoPatients,
   treatmentPhases,
 } from "../medico/patient-store";
+import { readPortalState } from "../paciente/patient-portal-store";
 
 type PatientStatus =
   | "com-pedido"
@@ -28,7 +25,7 @@ type PatientStatus =
   | "desistente";
 
 type DeliveryMethod = "Motoboy" | "Retirada" | "Sedex" | "Aéreo";
-type AcquisitionMethod = "Por frasco" | "Tratamento de 6 meses" | "Recorrente — ASAAS";
+type AcquisitionMethod = "Por frasco" | "Tratamento de 6 meses" | "Recorrente — ASAAS" | "Método 1.0";
 type PaymentMethod = "A definir" | "Dinheiro" | "PIX" | "Asaas" | "Cartão de crédito" | "Cartão de débito";
 
 type Patient = {
@@ -36,6 +33,7 @@ type Patient = {
   name: string;
   cpf: string;
   phone: string;
+  email?: string;
   birthDate: string;
   doctor: string;
   treatment: string;
@@ -72,6 +70,7 @@ type NewPatientForm = {
   cpf: string;
   birthDate: string;
   phone: string;
+  email: string;
   address: string;
   zipCode: string;
   street: string;
@@ -132,12 +131,6 @@ const columns: {
     title: "Paciente bacteriana",
     color: "border-t-[#3988a1]",
     badge: "bg-[#eaf6f9] text-[#28728a]",
-  },
-  {
-    id: "tentar-novamente",
-    title: "Tentar novamente",
-    color: "border-t-[#8072bd]",
-    badge: "bg-[#f1eefb] text-[#66549d]",
   },
   {
     id: "perdido",
@@ -291,6 +284,7 @@ function createEmptyPatientForm(): NewPatientForm {
     cpf: "",
     birthDate: "",
     phone: "",
+    email: "",
     address: "",
     zipCode: "",
     street: "",
@@ -348,6 +342,7 @@ function patientFromMedicalRecord(record: DemoPatientRecord): Patient {
     birthDate: record.birthDate,
     doctor: record.doctor,
     phone: record.phone ?? "",
+    email: record.email ?? "",
     address: record.address ?? "",
     zipCode: record.zipCode ?? "",
     street: record.street ?? record.address ?? "",
@@ -390,22 +385,6 @@ function getDaysSince(date: string) {
   return Math.max(0, Math.floor(difference / 86_400_000));
 }
 
-function getTreatmentProgress(patient: Patient) {
-  const start = new Date(`${patient.startDate}T12:00:00`);
-  const end = new Date(start);
-
-  end.setMonth(end.getMonth() + patient.totalMonths);
-
-  const total = end.getTime() - start.getTime();
-  const elapsed = new Date().getTime() - start.getTime();
-
-  if (total <= 0) {
-    return 0;
-  }
-
-  return Math.max(0, Math.min(100, Math.round((elapsed / total) * 100)));
-}
-
 function formatDate(date: string) {
   return new Date(`${date}T12:00:00`).toLocaleDateString("pt-BR");
 }
@@ -436,9 +415,9 @@ function requiresNewOrder(patient: Patient) {
 }
 
 export default function SecretariaPage() {
+  const router = useRouter();
+  const cardWasDragged = useRef(false);
   const [patients, setPatients] = useState<Patient[]>(initialPatients);
-  const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
-  const [invoices, setInvoices] = useState<DemoInvoice[]>([]);
   const [search, setSearch] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("Todos os médicos");
   const [filter, setFilter] = useState<FilterMode>("todos");
@@ -469,8 +448,6 @@ export default function SecretariaPage() {
         ...receivedPatients,
         ...initialPatients.filter((patient) => !receivedIds.has(patient.id)),
       ]);
-      setPrescriptions(readDemoPrescriptions());
-      setInvoices(readDemoInvoices());
     };
 
     queueMicrotask(syncPatients);
@@ -543,6 +520,7 @@ export default function SecretariaPage() {
   function openKanbanFilter(status: PatientStatus | "todos") {
     setKanbanStatusFilter(status);
     setFilter("todos");
+    setKanbanMenuOpen(false);
     window.setTimeout(() => document.getElementById("kanban-pacientes")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
@@ -558,46 +536,6 @@ export default function SecretariaPage() {
     setShowPatientForm(false);
     setEditingPatientId(null);
     setFormError("");
-  }
-
-  function openPatientForm(patient: Patient) {
-    setEditingPatientId(patient.id);
-    setNewPatient({
-      name: patient.name,
-      cpf: patient.cpf,
-      birthDate: patient.birthDate,
-      phone: patient.phone,
-      address: patient.address ?? "",
-      zipCode: patient.zipCode ?? "",
-      street: patient.street ?? patient.address ?? "",
-      addressNumber: patient.addressNumber ?? "",
-      addressComplement: patient.addressComplement ?? "",
-      neighborhood: patient.neighborhood ?? "",
-      city: patient.city ?? "",
-      state: patient.state ?? "",
-      deliveryNotes: patient.deliveryNotes ?? "",
-      billingName: patient.billingName ?? "",
-      billingCpf: patient.billingCpf ?? "",
-      doctor: patient.doctor,
-      treatment: patient.treatment,
-      startDate: patient.startDate,
-      totalMonths: patient.totalMonths,
-      lastReceivedDate: patient.lastReceivedDate,
-      bottlesReceived: patient.bottlesReceived,
-      drops: patient.drops,
-      phase: patient.phase,
-      delivery: patient.delivery,
-      status: patient.status,
-      acquisitionMethod: patient.acquisitionMethod ?? "Por frasco",
-      paymentMethod: patient.paymentMethod ?? "A definir",
-      paymentInstallments: patient.paymentInstallments ?? 1,
-      payments: patient.payments ?? [],
-      notes: patient.notes ?? "",
-      abandonmentReason: patient.abandonmentReason ?? "",
-    });
-    setFormError("");
-    setSuccessMessage("");
-    setShowPatientForm(true);
   }
 
   function addPayment() {
@@ -682,6 +620,7 @@ export default function SecretariaPage() {
       name: newPatient.name.trim(),
       cpf: newPatient.cpf,
       phone: newPatient.phone,
+      email: newPatient.email.trim(),
       birthDate: newPatient.birthDate,
       doctor: newPatient.doctor,
       treatment: newPatient.treatment,
@@ -840,12 +779,14 @@ export default function SecretariaPage() {
 
             <button type="button" onClick={() => setKanbanMenuOpen((open) => !open)} className="flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10"><span>Kanban de pacientes</span><span>{kanbanMenuOpen ? "⌃" : "⌄"}</span></button>
             {kanbanMenuOpen && <div className="ml-3 space-y-1 border-l border-white/20 pl-3">{([
-              ["todos", "Visão geral"], ["com-pedido", "Com pedido"], ["em-conversa", "Em conversa"], ["ativo", "Ativos"], ["bacteriana", "Bacteriana"], ["tentar-novamente", "Tentar novamente"], ["perdido", "Perdidos"], ["desistente", "Desistentes"], ["concluido", "Concluídos"],
+              ["todos", "Visão geral"], ["com-pedido", "Com pedido"], ["em-conversa", "Em conversa"], ["ativo", "Ativos"], ["bacteriana", "Bacteriana"], ["perdido", "Perdidos"], ["desistente", "Desistentes"], ["concluido", "Concluídos"],
             ] as [PatientStatus | "todos", string][]).map(([status, label]) => <button key={status} type="button" onClick={() => openKanbanFilter(status)} className={`block w-full rounded-xl px-3 py-2 text-left text-xs ${kanbanStatusFilter === status ? "bg-white/15 font-semibold text-white" : "text-white/70 hover:bg-white/10"}`}>{label}</button>)}</div>}
 
             <Link href="/secretaria/lotes" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
               Lotes
             </Link>
+
+            <Link href="/secretaria/cadastros" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">Cadastros</Link>
 
             <Link href="/secretaria/estoque" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
               Vacinas em estoque
@@ -855,9 +796,7 @@ export default function SecretariaPage() {
               Notas fiscais
             </Link>
 
-            <button className="w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
-              Contratos
-            </button>
+            <Link href="/secretaria/contratos" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">Contratos</Link>
 
             <button className="w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
               Configurações
@@ -1075,24 +1014,32 @@ export default function SecretariaPage() {
                       )}
 
                       {columnPatients.map((patient) => {
-                        const progress =
-                          getTreatmentProgress(patient);
-
-                        const daysSinceLastBottle = getDaysSince(
-                          patient.lastReceivedDate,
-                        );
-
-                        const showAlert = requiresNewOrder(patient);
-                        const latestPrescription = prescriptions.find(
-                          (prescription) => prescription.patientId === patient.id,
-                        );
-                        const patientInvoices = invoices.filter((invoice) => invoice.patientId === patient.id);
+                        const portal = readPortalState(patient.id);
+                        const currentBottle = portal.bottles.find((bottle) => bottle.status === "em-uso");
+                        const nextContact = currentBottle ? (() => { const date = new Date(`${currentBottle.startedAt}T12:00:00`); date.setDate(date.getDate() + 30); return date; })() : null;
+                        const receivedAfterCurrentStart = Boolean(currentBottle && patient.lastReceivedDate && patient.lastReceivedDate > currentBottle.startedAt.slice(0, 10));
+                        const showAlert = Boolean(nextContact && nextContact <= new Date() && !receivedAfterCurrentStart);
 
                         return (
                           <article
                             key={patient.id}
                             draggable
+                            role="link"
+                            tabIndex={0}
+                            aria-label={`Abrir cadastro completo de ${patient.name}`}
+                            onClick={() => {
+                              if (cardWasDragged.current) return;
+                              setKanbanMenuOpen(false);
+                              router.push(`/secretaria/cadastros#${patient.id}`);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter" && event.key !== " ") return;
+                              event.preventDefault();
+                              setKanbanMenuOpen(false);
+                              router.push(`/secretaria/cadastros#${patient.id}`);
+                            }}
                             onDragStart={(event) => {
+                              cardWasDragged.current = true;
                               event.dataTransfer.setData("text/plain", patient.id);
                               event.dataTransfer.effectAllowed = "move";
                               setDraggedPatientId(patient.id);
@@ -1100,8 +1047,11 @@ export default function SecretariaPage() {
                             onDragEnd={() => {
                               setDraggedPatientId(null);
                               setDragOverStatus(null);
+                              window.setTimeout(() => {
+                                cardWasDragged.current = false;
+                              }, 0);
                             }}
-                            className={`cursor-grab rounded-2xl border border-[#ece3df] bg-white p-4 shadow-sm active:cursor-grabbing ${draggedPatientId === patient.id ? "opacity-50" : ""}`}
+                            className={`cursor-pointer rounded-2xl border border-[#ece3df] bg-white p-4 shadow-sm outline-none transition hover:-translate-y-0.5 hover:border-[#d9b4bf] hover:shadow-md focus:ring-2 focus:ring-[#b91142]/40 active:cursor-grabbing ${draggedPatientId === patient.id ? "opacity-50" : ""}`}
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div>
@@ -1148,25 +1098,9 @@ export default function SecretariaPage() {
 
                               <p>
                                 <span className="font-semibold">
-                                  Fase:
+                                  Próximo pedido/contato:
                                 </span>{" "}
-                                {patient.phase}
-                              </p>
-
-                              <p>
-                                <span className="font-semibold">
-                                  Posologia:
-                                </span>{" "}
-                                {patient.drops} gotas
-                              </p>
-
-                              <p>
-                                <span className="font-semibold">
-                                  Último recebimento:
-                                </span>{" "}
-                                {formatDate(
-                                  patient.lastReceivedDate,
-                                )}
+                                {nextContact ? nextContact.toLocaleDateString("pt-BR") : "Aguardando início do frasco"}
                               </p>
 
                               <p>
@@ -1175,6 +1109,9 @@ export default function SecretariaPage() {
                                 </span>{" "}
                                 {patient.bottlesReceived}
                               </p>
+                              <p><span className="font-semibold">Frascos iniciados:</span> {portal.bottles.length}</p>
+                              <p><span className="font-semibold">Frasco atual:</span> {currentBottle ? currentBottle.number : "Nenhum"}</p>
+                              <p><span className="font-semibold">Status:</span> {column.title}</p>
                               {patient.status === "desistente" && patient.abandonmentReason && (
                                 <p className="rounded-xl bg-[#fdf0ee] px-3 py-2 text-[#9b5047]">
                                   <span className="font-semibold">Motivo da desistência:</span>{" "}
@@ -1183,80 +1120,20 @@ export default function SecretariaPage() {
                               )}
                             </div>
 
-                            <div className="mt-4">
-                              <div className="mb-2 flex justify-between text-xs">
-                                <span className="text-[#776b6e]">
-                                  Tratamento
-                                </span>
-
-                                <span className="font-bold text-[#a3113a]">
-                                  {progress}%
-                                </span>
-                              </div>
-
-                              <div className="h-2 overflow-hidden rounded-full bg-[#f0e8e5]">
-                                <div
-                                  className="h-full rounded-full bg-gradient-to-r from-[#a3113a] to-[#dc4770]"
-                                  style={{
-                                    width: `${progress}%`,
-                                  }}
-                                />
-                              </div>
-                            </div>
-
-                            {latestPrescription && (
-                              <div className="mt-4 rounded-xl border border-[#f0dfe4] bg-[#fff7f8] px-3 py-3">
-                                <p className="text-xs font-bold text-[#a3113a]">
-                                  Última receita disponível
-                                </p>
-                                <p className="mt-1 text-xs text-[#74666a]">
-                                  {formatDate(latestPrescription.createdAt.slice(0, 10))}
-                                  {" · "}
-                                  {latestPrescription.bottles} frasco(s)
-                                </p>
-                                <p className="mt-1 text-xs text-[#74666a]">
-                                  {latestPrescription.drops} gotas
-                                  {" · "}
-                                  {latestPrescription.formulas.length} composição(ões)
-                                </p>
-                              </div>
-                            )}
-
-                            {patientInvoices.length > 0 && (
-                              <div className="mt-4 rounded-xl border border-[#e1daf0] bg-[#faf7ff] px-3 py-3">
-                                <p className="text-xs font-bold text-[#7351a3]">Notas fiscais · {patientInvoices.length}</p>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  {patientInvoices.slice(0, 2).map((invoice) => (
-                                    <button key={invoice.id} type="button" onClick={() => void openDemoInvoicePdf(invoice)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#7351a3]">
-                                      Abrir PDF
-                                    </button>
-                                  ))}
-                                  <Link href="/secretaria/notas-fiscais" className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[#7351a3]">Ver todas</Link>
-                                </div>
-                              </div>
-                            )}
-
                             {showAlert && (
                               <div className="mt-4 rounded-xl bg-[#fff1ec] px-3 py-2 text-xs font-semibold text-[#ae4b35]">
-                                🔔 Novo pedido necessário:{" "}
-                                {daysSinceLastBottle} dias.
+                                ⚠️ Próximo pedido pendente
                               </div>
                             )}
 
                             <div className="mt-4 flex items-center justify-between">
-                              <span className="rounded-full bg-[#f5f0ed] px-3 py-1 text-xs font-medium text-[#706467]">
-                                {patient.delivery}
-                              </span>
+                              <div className="flex flex-wrap gap-2"><span className="rounded-full bg-[#f5f0ed] px-3 py-1 text-xs font-medium text-[#706467]">{patient.delivery}</span><span className="rounded-full bg-[#fff0f3] px-3 py-1 text-xs font-semibold text-[#a3113a]">{patient.acquisitionMethod ?? "Método não definido"}</span></div>
 
-                              <button
-                                type="button"
-                                onClick={() => openPatientForm(patient)}
-                                className="text-xs font-bold text-[#a3113a]"
-                              >
+                              <span className="text-xs font-bold text-[#a3113a]">
                                 {patient.registrationComplete === false
                                   ? "Completar cadastro →"
                                   : "Abrir paciente →"}
-                              </button>
+                              </span>
                             </div>
                           </article>
                         );
@@ -1385,6 +1262,7 @@ export default function SecretariaPage() {
                       ))}
                     </select>
                   </label>
+                  <label className="text-sm font-medium text-[#544449] sm:col-span-2">E-mail do paciente<input type="email" value={newPatient.email} onChange={(event) => updateNewPatient("email", event.target.value)} placeholder="paciente@email.com" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /></label>
                   <label className="text-sm font-medium text-[#544449]">CEP<input value={newPatient.zipCode} onChange={(event) => updateNewPatient("zipCode", event.target.value)} placeholder="00000-000" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /></label>
                   <label className="text-sm font-medium text-[#544449]">Rua<input value={newPatient.street} onChange={(event) => updateNewPatient("street", event.target.value)} placeholder="Nome da rua" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /></label>
                   <label className="text-sm font-medium text-[#544449]">Número<input value={newPatient.addressNumber} onChange={(event) => updateNewPatient("addressNumber", event.target.value)} placeholder="Número" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /></label>
@@ -1554,6 +1432,7 @@ export default function SecretariaPage() {
                       <option>Por frasco</option>
                       <option>Tratamento de 6 meses</option>
                       <option>Recorrente — ASAAS</option>
+                      <option>Método 1.0</option>
                     </select>
                   </label>
                   <label className="text-sm font-medium text-[#544449]">

@@ -13,8 +13,8 @@ import {
 } from "./patient-store";
 import { readPortalState } from "../paciente/patient-portal-store";
 
-type DoctorSection = "dashboard" | "pacientes" | "financeiro" | "evolucao";
-type DoctorPatientFilter = "todos" | "ativo" | "com-pedido" | "concluido" | "perdido" | "desistente";
+type DoctorSection = "dashboard" | "pacientes" | "evolucao";
+type DoctorPatientFilter = "todos" | "ativo" | "com-pedido" | "tentar-novamente" | "concluido" | "perdido" | "desistente";
 
 const loggedDoctor = demoDoctor.name;
 
@@ -48,6 +48,7 @@ export default function MedicoPage() {
   const [name, setName] = useState("");
   const [cpf, setCpf] = useState("");
   const [birthDate, setBirthDate] = useState("");
+  const [phone, setPhone] = useState("");
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -88,13 +89,13 @@ export default function MedicoPage() {
         .replace(/[.\-]/g, "")
         .toLowerCase();
 
-      const matchesStatus = patientFilter === "todos" || (patientFilter === "ativo" ? ["ativo", "em-conversa", "bacteriana", "tentar-novamente"].includes(patient.status ?? "") : patient.status === patientFilter);
+      const matchesStatus = patientFilter === "todos" || (patientFilter === "ativo" ? ["ativo", "em-conversa", "bacteriana"].includes(patient.status ?? "") : patient.status === patientFilter);
       return (!term || searchable.includes(term)) && matchesStatus;
     });
   }, [allDoctorPatients, patientFilter, search]);
 
   const totalPatients = allDoctorPatients.length;
-  const countByStatus = (status: DoctorPatientFilter) => status === "todos" ? totalPatients : allDoctorPatients.filter((patient) => status === "ativo" ? ["ativo", "em-conversa", "bacteriana", "tentar-novamente"].includes(patient.status ?? "") : patient.status === status).length;
+  const countByStatus = (status: DoctorPatientFilter) => status === "todos" ? totalPatients : allDoctorPatients.filter((patient) => status === "ativo" ? ["ativo", "em-conversa", "bacteriana"].includes(patient.status ?? "") : patient.status === status).length;
   const percentage = (value: number) => totalPatients ? Math.round((value / totalPatients) * 100) : 0;
   const statusMetrics = [
     { id: "ativo" as const, label: "Pacientes ativos", color: "#24846b" },
@@ -108,8 +109,8 @@ export default function MedicoPage() {
     const portal = readPortalState(patient.id);
     const scheduled = portal.bottles.length ? Math.max(1, portal.useRecords.length + Object.values(portal.dayOverrides ?? {}).filter((value) => value === "nao-registrado").length) : 0;
     const regularity = scheduled ? Math.round((portal.useRecords.length / scheduled) * 100) : 0;
-    const positive = portal.assessments.filter((assessment) => ["muito-bem", "bem"].includes(assessment.feeling)).length;
-    const discomfort = portal.assessments.filter((assessment) => ["desconfortos", "nao-bem"].includes(assessment.feeling)).length;
+    const positive = portal.assessments.filter((assessment) => ["muito-bem", "bem"].includes(assessment.feeling ?? "") || ["leves", "moderados"].includes(assessment.symptomSeverity ?? "")).length;
+    const discomfort = portal.assessments.filter((assessment) => ["desconfortos", "nao-bem"].includes(assessment.feeling ?? "") || ["severos", "muito-severos"].includes(assessment.symptomSeverity ?? "")).length;
     return { patient, regularity, positive, discomfort };
   });
   const averageRegularity = evolution.length ? Math.round(evolution.reduce((total, item) => total + item.regularity, 0) / evolution.length) : 0;
@@ -143,6 +144,7 @@ export default function MedicoPage() {
       name: name.trim(),
       cpf,
       birthDate,
+      phone: phone.trim() || undefined,
       doctor: loggedDoctor,
       createdAt: new Date().toISOString(),
       registrationStatus: "pending-secretary",
@@ -153,6 +155,7 @@ export default function MedicoPage() {
     setName("");
     setCpf("");
     setBirthDate("");
+    setPhone("");
     setSearch("");
     setMessage(`${patient.name} foi encaminhado para a secretaria completar o cadastro.`);
     closeForm();
@@ -180,9 +183,6 @@ export default function MedicoPage() {
             </button>
             <button type="button" onClick={() => setSection("pacientes")} className={`w-full rounded-2xl px-4 py-3 text-left text-sm ${section === "pacientes" ? "bg-white/15 font-semibold" : "text-white/80 hover:bg-white/10"}`}>
               Meus pacientes
-            </button>
-            <button type="button" onClick={() => setSection("financeiro")} className={`w-full rounded-2xl px-4 py-3 text-left text-sm ${section === "financeiro" ? "bg-white/15 font-semibold" : "text-white/80 hover:bg-white/10"}`}>
-              Financeiro
             </button>
             <button type="button" onClick={() => setSection("evolucao")} className={`w-full rounded-2xl px-4 py-3 text-left text-sm ${section === "evolucao" ? "bg-white/15 font-semibold" : "text-white/80 hover:bg-white/10"}`}>
               Evolução
@@ -278,7 +278,7 @@ export default function MedicoPage() {
               </div>
             )}
 
-            <div className="mt-5 flex flex-wrap gap-2">{([{ id: "todos", label: "Todos" }, ...statusMetrics.map((item) => ({ id: item.id, label: item.label }))] as { id: DoctorPatientFilter; label: string }[]).map((item) => <button key={item.id} type="button" onClick={() => setPatientFilter(item.id)} className={`rounded-full px-4 py-2 text-xs font-semibold ${patientFilter === item.id ? "bg-[#a3113a] text-white" : "bg-[#f6efec] text-[#716569]"}`}>{item.label} ({countByStatus(item.id)})</button>)}</div>
+            <div className="mt-5 flex flex-wrap gap-2">{([{ id: "todos", label: "Todos" }, ...statusMetrics.map((item) => ({ id: item.id, label: item.label })), { id: "tentar-novamente", label: "Tentar novamente" }] as { id: DoctorPatientFilter; label: string }[]).map((item) => <button key={item.id} type="button" onClick={() => setPatientFilter(item.id)} className={`rounded-full px-4 py-2 text-xs font-semibold ${patientFilter === item.id ? "bg-[#a3113a] text-white" : "bg-[#f6efec] text-[#716569]"}`}>{item.label} ({countByStatus(item.id)})</button>)}</div>
 
             <div className="mt-6 space-y-3">
               {visiblePatients.map((patient) => (
@@ -319,8 +319,6 @@ export default function MedicoPage() {
               )}
             </div>
           </section>}
-
-          {section === "financeiro" && <section className="space-y-6"><div><h2 className="text-2xl font-bold text-[#433438]">Financeiro dos meus pacientes</h2><p className="mt-2 text-sm text-[#817578]">Visão dos valores registrados para pacientes vinculados ao seu perfil.</p></div><div className="grid gap-4 sm:grid-cols-3">{[{ label: "Total registrado", value: allDoctorPatients.reduce((total, patient) => total + (patient.payments ?? []).reduce((sum, payment) => sum + payment.amount, 0), 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) }, { label: "Pacientes com pagamento", value: String(allDoctorPatients.filter((patient) => (patient.payments?.length ?? 0) > 0).length) }, { label: "Sem lançamento", value: String(allDoctorPatients.filter((patient) => (patient.payments?.length ?? 0) === 0).length) }].map((card) => <article key={card.label} className="rounded-3xl border border-[#efe6e1] bg-white p-6"><p className="text-sm text-[#817578]">{card.label}</p><p className="mt-3 text-3xl font-bold text-[#a3113a]">{card.value}</p></article>)}</div><article className="rounded-3xl border border-[#efe6e1] bg-white p-6"><h3 className="text-lg font-bold">Valores por paciente</h3><div className="mt-5 space-y-3">{allDoctorPatients.map((patient) => { const total = (patient.payments ?? []).reduce((sum, payment) => sum + payment.amount, 0); return <div key={patient.id} className="flex items-center justify-between rounded-2xl bg-[#fbf7f5] p-4"><div><p className="text-sm font-bold">{patient.name}</p><p className="mt-1 text-xs text-[#817578]">{patient.acquisitionMethod ?? "Aquisição não definida"}</p></div><strong className="text-sm text-[#a3113a]">{total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</strong></div>; })}</div></article></section>}
 
           {section === "evolucao" && <section className="space-y-6"><div><h2 className="text-2xl font-bold text-[#433438]">Evolução dos pacientes</h2><p className="mt-2 text-sm text-[#817578]">Indicadores de adesão e autoavaliação para apoiar o acompanhamento clínico.</p></div><div className="grid gap-4 sm:grid-cols-4">{[{ label: "Regularidade média", value: `${averageRegularity}%` }, { label: "Boa adesão", value: `${percentage(evolution.filter((item) => item.regularity >= 70).length)}%` }, { label: "Precisam de atenção", value: String(evolution.filter((item) => item.regularity < 50).length) }, { label: "Relatos de desconforto", value: String(evolution.reduce((total, item) => total + item.discomfort, 0)) }].map((card) => <article key={card.label} className="rounded-3xl border border-[#efe6e1] bg-white p-6"><p className="text-sm text-[#817578]">{card.label}</p><p className="mt-3 text-3xl font-bold text-[#a3113a]">{card.value}</p></article>)}</div><article className="rounded-3xl border border-[#efe6e1] bg-white p-6"><h3 className="text-lg font-bold">Desenvolvimento por paciente</h3><div className="mt-6 space-y-5">{evolution.map((item) => <div key={item.patient.id}><div className="flex flex-wrap items-center justify-between gap-2 text-sm"><strong>{item.patient.name}</strong><span className={item.regularity >= 70 ? "text-[#187157]" : item.regularity >= 50 ? "text-[#966419]" : "text-[#a3113a]"}>{item.regularity}% de regularidade</span></div><div className="mt-2 h-3 overflow-hidden rounded-full bg-[#f0e9e6]"><div className={`h-full rounded-full ${item.regularity >= 70 ? "bg-[#24846b]" : item.regularity >= 50 ? "bg-[#d59a42]" : "bg-[#b21a45]"}`} style={{ width: `${item.regularity}%` }} /></div><p className="mt-2 text-xs text-[#817578]">Autoavaliações positivas: {item.positive} · desconfortos: {item.discomfort}</p></div>)}</div></article><p className="rounded-2xl bg-[#fff7ea] p-4 text-xs leading-6 text-[#806238]">Estes indicadores apoiam o acompanhamento, mas não substituem avaliação médica individual.</p></section>}
 
@@ -403,6 +401,7 @@ export default function MedicoPage() {
                   className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]"
                 />
               </label>
+              <label className="block text-sm font-medium text-[#544449]">Telefone / WhatsApp <span className="font-normal text-[#817578]">(opcional)</span><input inputMode="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="(41) 99999-9999" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /></label>
 
               {error && (
                 <p className="rounded-xl border border-[#f3d5d8] bg-[#fff2f3] px-4 py-3 text-sm text-[#a3113a]">
