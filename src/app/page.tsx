@@ -153,7 +153,7 @@ export default function Home() {
           </div>
 
           <footer className="relative z-10 text-sm text-white/65">
-            CRA Care © 2026 · Desenvolvido pela Hippi
+            CRA Care © 2026 · Desenvolvido pela Hippi · Gustavo Sabino Rodrigues
           </footer>
         </section>
 
