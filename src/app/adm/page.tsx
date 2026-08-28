@@ -374,7 +374,7 @@ export default function AdminPage() {
   return (
     <main className="min-h-screen bg-[#f6f3f0] text-[#34292d]">
       <div className="min-h-screen lg:grid lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="bg-gradient-to-b from-[#701027] via-[#8f1033] to-[#520817] px-6 py-7 text-white lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto">
+        <aside className="bg-gradient-to-b from-[#701027] via-[#8f1033] to-[#520817] px-6 py-7 text-white lg:sticky lg:top-0 lg:h-screen lg:self-start lg:overflow-y-auto">
           <Image src="/logo-cra-branca.png" alt="CRA" width={150} height={100} className="h-auto w-32" priority />
           <div className="mt-5 border-b border-white/15 pb-5"><p className="text-sm font-bold">Painel Administrativo</p><p className="mt-1 text-xs text-white/60">Gestão financeira e estratégica</p></div>
           <nav className="mt-6 space-y-1">{sections.map((item) => <button key={item.id} type="button" onClick={() => chooseSection(item.id)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition ${section === item.id ? "bg-white/16 font-bold text-white" : "text-white/75 hover:bg-white/10"}`}><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10 text-xs font-bold">{item.icon}</span>{item.label}</button>)}</nav>

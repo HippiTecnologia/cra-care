@@ -593,6 +593,25 @@ export default function PatientPortalPage() {
     }
   }
 
+  function printPrescription(prescription: DemoPrescription) {
+    if (!patient) return;
+
+    const formulas = prescription.formulas.length
+      ? prescription.formulas.map((formula) => `${formula.name}: ${formula.percentage}%`).join("\n")
+      : "Não informada";
+    const sections = [
+      { heading: "Dados do paciente", text: `Paciente: ${patient.name}\nCPF: ${patient.cpf}\nData de nascimento: ${formatDate(patient.birthDate)}` },
+      { heading: "Prescrição médica", text: `Médico responsável: ${prescription.doctor} · CRM ${prescription.doctorCrm}\nEmitida em: ${formatDate(prescription.createdAt)}\nTratamento: ${prescription.treatment}\nFase: ${prescription.phase}\nQuantidade: ${prescription.bottles} frasco(s)` },
+      { heading: "Fórmula e composição", text: formulas },
+      { heading: "Posologia", text: `${prescription.posology}\nFrequência: ${prescription.frequency}` },
+      ...(prescription.notes.trim() ? [{ heading: "Observações médicas", text: prescription.notes }] : []),
+    ];
+
+    if (!openPrintableDocument(`Receita médica · ${patient.name}`, sections)) {
+      setMessage("Permita a abertura de janelas para imprimir ou salvar a receita em PDF.");
+    }
+  }
+
   if (!loaded) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#faf7f5] text-[#a3113a]">
@@ -903,7 +922,7 @@ export default function PatientPortalPage() {
             {section === "receitas" && (
               <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Prescrições médicas</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">Minhas receitas</h2><p className="mt-2 text-sm leading-6 text-[#817578]">Consulte as receitas emitidas pelo seu médico durante o tratamento.</p>
-                <div className="mt-6 space-y-3">{prescriptions.length === 0 ? <p className="rounded-2xl border border-dashed border-[#e6dbd6] px-5 py-10 text-center text-sm text-[#817578]">Nenhuma receita disponível no momento.</p> : prescriptions.map((prescription, index) => <article key={prescription.id} className="rounded-2xl bg-[#fbf5f2] p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold text-[#433438]">Receita {String(prescriptions.length - index).padStart(2, "0")}</p><p className="mt-1 text-xs text-[#817578]">{formatDate(prescription.createdAt)} · {prescription.doctor}</p></div><span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#a3113a]">{prescription.bottles} frasco(s)</span></div><p className="mt-3 text-sm text-[#66595d]">{prescription.treatment} · {prescription.phase}</p><p className="mt-2 text-xs text-[#817578]">{prescription.formulas.map((item) => `${item.name} ${item.percentage}%`).join(" · ")}</p></article>)}</div>
+                <div className="mt-6 space-y-3">{prescriptions.length === 0 ? <p className="rounded-2xl border border-dashed border-[#e6dbd6] px-5 py-10 text-center text-sm text-[#817578]">Nenhuma receita disponível no momento.</p> : prescriptions.map((prescription, index) => <article key={prescription.id} className="rounded-2xl bg-[#fbf5f2] p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold text-[#433438]">Receita {String(prescriptions.length - index).padStart(2, "0")}</p><p className="mt-1 text-xs text-[#817578]">{formatDate(prescription.createdAt)} · {prescription.doctor}</p></div><span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#a3113a]">{prescription.bottles} frasco(s)</span></div><p className="mt-3 text-sm text-[#66595d]">{prescription.treatment} · {prescription.phase}</p><p className="mt-2 text-xs text-[#817578]">{prescription.formulas.map((item) => `${item.name} ${item.percentage}%`).join(" · ")}</p><button type="button" onClick={() => printPrescription(prescription)} className="mt-4 rounded-xl bg-[#a3113a] px-4 py-2.5 text-xs font-semibold text-white">Imprimir / salvar em PDF</button></article>)}</div>
               </article>
             )}
 
