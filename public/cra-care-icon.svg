@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#8f1033"/>
+  <rect x="18" y="18" width="476" height="476" rx="96" fill="none" stroke="#ffffff" stroke-opacity=".20" stroke-width="3"/>
+  <image href="/logo-cra-branca.png" x="54" y="151" width="404" height="210" preserveAspectRatio="xMidYMid meet"/>
+</svg>

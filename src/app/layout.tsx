@@ -15,6 +15,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "CRA Care",
   description: "Gestão integrada de tratamentos do Centro de Rinite e Alergia",
+  applicationName: "CRA Care",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "CRA Care",
+  },
 };
 
 export const viewport: Viewport = {
