@@ -310,7 +310,7 @@ export default function MedicalPatientPage() {
       return;
     }
 
-    const printWindow = window.open("", "_blank", "width=900,height=760");
+    const printWindow = window.open("", "_blank");
 
     if (!printWindow) {
       setError("Permita a abertura de janelas no navegador para imprimir a receita.");
@@ -329,7 +329,9 @@ export default function MedicalPatientPage() {
           <style>
             @page { size: A4; margin: 16mm; }
             * { box-sizing: border-box; }
-            body { margin: 0; color: #34292d; font-family: Arial, sans-serif; font-size: 13px; }
+            body { margin: 0; background: #f6f1ef; color: #34292d; font-family: Arial, sans-serif; font-size: 13px; }
+            .document-shell { max-width: 880px; margin: 0 auto; padding: 28px 20px 56px; }
+            .document-card { border-radius: 24px; background: white; padding: 42px; box-shadow: 0 18px 50px rgba(52, 41, 45, .14); }
             header { display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #a3113a; padding: 0 0 18px; color: #34292d; }
             header img { width: 72px; height: 72px; border-radius: 14px; }
             h1 { margin: 0; font-size: 22px; }
@@ -343,15 +345,15 @@ export default function MedicalPatientPage() {
             th:last-child, td:last-child { text-align: right; }
             .signature { margin: 70px auto 0; width: 320px; border-top: 1px solid #45383c; padding-top: 9px; text-align: center; line-height: 1.6; }
             .footer { margin-top: 36px; color: #817578; font-size: 10px; text-align: center; }
-            .document-actions { position: fixed; top: 22px; right: 22px; display: flex; gap: 10px; z-index: 2; }
+            .document-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-bottom: 16px; }
             .document-actions button { border: 0; border-radius: 10px; padding: 11px 14px; font: 600 13px Arial, sans-serif; cursor: pointer; }
             .print { background: #a3113a; color: white; }
             .close { border: 1px solid #d9c9cc !important; background: white; color: #a3113a; }
-            @media print { .footer { position: fixed; bottom: 0; left: 0; right: 0; } .document-actions { display: none; } }
+            @media print { body { background: white; } .document-shell { max-width: none; padding: 0; } .document-card { border-radius: 0; padding: 0; box-shadow: none; } .footer { position: fixed; bottom: 0; left: 0; right: 0; } .document-actions { display: none; } }
           </style>
         </head>
         <body>
-          <div class="document-actions"><button class="print" onclick="window.print()">Imprimir / salvar em PDF</button><button class="close" onclick="window.close()">Fechar e voltar</button></div>
+          <main class="document-shell"><div class="document-actions"><button class="print" onclick="window.print()">Imprimir / salvar em PDF</button><button class="close" onclick="window.close()">Fechar e voltar</button></div><article class="document-card">
           <header><div><h1>Receita médica</h1><p>CRA Care · Centro de Rinite e Alergia</p></div><img src="${window.location.origin}/icon.png" alt="CRA Care" /></header>
           <div class="meta">
             <div><strong>Paciente:</strong> ${escapeHtml(printablePatient.name)}</div>
@@ -365,7 +367,7 @@ export default function MedicalPatientPage() {
           <div class="section"><div class="section-title">Posologia</div><p>${escapeHtml(preview.posology)}</p></div>
           ${preview.notes ? `<div class="section"><div class="section-title">Observações</div><p>${escapeHtml(preview.notes)}</p></div>` : ""}
           <div class="signature"><strong>${escapeHtml(preview.doctor)}</strong><br />CRM PR ${escapeHtml(preview.doctorCrm)}<br /><small>${preview.signatureStatus === "signed" ? "Assinada digitalmente" : preview.signatureStatus === "ready" ? "Preparada para assinatura digital" : "Aguardando assinatura digital"}</small></div>
-          <p class="footer">Documento gerado pelo CRA Care.</p>
+          <p class="footer">Documento gerado pelo CRA Care.</p></article></main>
         </body>
       </html>`);
     printWindow.document.close();
