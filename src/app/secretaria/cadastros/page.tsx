@@ -153,6 +153,31 @@ export default function PatientRecordsPage() {
     setDraft((current) => current ? { ...current, [key]: value } : current);
   }
 
+  async function fillAddressFromZipCode(value: string) {
+    const zipCode = value.replace(/\D/g, "");
+    if (zipCode.length !== 8) return;
+
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${zipCode}/json/`);
+      const address = await response.json() as { erro?: boolean; logradouro?: string; bairro?: string; localidade?: string; uf?: string };
+      if (!response.ok || address.erro) {
+        setMessage("CEP não encontrado. Confira o número ou preencha o endereço manualmente.");
+        return;
+      }
+      setDraft((current) => current ? {
+        ...current,
+        zipCode,
+        street: address.logradouro || current.street,
+        neighborhood: address.bairro || current.neighborhood,
+        city: address.localidade || current.city,
+        state: address.uf || current.state,
+      } : current);
+      setMessage("Endereço preenchido automaticamente pelo CEP. Informe apenas o número e complemento, se houver.");
+    } catch {
+      setMessage("Não foi possível consultar o CEP agora. Você pode preencher o endereço manualmente.");
+    }
+  }
+
   function saveDraft(section: string) {
     if (!draft) return;
     if (!draft.name.trim() || !draft.cpf.trim() || !draft.birthDate) {
@@ -279,7 +304,7 @@ export default function PatientRecordsPage() {
               <Field label="Telefone / WhatsApp (opcional)"><input value={draft.phone ?? ""} onChange={(event) => updateDraft("phone", event.target.value)} className={inputClass} /></Field>
               <Field label="E-mail (opcional)"><input type="email" value={draft.email ?? ""} onChange={(event) => updateDraft("email", event.target.value)} placeholder="paciente@exemplo.com" className={inputClass} /></Field>
               <Field label="Médico responsável"><input value={draft.doctor} onChange={(event) => updateDraft("doctor", event.target.value)} className={inputClass} /></Field>
-              <Field label="CEP"><input value={draft.zipCode ?? ""} onChange={(event) => updateDraft("zipCode", event.target.value)} className={inputClass} /></Field>
+              <Field label="CEP"><input inputMode="numeric" maxLength={9} value={draft.zipCode ?? ""} onChange={(event) => updateDraft("zipCode", event.target.value.replace(/\D/g, "").replace(/(\d{5})(\d)/, "$1-$2"))} onBlur={(event) => fillAddressFromZipCode(event.target.value)} placeholder="00000-000" className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Ao informar o CEP, rua, bairro, cidade e estado são preenchidos automaticamente.</span></Field>
               <Field label="Rua"><input value={draft.street ?? draft.address ?? ""} onChange={(event) => updateDraft("street", event.target.value)} className={inputClass} /></Field>
               <Field label="Número"><input value={draft.addressNumber ?? ""} onChange={(event) => updateDraft("addressNumber", event.target.value)} className={inputClass} /></Field>
               <Field label="Complemento"><input value={draft.addressComplement ?? ""} onChange={(event) => updateDraft("addressComplement", event.target.value)} className={inputClass} /></Field>
