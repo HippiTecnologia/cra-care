@@ -321,11 +321,6 @@ export default function MedicalPatientPage() {
       .map((formula) => `<tr><td>${escapeHtml(formula.name)}</td><td>${escapeHtml(formula.percentage)}%</td></tr>`)
       .join("");
 
-    printWindow.onload = () => {
-      printWindow.focus();
-      printWindow.print();
-    };
-
     printWindow.document.write(`<!doctype html>
       <html lang="pt-BR">
         <head>
@@ -335,9 +330,10 @@ export default function MedicalPatientPage() {
             @page { size: A4; margin: 16mm; }
             * { box-sizing: border-box; }
             body { margin: 0; color: #34292d; font-family: Arial, sans-serif; font-size: 13px; }
-            header { display: flex; align-items: center; justify-content: space-between; border-radius: 16px; background: #a3113a; padding: 18px 22px; color: white; }
-            header img { width: 112px; height: auto; }
+            header { display: flex; align-items: center; justify-content: space-between; border-bottom: 3px solid #a3113a; padding: 0 0 18px; color: #34292d; }
+            header img { width: 72px; height: 72px; border-radius: 14px; }
             h1 { margin: 0; font-size: 22px; }
+            header p { color: #86203b; }
             h2 { margin: 28px 0 18px; border-block: 1px solid #45383c; padding: 9px; text-align: center; font-size: 14px; letter-spacing: .22em; }
             .meta { margin-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; }
             .section { margin-top: 24px; }
@@ -347,11 +343,16 @@ export default function MedicalPatientPage() {
             th:last-child, td:last-child { text-align: right; }
             .signature { margin: 70px auto 0; width: 320px; border-top: 1px solid #45383c; padding-top: 9px; text-align: center; line-height: 1.6; }
             .footer { margin-top: 36px; color: #817578; font-size: 10px; text-align: center; }
-            @media print { .footer { position: fixed; bottom: 0; left: 0; right: 0; } }
+            .document-actions { position: fixed; top: 22px; right: 22px; display: flex; gap: 10px; z-index: 2; }
+            .document-actions button { border: 0; border-radius: 10px; padding: 11px 14px; font: 600 13px Arial, sans-serif; cursor: pointer; }
+            .print { background: #a3113a; color: white; }
+            .close { border: 1px solid #d9c9cc !important; background: white; color: #a3113a; }
+            @media print { .footer { position: fixed; bottom: 0; left: 0; right: 0; } .document-actions { display: none; } }
           </style>
         </head>
         <body>
-          <header><div><h1>Receita médica</h1><p>CRA Care · Centro de Rinite e Alergia</p></div><img src="${window.location.origin}/logo-cra-branca.png" alt="CRA" /></header>
+          <div class="document-actions"><button class="print" onclick="window.print()">Imprimir / salvar em PDF</button><button class="close" onclick="window.close()">Fechar e voltar</button></div>
+          <header><div><h1>Receita médica</h1><p>CRA Care · Centro de Rinite e Alergia</p></div><img src="${window.location.origin}/icon.png" alt="CRA Care" /></header>
           <div class="meta">
             <div><strong>Paciente:</strong> ${escapeHtml(printablePatient.name)}</div>
             <div><strong>CPF:</strong> ${escapeHtml(printablePatient.cpf)}</div>
@@ -368,6 +369,7 @@ export default function MedicalPatientPage() {
         </body>
       </html>`);
     printWindow.document.close();
+    printWindow.focus();
   }
 
   return (
