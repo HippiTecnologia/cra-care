@@ -99,7 +99,9 @@ export type DemoPrescription = {
   posology: string;
   formulas: PrescriptionFormula[];
   notes: string;
-  signatureStatus: "pending" | "signed";
+  signatureStatus: "pending" | "ready" | "signed";
+  signaturePreparedAt?: string;
+  signaturePreparedBy?: string;
 };
 
 export type DemoBatchStatus =
@@ -474,10 +476,17 @@ export function saveDemoPrescription(prescription: DemoPrescription) {
   const saved = readDemoPrescriptions().filter(
     (item) => !initialPrescriptions.some((initial) => initial.id === item.id),
   );
+  const existingIndex = saved.findIndex((item) => item.id === prescription.id);
+
+  if (existingIndex >= 0) {
+    saved[existingIndex] = prescription;
+  } else {
+    saved.unshift(prescription);
+  }
 
   window.sessionStorage.setItem(
     PRESCRIPTIONS_KEY,
-    JSON.stringify([prescription, ...saved]),
+    JSON.stringify(saved),
   );
 
   window.dispatchEvent(new Event(UPDATE_EVENT));
