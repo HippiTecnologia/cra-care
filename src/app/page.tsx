@@ -118,7 +118,7 @@ export default function Home() {
     </p>
 
     <p className="text-sm text-white/70">
-      Uma solução Hippi
+      Uma solução Hippi Care
     </p>
   </div>
 </header>
@@ -153,7 +153,7 @@ export default function Home() {
           </div>
 
           <footer className="relative z-10 text-sm text-white/65">
-            CRA Care © 2026 · Desenvolvido pela Hippi · Gustavo Sabino Rodrigues
+            CRA Care · Uma solução Hippi Care · Desenvolvido por Gustavo Sabino Rodrigues
           </footer>
         </section>
 
