@@ -3,7 +3,9 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { findPatientByCpf, setActivePortalPatient } from "./paciente/patient-portal-store";
+import { setActivePortalPatient } from "./paciente/patient-portal-store";
+import { authEmailForUsername } from "../lib/auth/credentials";
+import { getSupabaseClient } from "../lib/supabase/client";
 
 type UserRole = "Paciente" | "Médico" | "Secretaria" | "Laboratório" | "Administrador";
 
@@ -15,11 +17,6 @@ const roles: UserRole[] = [
   "Administrador",
 ];
 
-const adminDemoCredentials = {
-  email: "adm@cracare.com",
-  password: "CraCare@2026",
-};
-
 export default function Home() {
   const router = useRouter();
   const [selectedRole, setSelectedRole] = useState<UserRole>("Paciente");
@@ -27,63 +24,51 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [message, setMessage] = useState("");
-  
+  const [loading, setLoading] = useState(false);
 
-  const isPatient = selectedRole === "Paciente";
-
-  function handleLogin(event: FormEvent<HTMLFormElement>) {
-  event.preventDefault();
-
-  if (!identifier.trim() || !password.trim()) {
-    setMessage("Preencha os dados de acesso para continuar.");
-    return;
-  }
-
-  if (selectedRole === "Secretaria") {
-    router.push("/secretaria");
-    return;
-  }
-
-  if (selectedRole === "Médico") {
-    router.push("/medico");
-    return;
-  }
-
-  if (selectedRole === "Laboratório") {
-    router.push("/laboratorio");
-    return;
-  }
-
-  if (selectedRole === "Administrador") {
-    if (
-      identifier.trim().toLowerCase() !== adminDemoCredentials.email ||
-      password !== adminDemoCredentials.password
-    ) {
-      setMessage("Acesso ADM inválido. Utilize as credenciais administrativas fornecidas pela Hippi.");
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!identifier.trim() || !password.trim()) {
+      setMessage("Informe usuário e senha para continuar.");
       return;
     }
-    window.sessionStorage.setItem(
-      "cra-care-demo-admin-session",
-      JSON.stringify({ email: adminDemoCredentials.email, signedInAt: new Date().toISOString() }),
-    );
-    router.push("/adm");
-    return;
-  }
-
-  if (selectedRole === "Paciente") {
-    const patient = findPatientByCpf(identifier);
-
-    if (!patient) {
-      setMessage("CPF não encontrado. Solicite seu cadastro à equipe da clínica.");
-      return;
+    setLoading(true);
+    setMessage("");
+    try {
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: authEmailForUsername(identifier),
+        password,
+      });
+      if (error || !data.user) {
+        setMessage("Usuário ou senha inválidos. Se precisar, solicite ajuda à secretaria.");
+        return;
+      }
+      const { data: profile } = await supabase.from("profiles").select("role, must_change_password").eq("id", data.user.id).maybeSingle();
+      if (profile) {
+        if (profile.must_change_password) {
+          router.push("/alterar-senha");
+          return;
+        }
+        const destination = profile.role === "admin" || profile.role === "super_admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : "/medico";
+        if (profile.role === "admin" || profile.role === "super_admin") window.sessionStorage.setItem("cra-care-demo-admin-session", JSON.stringify({ signedInAt: new Date().toISOString() }));
+        router.push(destination);
+        return;
+      }
+      const { data: patient } = await supabase.from("patients").select("id").eq("auth_user_id", data.user.id).maybeSingle();
+      if (!patient) {
+        await supabase.auth.signOut();
+        setMessage("Este acesso ainda não foi vinculado a um perfil. Procure a secretaria.");
+        return;
+      }
+      setActivePortalPatient(patient.id);
+      router.push("/paciente");
+    } catch {
+      setMessage("Não foi possível conectar ao acesso seguro agora. Tente novamente em instantes.");
+    } finally {
+      setLoading(false);
     }
-
-    setActivePortalPatient(patient.id);
-    router.push("/paciente");
-    return;
   }
-
-}
 
   function selectRole(role: UserRole) {
     setSelectedRole(role);
@@ -202,7 +187,7 @@ export default function Home() {
                   htmlFor="identifier"
                   className="mb-2 block text-sm font-semibold text-[#45373b]"
                 >
-                  {isPatient ? "CPF" : "E-mail ou identificação"}
+                  Usuário
                 </label>
 
                 <input
@@ -210,11 +195,7 @@ export default function Home() {
                   type="text"
                   value={identifier}
                   onChange={(event) => setIdentifier(event.target.value)}
-                  placeholder={
-                    isPatient
-                      ? "000.000.000-00"
-                      : "Digite seu acesso profissional"
-                  }
+                  placeholder="Digite seu usuário de acesso"
                   autoComplete="username"
                   className="h-14 w-full rounded-2xl border border-[#e9ded9] bg-white px-4 text-sm outline-none transition placeholder:text-[#aaa0a2] focus:border-[#b91142] focus:ring-4 focus:ring-[#b91142]/10"
                 />
@@ -274,9 +255,10 @@ export default function Home() {
 
               <button
                 type="submit"
+                disabled={loading}
                 className="h-14 w-full rounded-2xl bg-gradient-to-r from-[#b91142] to-[#d32657] text-sm font-bold text-white shadow-[0_15px_35px_rgba(185,17,66,0.25)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_40px_rgba(185,17,66,0.30)]"
               >
-                Entrar no CRA Care
+                {loading ? "Entrando…" : "Entrar no CRA Care"}
               </button>
 
               {message && (
@@ -293,7 +275,7 @@ export default function Home() {
               </p>
 
               <p className="mt-3 text-xs text-[#a09698]">
-                Protótipo visual · Integração com Supabase pendente
+                Acesso seguro protegido pelo CRA Care
               </p>
             </div>
           </div>
