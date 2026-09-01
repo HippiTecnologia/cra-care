@@ -139,6 +139,13 @@ function openPrintableDocument(title: string, sections: { heading: string; text:
 }
 
 function contractSections(patient: DemoPatientRecord, portal: PatientPortalState) {
+  const contractValue = patient.contractValue;
+  const installments = Math.max(1, patient.paymentInstallments ?? 1);
+  const installmentValue = patient.installmentValue ?? (contractValue ? contractValue / installments : undefined);
+  const formatContractMoney = (value?: number) => value && value > 0 ? value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "Não informado";
+  const paymentDetails = installments > 1
+    ? `${patient.paymentMethod ?? "Forma não informada"} · ${installments}x de ${formatContractMoney(installmentValue)}${patient.paymentDueDate ? ` · primeira cobrança em ${formatDate(patient.paymentDueDate)}` : ""}`
+    : patient.paymentMethod ?? "Não informada";
   return [
     {
       heading: "Identificação do paciente",
@@ -158,7 +165,7 @@ function contractSections(patient: DemoPatientRecord, portal: PatientPortalState
     },
     {
       heading: "Valores, pagamento e cancelamento",
-      text: `Tratamento Imunoterápico (Alérgeno Específico) — orientação e planejamento técnico.\nValor: R$ 270,00.\nForma de pagamento: Recorrência.\nMétodo registrado no CRA Care: ${patient.acquisitionMethod ?? "Não informado"}${patient.paymentMethod ? ` · ${patient.paymentMethod}` : ""}.\nO paciente poderá cancelar o tratamento a qualquer momento, mediante pagamento de multa correspondente a 1 mensalidade.`,
+      text: `Tratamento Imunoterápico (Alérgeno Específico) — orientação e planejamento técnico.\nValor total contratado: ${formatContractMoney(contractValue)}.\nMétodo de aquisição: ${patient.acquisitionMethod ?? "Não informado"}.\nForma de pagamento: ${paymentDetails}.\nCondição escolhida: ${patient.agreedCondition ?? "Não informada"}.\nO paciente poderá cancelar o tratamento a qualquer momento, conforme as condições registradas e acordadas com a equipe responsável.`,
     },
     {
       heading: "Possíveis efeitos adversos e crises de rinite",
