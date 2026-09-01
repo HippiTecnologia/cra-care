@@ -55,9 +55,25 @@ export type AdminSaleSnapshot = {
   status: "ativa" | "concluida" | "cancelada";
 };
 
+export type AdminCommissionRecord = {
+  id: string;
+  installmentId: string;
+  saleId: string;
+  patientId: string;
+  patientName: string;
+  doctor: string;
+  paymentId?: string;
+  receivedAt: string;
+  accountingAt: string;
+  receivedValue: number;
+  commissionRate: number;
+  commissionValue: number;
+  paidAt: string;
+};
+
 export type AdminAuditEntry = {
   id: string;
-  entity: "método" | "custo" | "médico" | "venda";
+  entity: "método" | "custo" | "médico" | "venda" | "comissão";
   entityId: string;
   action: string;
   summary: string;
@@ -69,6 +85,7 @@ const METHODS_KEY = "cra-care-admin-methods";
 const COSTS_KEY = "cra-care-admin-costs";
 const DOCTORS_KEY = "cra-care-admin-doctors";
 const SALES_KEY = "cra-care-admin-sales";
+const COMMISSIONS_KEY = "cra-care-admin-commissions";
 const AUDIT_KEY = "cra-care-admin-audit";
 const UPDATE_EVENT = "cra-care-admin-updated";
 
@@ -220,6 +237,45 @@ export function saveAdminDoctor(doctor: AdminDoctor) {
 
 export function readAdminSales() {
   return readStored<AdminSaleSnapshot[]>(SALES_KEY, []);
+}
+
+export function readAdminCommissions() {
+  return readStored<AdminCommissionRecord[]>(COMMISSIONS_KEY, []);
+}
+
+export function markAdminCommissionPaid(record: Omit<AdminCommissionRecord, "id" | "paidAt">) {
+  const current = readAdminCommissions();
+  const existing = current.find((item) => item.installmentId === record.installmentId);
+  if (existing) return existing;
+
+  const saved: AdminCommissionRecord = {
+    ...record,
+    id: crypto.randomUUID(),
+    paidAt: new Date().toISOString(),
+  };
+  audit(
+    "comissão",
+    saved.installmentId,
+    "Comissão paga",
+    `${saved.doctor} · ${saved.patientName} · R$ ${saved.commissionValue.toFixed(2)} · competência ${saved.accountingAt.slice(0, 10)}`,
+  );
+  writeStored(COMMISSIONS_KEY, [saved, ...current]);
+  return saved;
+}
+
+export function reverseAdminCommissionPayment(installmentId: string) {
+  const current = readAdminCommissions();
+  const removed = current.find((item) => item.installmentId === installmentId);
+  if (!removed) return false;
+
+  audit(
+    "comissão",
+    removed.installmentId,
+    "Pagamento de comissão estornado",
+    `${removed.doctor} · ${removed.patientName} · R$ ${removed.commissionValue.toFixed(2)}`,
+  );
+  writeStored(COMMISSIONS_KEY, current.filter((item) => item.installmentId !== installmentId));
+  return true;
 }
 
 export function treatmentMethodTotal(methodRecord: AdminTreatmentMethod) {

@@ -16,15 +16,19 @@ import {
 } from "../medico/patient-store";
 import {
   AdminAuditEntry,
+  AdminCommissionRecord,
   AdminDoctor,
   AdminFixedCost,
   AdminSaleSnapshot,
   AdminTreatmentMethod,
+  markAdminCommissionPaid,
   readAdminAudit,
+  readAdminCommissions,
   readAdminCosts,
   readAdminDoctors,
   readAdminMethods,
   removeAdminCost,
+  reverseAdminCommissionPayment,
   saveAdminCost,
   saveAdminDoctor,
   saveAdminMethod,
@@ -46,6 +50,8 @@ type InstallmentView = {
   payment?: PatientPaymentRecord;
   receivedValue: number;
   commissionValue: number;
+  commissionAt?: string;
+  commissionRecord?: AdminCommissionRecord;
   status: "Recebida" | "Pendente" | "Vencida" | "Cancelada";
   invoice?: DemoInvoice;
 };
@@ -103,7 +109,25 @@ function addMonths(value: string, months: number) {
   return base.toISOString().slice(0, 10);
 }
 
-function createInstallments(sales: AdminSaleSnapshot[], patients: DemoPatientRecord[], invoices: DemoInvoice[]): InstallmentView[] {
+function addDays(value: string, days: number) {
+  const base = value.includes("T") ? new Date(value) : new Date(`${value}T12:00:00`);
+  base.setDate(base.getDate() + days);
+  return base.toISOString().slice(0, 10);
+}
+
+function commissionDate(payment?: PatientPaymentRecord) {
+  if (!payment) return undefined;
+  const method = payment.method.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const isCreditCard = method.includes("cartao") && !method.includes("debito");
+  return isCreditCard ? addDays(payment.paidAt, 30) : payment.paidAt.slice(0, 10);
+}
+
+function createInstallments(
+  sales: AdminSaleSnapshot[],
+  patients: DemoPatientRecord[],
+  invoices: DemoInvoice[],
+  commissions: AdminCommissionRecord[],
+): InstallmentView[] {
   const today = new Date().toISOString().slice(0, 10);
   return sales.flatMap((sale) => {
     const count = Math.max(1, sale.installments);
@@ -119,10 +143,12 @@ function createInstallments(sales: AdminSaleSnapshot[], patients: DemoPatientRec
       const scheduledValue = (baseCents + (index < remainder ? 1 : 0)) / 100;
       const payment = payments.find((item) => item.installmentNumber === index + 1) ?? withoutNumber[index];
       const dueAt = addMonths(sale.contractedAt, index);
+      const installmentId = `${sale.id}-${index + 1}`;
+      const commissionRecord = commissions.find((item) => item.installmentId === installmentId);
       const status: InstallmentView["status"] = sale.status === "cancelada" ? "Cancelada" : payment ? "Recebida" : dueAt < today ? "Vencida" : "Pendente";
       const receivedValue = payment?.amount ?? 0;
       return {
-        id: `${sale.id}-${index + 1}`,
+        id: installmentId,
         sale,
         number: index + 1,
         scheduledValue,
@@ -130,6 +156,8 @@ function createInstallments(sales: AdminSaleSnapshot[], patients: DemoPatientRec
         payment,
         receivedValue,
         commissionValue: receivedValue * (sale.commissionRateSnapshot / 100),
+        commissionAt: commissionDate(payment),
+        commissionRecord,
         status,
         invoice: patientInvoices[index] ?? (payment ? patientInvoices.at(-1) : undefined),
       };
@@ -160,6 +188,7 @@ export default function AdminPage() {
   const [costs, setCosts] = useState<AdminFixedCost[]>([]);
   const [doctors, setDoctors] = useState<AdminDoctor[]>([]);
   const [sales, setSales] = useState<AdminSaleSnapshot[]>([]);
+  const [commissions, setCommissions] = useState<AdminCommissionRecord[]>([]);
   const [audit, setAudit] = useState<AdminAuditEntry[]>([]);
   const [invoices, setInvoices] = useState<DemoInvoice[]>([]);
   const [message, setMessage] = useState("");
@@ -172,6 +201,9 @@ export default function AdminPage() {
   const [costDraft, setCostDraft] = useState<AdminFixedCost>(blankCost);
   const [methodDraft, setMethodDraft] = useState<AdminTreatmentMethod>(blankMethod);
   const [doctorRates, setDoctorRates] = useState<Record<string, number>>({});
+  const [commissionMonth, setCommissionMonth] = useState("");
+  const [commissionDoctorFilter, setCommissionDoctorFilter] = useState("Todos");
+  const [commissionStatusFilter, setCommissionStatusFilter] = useState("Disponíveis");
   const costFormRef = useRef<HTMLDivElement>(null);
   const methodFormRef = useRef<HTMLDivElement>(null);
 
@@ -191,6 +223,7 @@ export default function AdminPage() {
       setDoctors(nextDoctors);
       setDoctorRates((current) => Object.fromEntries(nextDoctors.map((doctor) => [doctor.id, current[doctor.id] ?? doctor.commissionRate])));
       setSales(nextSales);
+      setCommissions(readAdminCommissions());
       setAudit(readAdminAudit());
       setInvoices(readDemoInvoices());
     };
@@ -203,7 +236,7 @@ export default function AdminPage() {
     return () => { unsubscribeAdmin(); unsubscribePatients(); };
   }, [router]);
 
-  const installments = useMemo(() => createInstallments(sales, patients, invoices), [invoices, patients, sales]);
+  const installments = useMemo(() => createInstallments(sales, patients, invoices, commissions), [commissions, invoices, patients, sales]);
   const activeSales = sales.filter((sale) => sale.status !== "cancelada");
   const received = installments.reduce((sum, installment) => sum + installment.receivedValue, 0);
   const pending = installments.filter((installment) => installment.status === "Pendente" || installment.status === "Vencida").reduce((sum, installment) => sum + installment.scheduledValue, 0);
@@ -228,8 +261,13 @@ export default function AdminPage() {
         const paidMonth = monthKey(installment.payment.paidAt);
         const paid = get(paidMonth);
         paid.received += installment.receivedValue;
-        paid.commissions += installment.commissionValue;
         map.set(paidMonth, paid);
+      }
+      if (installment.commissionAt) {
+        const commissionMonth = monthKey(installment.commissionAt);
+        const commission = get(commissionMonth);
+        commission.commissions += installment.commissionValue;
+        map.set(commissionMonth, commission);
       }
     });
     return Array.from(map.entries()).map(([month, values]) => ({ month, ...values })).sort((a, b) => a.month.localeCompare(b.month));
@@ -251,7 +289,8 @@ export default function AdminPage() {
   const filteredSales = baseFilteredSales.filter((sale) => inReportPeriod(sale.contractedAt));
   const baseInstallments = installments.filter((installment) => baseFilteredSales.some((sale) => sale.id === installment.sale.id));
   const filteredInstallments = baseInstallments.filter((installment) => {
-    if (reportType === "Recebimentos" || reportType === "Comissões") return inReportPeriod(installment.payment?.paidAt);
+    if (reportType === "Recebimentos") return inReportPeriod(installment.payment?.paidAt);
+    if (reportType === "Comissões") return inReportPeriod(installment.commissionAt);
     return reportType === "Parcelas" ? inReportPeriod(installment.dueAt) : inReportPeriod(installment.sale.contractedAt);
   });
   const filteredInvoices = invoices.filter((invoice) => baseFilteredSales.some((sale) => sale.patientId === invoice.patientId) && inReportPeriod(invoice.uploadedAt));
@@ -264,6 +303,21 @@ export default function AdminPage() {
     return matchesDoctor && matchesPatient && inReportPeriod(patient.createdAt);
   });
   const reportRows = buildReportRows(reportType, filteredSales, filteredInstallments, filteredPatients, filteredInvoices, filteredCosts);
+
+  const commissionMonths = useMemo(
+    () => Array.from(new Set(installments.flatMap((item) => item.commissionAt ? [monthKey(item.commissionAt)] : []))).sort((first, second) => second.localeCompare(first)),
+    [installments],
+  );
+  const selectedCommissionMonth = commissionMonths.includes(commissionMonth) ? commissionMonth : (commissionMonths[0] ?? "");
+  const commissionInstallments = useMemo(() => installments.filter((item) => {
+    if (item.status !== "Recebida" || !item.commissionAt) return false;
+    const matchesMonth = !selectedCommissionMonth || monthKey(item.commissionAt) === selectedCommissionMonth;
+    const matchesDoctor = commissionDoctorFilter === "Todos" || item.sale.doctor === commissionDoctorFilter;
+    const matchesStatus = commissionStatusFilter === "Todas" || (commissionStatusFilter === "Pagas" ? Boolean(item.commissionRecord) : !item.commissionRecord);
+    return matchesMonth && matchesDoctor && matchesStatus;
+  }), [commissionDoctorFilter, commissionStatusFilter, installments, selectedCommissionMonth]);
+  const commissionAvailable = commissionInstallments.filter((item) => !item.commissionRecord).reduce((sum, item) => sum + item.commissionValue, 0);
+  const commissionPaid = commissionInstallments.filter((item) => item.commissionRecord).reduce((sum, item) => sum + item.commissionValue, 0);
 
   const doctorPerformance = doctors.map((doctor) => {
     const doctorSales = activeSales.filter((sale) => sale.doctor === doctor.name);
@@ -365,6 +419,31 @@ export default function AdminPage() {
     if (!invoice || !openDemoInvoicePdf(invoice)) setMessage("Nota fiscal indisponível ou abertura de janelas bloqueada.");
   }
 
+  function markCommissionAsPaid(installment: InstallmentView) {
+    if (!installment.payment || !installment.commissionAt || installment.commissionRecord) return;
+    markAdminCommissionPaid({
+      installmentId: installment.id,
+      saleId: installment.sale.id,
+      patientId: installment.sale.patientId,
+      patientName: installment.sale.patientName,
+      doctor: installment.sale.doctor,
+      paymentId: installment.payment.id,
+      receivedAt: installment.payment.paidAt,
+      accountingAt: installment.commissionAt,
+      receivedValue: installment.receivedValue,
+      commissionRate: installment.sale.commissionRateSnapshot,
+      commissionValue: installment.commissionValue,
+    });
+    setMessage(`Comissão de ${formatMoney(installment.commissionValue)} marcada como paga para ${installment.sale.doctor}.`);
+  }
+
+  function reverseCommissionPayment(installment: InstallmentView) {
+    if (!installment.commissionRecord) return;
+    if (!window.confirm(`Estornar o pagamento da comissão de ${formatMoney(installment.commissionValue)} para ${installment.sale.doctor}?`)) return;
+    reverseAdminCommissionPayment(installment.id);
+    setMessage("Pagamento de comissão estornado. A parcela volta para a lista de disponíveis.");
+  }
+
   const maxMonthly = Math.max(1, ...monthly.map((item) => Math.max(item.expected, item.received)));
 
   if (!authorized) {
@@ -401,7 +480,17 @@ export default function AdminPage() {
 
           {section === "medicos" && <div className="mt-7 space-y-5"><Panel title="Cadastro e desempenho por médico" subtitle="A comissão definida aqui só vale para novas vendas"><div className="mt-5 grid gap-4 xl:grid-cols-2">{doctorPerformance.map((item) => <article key={item.doctor.id} className="rounded-2xl border border-[#eee5e0] p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-bold">{item.doctor.name}</h3><p className="mt-1 text-xs text-[#817578]">{item.doctor.crm ? `CRM ${item.doctor.crm}` : "CRM a cadastrar"} · {item.patients} paciente(s)</p></div><div className="flex items-end gap-2"><Input compact label="Comissão (%)" type="number" value={String(doctorRates[item.doctor.id] ?? item.doctor.commissionRate)} onChange={(value) => setDoctorRates((current) => ({ ...current, [item.doctor.id]: Number(value) }))} /><button type="button" onClick={() => updateDoctorCommission(item.doctor)} className="h-10 rounded-xl bg-[#a3113a] px-3 text-xs font-bold text-white">Salvar</button></div></div><div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3"><Mini label="Tratamentos" value={String(item.treatments)} /><Mini label="Total vendido" value={formatMoney(item.sold)} /><Mini label="Recebido" value={formatMoney(item.received)} /><Mini label="Pendente" value={formatMoney(item.pending)} /><Mini label="Comissões" value={formatMoney(item.commissions)} /><Mini label="Percentual atual" value={`${item.doctor.commissionRate}%`} /></div><div className="mt-4"><p className="text-xs font-bold text-[#817578]">Comparativo por mês</p><div className="mt-2 flex gap-2 overflow-x-auto">{monthly.slice(-6).map((month) => { const amount = installments.filter((installment) => installment.sale.doctor === item.doctor.name && installment.payment && monthKey(installment.payment.paidAt) === month.month).reduce((sum, installment) => sum + installment.receivedValue, 0); return <div key={month.month} className="min-w-24 rounded-xl bg-[#fbf7f5] p-3"><p className="text-[10px] capitalize text-[#817578]">{monthLabel(month.month)}</p><p className="mt-1 text-xs font-bold">{formatMoney(amount)}</p></div>; })}</div></div></article>)}</div></Panel></div>}
 
-          {section === "comissoes" && <div className="mt-7 space-y-5"><div className="grid gap-4 sm:grid-cols-3"><Kpi label="Comissões geradas" value={formatMoney(installments.reduce((sum, item) => sum + item.commissionValue, 0))} detail="Somente parcelas recebidas" tone="wine" /><Kpi label="Parcelas com comissão" value={String(installments.filter((item) => item.receivedValue > 0).length)} detail="Recebimentos efetivos" tone="green" /><Kpi label="Base recebida" value={formatMoney(received)} detail="Valor usado no cálculo" tone="blue" /></div><Panel title="Comissão por parcela recebida" subtitle="O percentual histórico fica congelado na venda"><InstallmentTable installments={installments.filter((item) => item.status === "Recebida")} showCommission openInvoice={openInvoice} /></Panel></div>}
+          {section === "comissoes" && <div className="mt-7 space-y-5">
+            <Panel title="Fechamento de comissões" subtitle="A comissão só entra uma vez: PIX e débito no dia do pagamento; cartão 30 dias após o recebimento.">
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <label className="block text-xs font-semibold text-[#66595d]">Competência<select value={selectedCommissionMonth} onChange={(event) => setCommissionMonth(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#e6ddd9] bg-white px-3 outline-none focus:border-[#a3113a]">{commissionMonths.length === 0 ? <option value="">Nenhum recebimento</option> : commissionMonths.map((month) => <option key={month} value={month}>{monthLabel(month)}</option>)}</select></label>
+                <Select label="Médico" value={commissionDoctorFilter} onChange={setCommissionDoctorFilter} options={["Todos", ...doctors.map((doctor) => doctor.name)]} />
+                <Select label="Situação" value={commissionStatusFilter} onChange={setCommissionStatusFilter} options={["Disponíveis", "Pagas", "Todas"]} />
+              </div>
+            </Panel>
+            <div className="grid gap-4 sm:grid-cols-3"><Kpi label="Comissões disponíveis" value={formatMoney(commissionAvailable)} detail="Prontas para fechar no período" tone="wine" /><Kpi label="Comissões já pagas" value={formatMoney(commissionPaid)} detail="Baixadas no período filtrado" tone="green" /><Kpi label="Parcelas no fechamento" value={String(commissionInstallments.length)} detail="Recebimentos sem duplicidade" tone="blue" /></div>
+            <Panel title={selectedCommissionMonth ? `Comissões de ${monthLabel(selectedCommissionMonth)}` : "Comissões por parcela recebida"} subtitle="O percentual da venda fica congelado no histórico; marque como paga ao realizar o repasse ao médico."><InstallmentTable installments={commissionInstallments} showCommission openInvoice={openInvoice} onMarkCommission={markCommissionAsPaid} onReverseCommission={reverseCommissionPayment} /></Panel>
+          </div>}
 
           {section === "parcelas" && <div className="mt-7 space-y-5"><Panel title="Venda → Parcela → Recebimento → Comissão → Nota fiscal" subtitle="Rastreabilidade financeira completa"><InstallmentTable installments={installments} showCommission openInvoice={openInvoice} /></Panel></div>}
 
@@ -419,7 +508,7 @@ function buildReportRows(type: ReportType, sales: AdminSaleSnapshot[], installme
   if (type === "Recebimentos") return installments.filter((item) => item.payment).map((item) => ({ Paciente: item.sale.patientName, Médico: item.sale.doctor, Parcela: `${item.number}/${item.sale.installments}`, Recebido: formatMoney(item.receivedValue), "Data de pagamento": formatDate(item.payment?.paidAt), Forma: item.payment?.method ?? item.sale.paymentMethod, Status: item.status }));
   if (type === "Parcelas") return installments.map((item) => ({ Paciente: item.sale.patientName, Médico: item.sale.doctor, Parcela: `${item.number}/${item.sale.installments}`, Valor: formatMoney(item.scheduledValue), Vencimento: formatDate(item.dueAt), Pagamento: formatDate(item.payment?.paidAt), Status: item.status }));
   if (type === "Notas fiscais") return invoices.filter((invoice) => sales.some((sale) => sale.patientId === invoice.patientId)).map((invoice) => ({ Paciente: invoice.patientName, CPF: invoice.patientCpf, Arquivo: invoice.fileName, Envio: formatDate(invoice.uploadedAt, true), Responsável: invoice.uploadedBy }));
-  if (type === "Comissões") return installments.filter((item) => item.payment).map((item) => ({ Médico: item.sale.doctor, Paciente: item.sale.patientName, Parcela: `${item.number}/${item.sale.installments}`, "Valor da parcela": formatMoney(item.receivedValue), Percentual: `${item.sale.commissionRateSnapshot}%`, Comissão: formatMoney(item.commissionValue), Recebimento: formatDate(item.payment?.paidAt), "Nota fiscal": item.invoice?.fileName ?? "Não vinculada" }));
+  if (type === "Comissões") return installments.filter((item) => item.payment).map((item) => ({ Médico: item.sale.doctor, Paciente: item.sale.patientName, Parcela: `${item.number}/${item.sale.installments}`, "Valor da parcela": formatMoney(item.receivedValue), Percentual: `${item.sale.commissionRateSnapshot}%`, Comissão: formatMoney(item.commissionValue), "Data do pagamento": formatDate(item.payment?.paidAt), "Data para comissão": formatDate(item.commissionAt), "Status da comissão": item.commissionRecord ? `Paga em ${formatDate(item.commissionRecord.paidAt)}` : "Disponível para pagamento", "Nota fiscal": item.invoice?.fileName ?? "Não vinculada" }));
   if (type === "Custos") return costs.map((cost) => ({ Descrição: cost.description, Categoria: cost.category, Valor: formatMoney(cost.amount), Atualização: formatDate(cost.updatedAt, true), Situação: cost.active ? "Ativo" : "Inativo" }));
   if (type === "Vendas por médico") return Array.from(new Set(sales.map((sale) => sale.doctor))).map((doctor) => { const doctorSales = sales.filter((sale) => sale.doctor === doctor); const doctorInstallments = installments.filter((item) => item.sale.doctor === doctor); return { Médico: doctor, Tratamentos: doctorSales.length, Pacientes: new Set(doctorSales.map((sale) => sale.patientId)).size, Vendido: formatMoney(doctorSales.reduce((sum, sale) => sum + sale.contractedValue, 0)), Recebido: formatMoney(doctorInstallments.reduce((sum, item) => sum + item.receivedValue, 0)), Pendente: formatMoney(doctorInstallments.filter((item) => item.status !== "Recebida" && item.status !== "Cancelada").reduce((sum, item) => sum + item.scheduledValue, 0)), Comissões: formatMoney(doctorInstallments.reduce((sum, item) => sum + item.commissionValue, 0)) }; });
   if (type === "Conversões") return patients.map((patient) => ({ Paciente: patient.name, CPF: patient.cpf, Médico: patient.doctor, Status: patient.status ?? "em-conversa", Convertido: sales.some((sale) => sale.patientId === patient.id && sale.status !== "cancelada") ? "Sim" : "Não" }));
@@ -437,4 +526,4 @@ function Th({ children }: { children: ReactNode }) { return <th className="borde
 function Td({ children, strong = false, tone }: { children: ReactNode; strong?: boolean; tone?: "green" | "gold" }) { return <td className={`border-b border-[#eee7e3] px-3 py-3 ${strong ? "font-bold" : ""} ${tone === "green" ? "text-[#187157]" : tone === "gold" ? "text-[#966419]" : ""}`}>{children}</td>; }
 function SalesTable({ sales }: { sales: AdminSaleSnapshot[] }) { return <div className="mt-4 overflow-x-auto"><table className={tableClass}><thead><tr><Th>Paciente</Th><Th>Médico</Th><Th>Método</Th><Th>Valor</Th><Th>Condição</Th><Th>Status</Th></tr></thead><tbody>{sales.map((sale) => <tr key={sale.id}><Td strong>{sale.patientName}</Td><Td>{sale.doctor}</Td><Td>{sale.methodName} · v{sale.methodVersion}</Td><Td strong>{formatMoney(sale.contractedValue)}</Td><Td>{sale.condition} · {sale.installments}x</Td><Td>{sale.status}</Td></tr>)}</tbody></table>{sales.length === 0 && <p className="py-8 text-center text-sm text-[#817578]">Nenhuma venda sincronizada.</p>}</div>; }
 function ReportPreview({ rows }: { rows: ReportRow[] }) { const headers = rows.length ? Object.keys(rows[0]) : []; return <div className="mt-4 max-h-[560px] overflow-auto"><table className={tableClass}><thead className="sticky top-0 bg-white"><tr>{headers.map((header) => <Th key={header}>{header}</Th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{headers.map((header) => <Td key={header}>{row[header]}</Td>)}</tr>)}</tbody></table>{rows.length === 0 && <p className="py-10 text-center text-sm text-[#817578]">Nenhum registro para os filtros selecionados.</p>}</div>; }
-function InstallmentTable({ installments, showCommission, openInvoice }: { installments: InstallmentView[]; showCommission?: boolean; openInvoice: (invoice?: DemoInvoice) => void }) { return <div className="mt-4 max-h-[680px] overflow-auto"><table className="w-full min-w-[1320px] text-left text-sm"><thead className="sticky top-0 bg-white"><tr><Th>Paciente</Th><Th>Médico</Th><Th>Tratamento</Th><Th>Venda</Th><Th>Parcela</Th><Th>Valor</Th><Th>Vencimento</Th><Th>Pagamento</Th>{showCommission && <><Th>% comissão</Th><Th>Comissão</Th></>}<Th>Status</Th><Th>Nota fiscal</Th></tr></thead><tbody>{installments.map((item) => <tr key={item.id}><Td strong>{item.sale.patientName}</Td><Td>{item.sale.doctor}</Td><Td>{item.sale.treatment}</Td><Td>{formatMoney(item.sale.contractedValue)}</Td><Td>{item.number}/{item.sale.installments}</Td><Td strong>{formatMoney(item.scheduledValue)}</Td><Td>{formatDate(item.dueAt)}</Td><Td>{formatDate(item.payment?.paidAt)}</Td>{showCommission && <><Td>{item.sale.commissionRateSnapshot}%</Td><Td>{formatMoney(item.commissionValue)}</Td></>}<Td><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${item.status === "Recebida" ? "bg-[#edf8f3] text-[#187157]" : item.status === "Vencida" ? "bg-[#fff0ef] text-[#b54843]" : "bg-[#fff4e4] text-[#966419]"}`}>{item.status}</span></Td><Td>{item.invoice ? <div className="flex gap-2"><button type="button" onClick={() => openInvoice(item.invoice)} className="font-bold text-[#a3113a]">Abrir</button><a href={item.invoice.fileData} download={item.invoice.fileName} className="font-bold text-[#187157]">Baixar</a></div> : "Não vinculada"}</Td></tr>)}</tbody></table>{installments.length === 0 && <p className="py-10 text-center text-sm text-[#817578]">Nenhuma parcela encontrada.</p>}</div>; }
+function InstallmentTable({ installments, showCommission, openInvoice, onMarkCommission, onReverseCommission }: { installments: InstallmentView[]; showCommission?: boolean; openInvoice: (invoice?: DemoInvoice) => void; onMarkCommission?: (installment: InstallmentView) => void; onReverseCommission?: (installment: InstallmentView) => void }) { return <div className="mt-4 max-h-[680px] overflow-auto"><table className="w-full min-w-[1320px] text-left text-sm"><thead className="sticky top-0 bg-white"><tr><Th>Paciente</Th><Th>Médico</Th><Th>Tratamento</Th><Th>Venda</Th><Th>Parcela</Th><Th>Valor</Th><Th>Vencimento</Th><Th>Pagamento</Th>{showCommission && <><Th>% comissão</Th><Th>Comissão</Th><Th>Data p/ comissão</Th><Th>Situação comissão</Th>{onMarkCommission && <Th>Ação</Th>}</>}<Th>Status</Th><Th>Nota fiscal</Th></tr></thead><tbody>{installments.map((item) => <tr key={item.id}><Td strong>{item.sale.patientName}</Td><Td>{item.sale.doctor}</Td><Td>{item.sale.treatment}</Td><Td>{formatMoney(item.sale.contractedValue)}</Td><Td>{item.number}/{item.sale.installments}</Td><Td strong>{formatMoney(item.scheduledValue)}</Td><Td>{formatDate(item.dueAt)}</Td><Td>{formatDate(item.payment?.paidAt)}</Td>{showCommission && <><Td>{item.sale.commissionRateSnapshot}%</Td><Td>{formatMoney(item.commissionValue)}</Td><Td>{formatDate(item.commissionAt)}</Td><Td><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${item.commissionRecord ? "bg-[#edf8f3] text-[#187157]" : "bg-[#fff4e4] text-[#966419]"}`}>{item.commissionRecord ? `Paga ${formatDate(item.commissionRecord.paidAt)}` : "Disponível"}</span></Td>{onMarkCommission && <Td>{item.commissionRecord ? <button type="button" onClick={() => onReverseCommission?.(item)} className="font-bold text-[#a3113a]">Estornar</button> : <button type="button" onClick={() => onMarkCommission(item)} className="rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-bold text-white">Marcar como paga</button>}</Td>}</>}<Td><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${item.status === "Recebida" ? "bg-[#edf8f3] text-[#187157]" : item.status === "Vencida" ? "bg-[#fff0ef] text-[#b54843]" : "bg-[#fff4e4] text-[#966419]"}`}>{item.status}</span></Td><Td>{item.invoice ? <div className="flex gap-2"><button type="button" onClick={() => openInvoice(item.invoice)} className="font-bold text-[#a3113a]">Abrir</button><a href={item.invoice.fileData} download={item.invoice.fileName} className="font-bold text-[#187157]">Baixar</a></div> : "Não vinculada"}</Td></tr>)}</tbody></table>{installments.length === 0 && <p className="py-10 text-center text-sm text-[#817578]">Nenhuma parcela encontrada.</p>}</div>; }
