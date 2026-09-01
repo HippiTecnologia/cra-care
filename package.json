@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "bootstrap:access": "node --env-file=.env.local scripts/bootstrap-cra-access.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
