@@ -30,6 +30,7 @@ export type AdminDoctor = {
   name: string;
   crm?: string;
   commissionRate: number;
+  commissionPerBottle?: number;
   active: boolean;
   updatedAt: string;
 };
@@ -51,6 +52,7 @@ export type AdminSaleSnapshot = {
   condition: "À vista" | "Parcelado";
   installments: number;
   paymentMethod: string;
+  firstPaymentDueAt?: string;
   commissionRateSnapshot: number;
   bottleCount?: number;
   commissionPerBottleSnapshot?: number;
@@ -92,7 +94,7 @@ const SALES_KEY = "cra-care-admin-sales";
 const COMMISSIONS_KEY = "cra-care-admin-commissions";
 const AUDIT_KEY = "cra-care-admin-audit";
 const UPDATE_EVENT = "cra-care-admin-updated";
-export const COMMISSION_PER_BOTTLE = 64;
+export const COMMISSION_PER_BOTTLE = 68;
 
 const initialMethods: AdminTreatmentMethod[] = [
   method("metodo-1-0", "Método 1.0", "Método", 320, "Asaas", 1, 1),
@@ -113,8 +115,8 @@ const initialCosts: AdminFixedCost[] = [
 ];
 
 const initialDoctors: AdminDoctor[] = [
-  { id: "doctor-flavio", name: "Dr. Flavio Mizoguchi", crm: "24603", commissionRate: 20, active: true, updatedAt: "2026-08-26T10:00:00" },
-  { id: "doctor-camila", name: "Dra. Camila Rodrigues", commissionRate: 15, active: true, updatedAt: "2026-08-26T10:00:00" },
+  { id: "doctor-flavio", name: "Dr. Flavio Mizoguchi", crm: "24603", commissionRate: 20, commissionPerBottle: COMMISSION_PER_BOTTLE, active: true, updatedAt: "2026-08-26T10:00:00" },
+  { id: "doctor-camila", name: "Dra. Camila Rodrigues", commissionRate: 15, commissionPerBottle: COMMISSION_PER_BOTTLE, active: true, updatedAt: "2026-08-26T10:00:00" },
 ];
 
 function method(
@@ -235,7 +237,7 @@ export function saveAdminDoctor(doctor: AdminDoctor) {
   const saved = { ...doctor, updatedAt: new Date().toISOString() };
   if (index >= 0) current[index] = saved;
   else current.unshift(saved);
-  audit("médico", saved.id, previous ? "Edição de comissão" : "Cadastro", `${saved.name} · comissão fixa de R$ ${COMMISSION_PER_BOTTLE.toFixed(2)} por frasco`);
+  audit("médico", saved.id, previous ? "Edição de comissão" : "Cadastro", `${saved.name} · comissão de R$ ${(saved.commissionPerBottle ?? COMMISSION_PER_BOTTLE).toFixed(2)} por frasco`);
   writeStored(DOCTORS_KEY, current);
   return saved;
 }
@@ -322,11 +324,12 @@ export function synchronizeAdminSales(
   let changed = current.length !== stored.length;
   const synchronized = current.map((sale) => {
     const patient = patients.find((item) => item.id === sale.patientId);
-    if (!patient) return sale;
+    const needsCommissionUpdate = sale.commissionPerBottleSnapshot === 64;
+    if (!patient) return needsCommissionUpdate ? { ...sale, commissionPerBottleSnapshot: COMMISSION_PER_BOTTLE } : sale;
     const status = saleStatus(patient);
-    if (status === sale.status) return sale;
+    if (status === sale.status && !needsCommissionUpdate) return sale;
     changed = true;
-    return { ...sale, status };
+    return { ...sale, status, ...(needsCommissionUpdate ? { commissionPerBottleSnapshot: COMMISSION_PER_BOTTLE } : {}) };
   });
 
   patients
@@ -368,9 +371,10 @@ export function synchronizeAdminSales(
         condition,
         installments,
         paymentMethod: patient.paymentMethod ?? selectedMethod.paymentMethod,
+        firstPaymentDueAt: patient.paymentDueDate ?? addMonthsToDate(patient.startDate ?? patient.createdAt, 1),
         commissionRateSnapshot: doctor?.commissionRate ?? 0,
         bottleCount: bottlesForMethod(patient.acquisitionMethod ?? selectedMethod.name),
-        commissionPerBottleSnapshot: COMMISSION_PER_BOTTLE,
+        commissionPerBottleSnapshot: doctor?.commissionPerBottle ?? COMMISSION_PER_BOTTLE,
         status: saleStatus(patient),
       });
       changed = true;
@@ -390,6 +394,15 @@ function bottlesForMethod(methodName: string) {
   if (normalized.includes("metodo 1.0") || normalized.includes("metodo 1.1")) return 2;
   if (normalized.includes("recorrente") || normalized.includes("6 meses") || normalized.includes("tratamento de 6")) return 3;
   return 1;
+}
+
+function addMonthsToDate(value: string, months: number) {
+  const date = new Date(value.includes("T") ? value : `${value}T12:00:00`);
+  const day = date.getDate();
+  date.setDate(1);
+  date.setMonth(date.getMonth() + months);
+  date.setDate(Math.min(day, new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()));
+  return date.toISOString().slice(0, 10);
 }
 
 export function readAdminAudit() {
