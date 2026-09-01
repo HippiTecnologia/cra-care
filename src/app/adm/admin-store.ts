@@ -52,6 +52,8 @@ export type AdminSaleSnapshot = {
   installments: number;
   paymentMethod: string;
   commissionRateSnapshot: number;
+  bottleCount?: number;
+  commissionPerBottleSnapshot?: number;
   status: "ativa" | "concluida" | "cancelada";
 };
 
@@ -67,6 +69,8 @@ export type AdminCommissionRecord = {
   accountingAt: string;
   receivedValue: number;
   commissionRate: number;
+  bottleCount?: number;
+  commissionPerBottle?: number;
   commissionValue: number;
   paidAt: string;
 };
@@ -88,6 +92,7 @@ const SALES_KEY = "cra-care-admin-sales";
 const COMMISSIONS_KEY = "cra-care-admin-commissions";
 const AUDIT_KEY = "cra-care-admin-audit";
 const UPDATE_EVENT = "cra-care-admin-updated";
+export const COMMISSION_PER_BOTTLE = 64;
 
 const initialMethods: AdminTreatmentMethod[] = [
   method("metodo-1-0", "Método 1.0", "Método", 320, "Asaas", 1, 1),
@@ -230,7 +235,7 @@ export function saveAdminDoctor(doctor: AdminDoctor) {
   const saved = { ...doctor, updatedAt: new Date().toISOString() };
   if (index >= 0) current[index] = saved;
   else current.unshift(saved);
-  audit("médico", saved.id, previous ? "Edição de comissão" : "Cadastro", `${saved.name} · ${saved.commissionRate}%${previous ? ` (antes ${previous.commissionRate}%)` : ""}`);
+  audit("médico", saved.id, previous ? "Edição de comissão" : "Cadastro", `${saved.name} · comissão fixa de R$ ${COMMISSION_PER_BOTTLE.toFixed(2)} por frasco`);
   writeStored(DOCTORS_KEY, current);
   return saved;
 }
@@ -364,6 +369,8 @@ export function synchronizeAdminSales(
         installments,
         paymentMethod: patient.paymentMethod ?? selectedMethod.paymentMethod,
         commissionRateSnapshot: doctor?.commissionRate ?? 0,
+        bottleCount: bottlesForMethod(patient.acquisitionMethod ?? selectedMethod.name),
+        commissionPerBottleSnapshot: COMMISSION_PER_BOTTLE,
         status: saleStatus(patient),
       });
       changed = true;
@@ -375,6 +382,14 @@ export function synchronizeAdminSales(
     window.dispatchEvent(new Event(UPDATE_EVENT));
   }
   return synchronized;
+}
+
+function bottlesForMethod(methodName: string) {
+  const normalized = methodName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (normalized.includes("por frasco")) return 1;
+  if (normalized.includes("metodo 1.0") || normalized.includes("metodo 1.1")) return 2;
+  if (normalized.includes("recorrente") || normalized.includes("6 meses") || normalized.includes("tratamento de 6")) return 3;
+  return 1;
 }
 
 export function readAdminAudit() {
