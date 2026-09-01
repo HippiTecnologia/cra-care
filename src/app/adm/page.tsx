@@ -12,6 +12,7 @@ import {
   openDemoInvoicePdf,
   readDemoInvoices,
   readDemoPatients,
+  saveDemoPatient,
   subscribeDemoPatients,
 } from "../medico/patient-store";
 import {
@@ -28,6 +29,7 @@ import {
   readAdminCosts,
   readAdminDoctors,
   readAdminMethods,
+  readAdminSales,
   removeAdminCost,
   reverseAdminCommissionPayment,
   saveAdminCost,
@@ -451,6 +453,27 @@ export default function AdminPage() {
     setMessage("Pagamento de comissão estornado. A parcela volta para a lista de disponíveis.");
   }
 
+  function loadCommissionDemo() {
+    const demoPatients: DemoPatientRecord[] = [
+      { id: "commission-demo-001", name: "Eduardo Martins", cpf: "418.725.390-16", birthDate: "1987-03-14", doctor: "Dr. Flavio Mizoguchi", createdAt: "2026-07-15T10:00:00", registrationStatus: "completed", phone: "(41) 99999-2101", treatment: "Imunoterapia para rinite", startDate: "2026-07-15", totalMonths: 6, bottlesReceived: 2, status: "ativo", acquisitionMethod: "Método 1.0", agreedCondition: "Parcelado", paymentMethod: "Cartão de crédito", paymentInstallments: 2, contractValue: 640, payments: [{ id: "payment-demo-001", amount: 320, paidAt: "2026-07-15", method: "Cartão de crédito", installmentNumber: 1 }] },
+      { id: "commission-demo-002", name: "Camila Nogueira", cpf: "729.480.163-52", birthDate: "1992-08-21", doctor: "Dra. Camila Rodrigues", createdAt: "2026-08-05T10:00:00", registrationStatus: "completed", phone: "(41) 99999-2102", treatment: "Imunoterapia para rinite", startDate: "2026-08-05", totalMonths: 6, bottlesReceived: 3, status: "ativo", acquisitionMethod: "Tratamento de 6 meses", agreedCondition: "À vista", paymentMethod: "PIX", paymentInstallments: 1, contractValue: 1620, payments: [{ id: "payment-demo-002", amount: 1620, paidAt: "2026-08-05", method: "PIX", installmentNumber: 1 }] },
+      { id: "commission-demo-003", name: "Rafael Bittencourt", cpf: "184.630.927-40", birthDate: "1979-11-30", doctor: "Dr. Flavio Mizoguchi", createdAt: "2026-08-12T10:00:00", registrationStatus: "completed", phone: "(41) 99999-2103", treatment: "Imunoterapia para rinite", startDate: "2026-08-12", totalMonths: 6, bottlesReceived: 3, status: "ativo", acquisitionMethod: "Recorrente 1.0", agreedCondition: "Parcelado", paymentMethod: "Asaas", paymentInstallments: 6, contractValue: 1620, payments: [{ id: "payment-demo-003", amount: 270, paidAt: "2026-08-12", method: "Asaas", installmentNumber: 1 }] },
+      { id: "commission-demo-004", name: "Larissa Almeida", cpf: "506.348.172-61", birthDate: "1995-06-07", doctor: "Dra. Camila Rodrigues", createdAt: "2026-08-26T10:00:00", registrationStatus: "completed", phone: "(41) 99999-2104", treatment: "Imunoterapia para rinite", startDate: "2026-08-26", totalMonths: 1, bottlesReceived: 1, status: "ativo", acquisitionMethod: "Por frasco", agreedCondition: "À vista", paymentMethod: "Débito", paymentInstallments: 1, contractValue: 500, payments: [{ id: "payment-demo-004", amount: 500, paidAt: "2026-08-26", method: "Débito", installmentNumber: 1 }] },
+    ];
+    demoPatients.forEach((patient) => saveDemoPatient(patient));
+    const syncedSales = readAdminSales();
+    ["commission-demo-001", "commission-demo-002"].forEach((patientId) => {
+      const sale = syncedSales.find((item) => item.patientId === patientId);
+      const patient = demoPatients.find((item) => item.id === patientId);
+      const payment = patient?.payments?.[0];
+      if (!sale || !payment) return;
+      const bottles = bottleCountForSale(sale);
+      const perBottle = sale.commissionPerBottleSnapshot ?? COMMISSION_PER_BOTTLE;
+      markAdminCommissionPaid({ installmentId: `${sale.id}-1`, saleId: sale.id, patientId, patientName: patient.name, doctor: sale.doctor, paymentId: payment.id, receivedAt: payment.paidAt, accountingAt: commissionDate(payment) ?? payment.paidAt, receivedValue: payment.amount, commissionRate: sale.commissionRateSnapshot, bottleCount: bottles, commissionPerBottle: perBottle, commissionValue: bottles * perBottle });
+    });
+    setMessage("Cenário fictício carregado: PIX, débito, cartão com 30 dias, recorrente, comissões pagas e pendentes.");
+  }
+
   const maxMonthly = Math.max(1, ...monthly.map((item) => Math.max(item.expected, item.received)));
 
   if (!authorized) {
@@ -494,6 +517,7 @@ export default function AdminPage() {
                 <Select label="Médico" value={commissionDoctorFilter} onChange={setCommissionDoctorFilter} options={["Todos", ...doctors.map((doctor) => doctor.name)]} />
                 <Select label="Situação" value={commissionStatusFilter} onChange={setCommissionStatusFilter} options={["Disponíveis", "Pagas", "Todas"]} />
               </div>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[#fbf7f5] p-4"><p className="text-xs leading-5 text-[#66595d]">Quer apresentar o fluxo completo? Carregue um cenário fictício com PIX, débito, cartão, recorrência e repasses pagos.</p><button type="button" onClick={loadCommissionDemo} className="rounded-xl border border-[#a3113a] px-4 py-2 text-xs font-bold text-[#a3113a]">Carregar demonstração</button></div>
             </Panel>
             <div className="grid gap-4 sm:grid-cols-3"><Kpi label="Comissões disponíveis" value={formatMoney(commissionAvailable)} detail="Prontas para fechar no período" tone="wine" /><Kpi label="Comissões já pagas" value={formatMoney(commissionPaid)} detail="Baixadas no período filtrado" tone="green" /><Kpi label="Parcelas no fechamento" value={String(commissionInstallments.length)} detail="Recebimentos sem duplicidade" tone="blue" /></div>
             <Panel title={selectedCommissionMonth ? `Comissões de ${monthLabel(selectedCommissionMonth)}` : "Comissões por parcela recebida"} subtitle="Cada tratamento gera R$ 64,00 por frasco na primeira parcela recebida; marque como paga ao realizar o repasse ao médico."><InstallmentTable installments={commissionInstallments} showCommission openInvoice={openInvoice} onMarkCommission={markCommissionAsPaid} onReverseCommission={reverseCommissionPayment} /></Panel>
