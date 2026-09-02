@@ -3,20 +3,17 @@
 import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import {
-  DemoPatientRecord,
-  demoDoctor,
-  demoMedicalPatients,
-  readDemoPatients,
-  subscribeDemoPatients,
-} from "./patient-store";
+import type { DemoPatientRecord } from "./patient-store";
 import { readPortalState } from "../paciente/patient-portal-store";
-import { getSupabaseClient } from "../../lib/supabase/client";
+import {
+  createDoctorPatient,
+  loadCurrentDoctorProfile,
+  loadDoctorPatients,
+  type MedicalDoctorProfile,
+} from "../../lib/supabase/medical-records";
 
 type DoctorSection = "dashboard" | "pacientes" | "evolucao";
 type DoctorPatientFilter = "todos" | "ativo" | "com-pedido" | "tentar-novamente" | "concluido" | "perdido" | "desistente";
-
-const loggedDoctor = demoDoctor.name;
 
 function formatCpf(value: string) {
   const digits = value.replace(/\D/g, "").slice(0, 11);
@@ -31,8 +28,18 @@ function formatDate(value: string) {
   return new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR");
 }
 
+function initials(value: string) {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "DR";
+}
+
 export default function MedicoPage() {
   const [records, setRecords] = useState<DemoPatientRecord[]>([]);
+  const [doctor, setDoctor] = useState<MedicalDoctorProfile | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [cpf, setCpf] = useState("");
@@ -45,22 +52,25 @@ export default function MedicoPage() {
   const [patientFilter, setPatientFilter] = useState<DoctorPatientFilter>("todos");
 
   useEffect(() => {
-    const syncPatients = () => setRecords(readDemoPatients());
+    let active = true;
 
-    queueMicrotask(syncPatients);
+    void (async () => {
+      try {
+        const profile = await loadCurrentDoctorProfile();
+        const patients = await loadDoctorPatients(profile);
+        if (!active) return;
+        setDoctor(profile);
+        setRecords(patients);
+      } catch {
+        if (active) setError("Não foi possível carregar o perfil médico e os pacientes reais.");
+      }
+    })();
 
-    return subscribeDemoPatients(syncPatients);
+    return () => { active = false; };
   }, []);
 
-  const doctorRecords = useMemo(
-    () => records.filter((patient) => patient.doctor === loggedDoctor),
-    [records],
-  );
-
-  const allDoctorPatients = useMemo(() => {
-    const savedIds = new Set(doctorRecords.map((patient) => patient.id));
-    return [...doctorRecords, ...demoMedicalPatients.filter((patient) => patient.doctor === loggedDoctor && !savedIds.has(patient.id))];
-  }, [doctorRecords]);
+  const loggedDoctor = doctor?.fullName ?? "Médico";
+  const allDoctorPatients = records;
 
   const visiblePatients = useMemo(() => {
     const term = search
@@ -120,20 +130,21 @@ export default function MedicoPage() {
     }
 
     try {
-      const supabase = getSupabaseClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      const { data: clinicId, error: clinicError } = await supabase.rpc("current_clinic_id");
-      if (!user || clinicError || !clinicId) throw new Error("Não foi possível identificar o médico logado.");
-      const { error: duplicateError, data: duplicate } = await supabase.from("patients").select("id").eq("cpf", cpf).maybeSingle();
-      if (duplicateError) throw duplicateError;
-      if (duplicate) { setError("Já existe um paciente cadastrado com esse CPF."); return; }
-      const { error } = await supabase.from("patients").insert({ clinic_id: clinicId as string, doctor_profile_id: user.id, full_name: name.trim(), cpf, birth_date: birthDate, phone: phone.trim() || null, status: "em-conversa", address: {}, treatment: {}, financial: {} });
-      if (error) throw error;
+      if (!doctor) throw new Error("PERFIL_MEDICO");
+      const created = await createDoctorPatient(doctor, {
+        name,
+        cpf,
+        birthDate,
+        phone,
+      });
+      setRecords((current) => [created, ...current]);
       setName(""); setCpf(""); setBirthDate(""); setPhone(""); setSearch("");
       setMessage(`${name.trim()} foi encaminhado para a secretaria completar o cadastro.`);
       closeForm();
-    } catch {
-      setError("Não foi possível salvar o pré-cadastro agora. Tente novamente.");
+    } catch (caught) {
+      setError(caught instanceof Error && caught.message === "CPF_DUPLICADO"
+        ? "Já existe um paciente cadastrado com esse CPF."
+        : "Não foi possível salvar o pré-cadastro agora. Tente novamente.");
     }
   }
 
@@ -188,11 +199,11 @@ export default function MedicoPage() {
 
             <div className="flex items-center gap-3 rounded-2xl border border-[#eadfd9] bg-white px-4 py-3 shadow-sm">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#faedf0] text-sm font-bold text-[#a3113a]">
-                FM
+                {initials(loggedDoctor)}
               </div>
               <div>
                 <p className="text-sm font-semibold">{loggedDoctor}</p>
-                <p className="text-xs text-[#877b7e]">Otorrinolaringologia</p>
+                <p className="text-xs text-[#877b7e]">{doctor?.specialty ?? "Carregando perfil..."}</p>
               </div>
               <Link href="/" className="ml-2 rounded-xl border border-[#eadfd9] px-3 py-2 text-xs font-semibold text-[#a3113a] hover:bg-[#fff5f7]">
                 Sair
@@ -299,8 +310,7 @@ export default function MedicoPage() {
           {section === "evolucao" && <section className="space-y-6"><div><h2 className="text-2xl font-bold text-[#433438]">Evolução dos pacientes</h2><p className="mt-2 text-sm text-[#817578]">Indicadores de adesão e autoavaliação para apoiar o acompanhamento clínico.</p></div><div className="grid gap-4 sm:grid-cols-4">{[{ label: "Regularidade média", value: `${averageRegularity}%` }, { label: "Boa adesão", value: `${percentage(evolution.filter((item) => item.regularity >= 70).length)}%` }, { label: "Precisam de atenção", value: String(evolution.filter((item) => item.regularity < 50).length) }, { label: "Relatos de desconforto", value: String(evolution.reduce((total, item) => total + item.discomfort, 0)) }].map((card) => <article key={card.label} className="rounded-3xl border border-[#efe6e1] bg-white p-6"><p className="text-sm text-[#817578]">{card.label}</p><p className="mt-3 text-3xl font-bold text-[#a3113a]">{card.value}</p></article>)}</div><article className="rounded-3xl border border-[#efe6e1] bg-white p-6"><h3 className="text-lg font-bold">Desenvolvimento por paciente</h3><div className="mt-6 space-y-5">{evolution.map((item) => <div key={item.patient.id}><div className="flex flex-wrap items-center justify-between gap-2 text-sm"><strong>{item.patient.name}</strong><span className={item.regularity >= 70 ? "text-[#187157]" : item.regularity >= 50 ? "text-[#966419]" : "text-[#a3113a]"}>{item.regularity}% de regularidade</span></div><div className="mt-2 h-3 overflow-hidden rounded-full bg-[#f0e9e6]"><div className={`h-full rounded-full ${item.regularity >= 70 ? "bg-[#24846b]" : item.regularity >= 50 ? "bg-[#d59a42]" : "bg-[#b21a45]"}`} style={{ width: `${item.regularity}%` }} /></div><p className="mt-2 text-xs text-[#817578]">Autoavaliações positivas: {item.positive} · desconfortos: {item.discomfort}</p></div>)}</div></article><p className="rounded-2xl bg-[#fff7ea] p-4 text-xs leading-6 text-[#806238]">Estes indicadores apoiam o acompanhamento, mas não substituem avaliação médica individual.</p></section>}
 
           <p className="mt-6 text-xs text-[#8a7d80]">
-            Demonstração temporária: utilize somente dados fictícios. O armazenamento
-            seguro será implementado no Supabase.
+            Dados médicos protegidos e sincronizados com o CRA Care.
           </p>
         </section>
       </div>

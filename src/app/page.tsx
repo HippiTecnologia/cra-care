@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { setActivePortalPatient } from "./paciente/patient-portal-store";
-import { authEmailForUsername } from "../lib/auth/credentials";
+import { authEmailForUsername, requiresPasswordChange, type AccountRole } from "../lib/auth/credentials";
 import { getSupabaseClient } from "../lib/supabase/client";
 
 type UserRole = "Paciente" | "Médico" | "Secretaria" | "Laboratório" | "Administrador";
@@ -46,7 +46,7 @@ export default function Home() {
       }
       const { data: profile } = await supabase.from("profiles").select("role, must_change_password").eq("id", data.user.id).maybeSingle();
       if (profile) {
-        if (profile.must_change_password) {
+        if (profile.must_change_password && requiresPasswordChange(profile.role as AccountRole)) {
           router.push("/alterar-senha");
           return;
         }

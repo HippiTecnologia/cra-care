@@ -6,18 +6,20 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   availableFormulas,
-  DemoPatientRecord,
-  demoDoctor,
-  DemoPrescription,
-  findDemoPatient,
-  PrescriptionFormula,
-  readDemoPrescriptions,
-  saveDemoPatient,
-  saveDemoPrescription,
-  subscribeDemoPatients,
   treatmentPhases,
 } from "../../patient-store";
-import { PatientPortalState, readPortalState, subscribePortalState } from "../../../paciente/patient-portal-store";
+import type {
+  DemoPatientRecord,
+  DemoPrescription,
+  PrescriptionFormula,
+} from "../../patient-store";
+import type { PatientPortalState } from "../../../paciente/patient-portal-store";
+import {
+  createMedicalPrescription,
+  loadMedicalPatientWorkspace,
+  prepareMedicalPrescriptionSignature,
+  type MedicalDoctorProfile,
+} from "../../../../lib/supabase/medical-records";
 
 type Tab = "receitas" | "resumo" | "historico" | "avaliacoes";
 
@@ -73,6 +75,7 @@ export default function MedicalPatientPage() {
 
   const [patient, setPatient] = useState<DemoPatientRecord | null>(null);
   const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
+  const [doctor, setDoctor] = useState<MedicalDoctorProfile | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("receitas");
   const [selectedFormula, setSelectedFormula] = useState(availableFormulas[0]);
@@ -93,25 +96,28 @@ export default function MedicalPatientPage() {
   const [portal, setPortal] = useState<PatientPortalState | null>(null);
 
   useEffect(() => {
-    const syncPatient = () => {
-      const current = findDemoPatient(patientId);
+    let active = true;
 
-      setPatient(current ?? null);
-      setPrescriptions(readDemoPrescriptions(patientId));
-      setPortal(readPortalState(patientId));
-      setLoaded(true);
-
-      if (current) {
-        setPhase(current.phase ?? treatmentPhases[0]);
-        setDrops(current.drops ?? 6);
+    void (async () => {
+      try {
+        const workspace = await loadMedicalPatientWorkspace(patientId);
+        if (!active) return;
+        setDoctor(workspace.doctor);
+        setPatient(workspace.patient);
+        setPrescriptions(workspace.prescriptions);
+        setPortal(workspace.portal);
+        if (workspace.patient) {
+          setPhase(workspace.patient.phase ?? treatmentPhases[0]);
+          setDrops(workspace.patient.drops ?? 6);
+        }
+      } catch {
+        if (active) setError("Não foi possível carregar o prontuário real deste paciente.");
+      } finally {
+        if (active) setLoaded(true);
       }
-    };
+    })();
 
-    queueMicrotask(syncPatient);
-
-    const unsubscribePatients = subscribeDemoPatients(syncPatient);
-    const unsubscribePortal = subscribePortalState(syncPatient);
-    return () => { unsubscribePatients(); unsubscribePortal(); };
+    return () => { active = false; };
   }, [patientId]);
 
   const totalPercentage = useMemo(
@@ -190,8 +196,8 @@ export default function MedicalPatientPage() {
     setSelectedPrescriptionId(null);
   }
 
-  function createPrescription() {
-    if (!patient) return;
+  async function createPrescription() {
+    if (!patient || !doctor) return;
 
     if (totalPercentage !== 100) {
       setError("A composição precisa fechar exatamente 100%.");
@@ -206,8 +212,8 @@ export default function MedicalPatientPage() {
     const prescription: DemoPrescription = {
       id: crypto.randomUUID(),
       patientId: patient.id,
-      doctor: demoDoctor.name,
-      doctorCrm: demoDoctor.crm,
+      doctor: doctor.fullName,
+      doctorCrm: doctor.crm,
       createdAt: new Date().toISOString(),
       treatment: patient.treatment ?? "Imunoterapia para rinite",
       phase,
@@ -220,28 +226,32 @@ export default function MedicalPatientPage() {
       signatureStatus: "pending",
     };
 
-    saveDemoPrescription(prescription);
+    try {
+      const saved = await createMedicalPrescription(doctor, patient, prescription);
+      setPrescriptions((current) => [saved, ...current]);
+      setPatient((current) => current ? {
+        ...current,
+        phase,
+        drops,
+        treatment: prescription.treatment,
+        status: "com-pedido",
+      } : current);
 
-    saveDemoPatient({
-      ...patient,
-      phase,
-      drops,
-      treatment: prescription.treatment,
-      status: "com-pedido",
-    });
-
-    setMessage(
-      "Receita gerada com sucesso. O paciente foi encaminhado para a coluna Paciente com pedido da secretaria.",
-    );
-    setError("");
-    setSelectedPrescriptionId(prescription.id);
-    setFormulas([]);
-    setFormulaPercentage("");
-    setNotes("");
+      setMessage(
+        "Receita gerada com sucesso. O paciente foi encaminhado para a coluna Paciente com pedido da secretaria.",
+      );
+      setError("");
+      setSelectedPrescriptionId(saved.id);
+      setFormulas([]);
+      setFormulaPercentage("");
+      setNotes("");
+    } catch {
+      setError("Não foi possível salvar a receita no prontuário. Tente novamente.");
+    }
   }
 
-  function prepareDigitalSignature() {
-    if (!selectedPrescription) {
+  async function prepareDigitalSignature() {
+    if (!selectedPrescription || !doctor) {
       setError("Gere a receita antes de prepará-la para assinatura digital.");
       return;
     }
@@ -251,13 +261,14 @@ export default function MedicalPatientPage() {
       return;
     }
 
-    saveDemoPrescription({
-      ...selectedPrescription,
-      signatureStatus: "ready",
-      signaturePreparedAt: new Date().toISOString(),
-      signaturePreparedBy: demoDoctor.name,
-    });
-    setMessage("Receita preparada para assinatura digital. A conexão com o certificado do médico será ativada quando o assinador for configurado.");
+    try {
+      const prepared = await prepareMedicalPrescriptionSignature(doctor, selectedPrescription);
+      setPrescriptions((current) => current.map((item) => item.id === prepared.id ? prepared : item));
+      setMessage("Receita preparada para assinatura digital. A conexão com o certificado do médico será ativada quando o assinador for configurado.");
+      setError("");
+    } catch {
+      setError("Não foi possível preparar a receita para assinatura agora.");
+    }
   }
 
   if (!loaded) {
@@ -287,8 +298,8 @@ export default function MedicalPatientPage() {
   const preview = selectedPrescription ?? {
     id: "draft",
     patientId: patient.id,
-    doctor: demoDoctor.name,
-    doctorCrm: demoDoctor.crm,
+    doctor: doctor?.fullName ?? "Médico responsável",
+    doctorCrm: doctor?.crm ?? "",
     createdAt: new Date().toISOString(),
     treatment: patient.treatment ?? "Imunoterapia para rinite",
     phase,
@@ -391,8 +402,8 @@ export default function MedicalPatientPage() {
           </div>
           <div className="flex items-center justify-between gap-4 sm:justify-end">
             <div className="sm:text-right">
-              <p className="font-semibold text-[#a3113a]">{demoDoctor.name}</p>
-              <p className="mt-1 text-xs text-[#84777a]">CRM PR {demoDoctor.crm}</p>
+              <p className="font-semibold text-[#a3113a]">{doctor?.fullName ?? "Médico"}</p>
+              <p className="mt-1 text-xs text-[#84777a]">CRM PR {doctor?.crm ?? ""}</p>
             </div>
             <Link href="/" className="rounded-xl border border-[#eadfd9] px-4 py-2.5 text-sm font-semibold text-[#a3113a] hover:bg-[#fff5f7]">
               Sair
@@ -742,7 +753,7 @@ export default function MedicalPatientPage() {
         )}
 
         <p className="mt-6 pb-4 text-xs text-[#8a7d80]">
-          Protótipo com dados fictícios. Receitas e prontuários reais dependerão de autenticação, auditoria e Supabase.
+          Prontuário e receitas sincronizados com a base segura do CRA Care.
         </p>
       </div>
     </main>
