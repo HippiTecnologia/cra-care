@@ -108,6 +108,9 @@ export function mapMedicalPatient(
     stringValue(address, "city") ||
     stringValue(financial, "acquisitionMethod"),
   );
+  const registrationStatus: DemoPatientRecord["registrationStatus"] = hasSecretaryData
+    ? "completed"
+    : "pending-secretary";
 
   return {
     id: row.id,
@@ -117,7 +120,7 @@ export function mapMedicalPatient(
     birthDate: row.birth_date,
     doctor: doctorName,
     createdAt: row.created_at,
-    registrationStatus: hasSecretaryData ? "completed" : "pending-secretary",
+    registrationStatus,
     phone: row.phone ?? undefined,
     email: row.email ?? undefined,
     zipCode: stringValue(address, "zipCode"),
@@ -138,7 +141,9 @@ export function mapMedicalPatient(
     drops: numberValue(treatment, "drops"),
     phase: stringValue(treatment, "phase"),
     delivery: validDelivery(stringValue(treatment, "delivery") ?? stringValue(address, "delivery")),
-    status: validStatus(row.status),
+    status: registrationStatus === "pending-secretary" && row.status === "em-conversa"
+      ? "com-pedido"
+      : validStatus(row.status),
     acquisitionMethod: stringValue(financial, "acquisitionMethod"),
     agreedCondition: stringValue(financial, "agreedCondition") as DemoPatientRecord["agreedCondition"],
     methodSnapshotId: stringValue(financial, "methodSnapshotId"),
@@ -247,7 +252,7 @@ export async function createDoctorPatient(
     cpf: input.cpf,
     birth_date: input.birthDate,
     phone: input.phone?.trim() || null,
-    status: "em-conversa",
+    status: "com-pedido",
     address: {},
     treatment: {},
     financial: {},
