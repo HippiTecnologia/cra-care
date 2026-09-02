@@ -1,5 +1,6 @@
 export type DemoPatientRecord = {
   id: string;
+  username?: string;
   name: string;
   cpf: string;
   birthDate: string;

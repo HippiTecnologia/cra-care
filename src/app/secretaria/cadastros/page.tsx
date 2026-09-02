@@ -1,33 +1,433 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { getSupabaseClient } from "../../../lib/supabase/client";
-import { patientInitialPassword, patientUsername } from "../../../lib/auth/credentials";
+import { ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  openDemoInvoicePdf,
+  treatmentPhases,
+} from "../../medico/patient-store";
+import type {
+  DemoInvoice,
+  DemoPatientRecord,
+  DemoPrescription,
+  DemoStockItem,
+  PatientPaymentRecord,
+} from "../../medico/patient-store";
+import { buildBottleHistory } from "../../paciente/bottle-history";
+import {
+  PatientPortalState,
+  createDefaultPortalState,
+} from "../../paciente/patient-portal-store";
+import {
+  AdminTreatmentMethod,
+  readAdminMethods,
+  subscribeAdminStore,
+  treatmentMethodTotal,
+} from "../../adm/admin-store";
+import {
+  loadSecretaryInvoices,
+  loadSecretaryPatients,
+  loadSecretaryPortals,
+  loadSecretaryPrescriptions,
+  loadSecretaryStock,
+  saveSecretaryBottleAdjustment,
+  saveSecretaryPatient,
+  type SecretaryContext,
+} from "../../../lib/supabase/secretary-records";
 
 type Tab = "pessoais" | "tratamento" | "financeiro";
-type Patient = { id: string; full_name: string; cpf: string; birth_date: string; phone: string | null; email: string | null; status: string; doctor_profile_id: string | null; username: string | null; address: Record<string,string>; treatment: Record<string,string|number>; financial: Record<string,string|number> };
-type Doctor = { id: string; full_name: string; crm: string | null };
-type Payment = { id:string; amount:number|string; paid_at:string|null; payment_method:string; installment_number:number; installment_count:number };
-const input="mt-1 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 outline-none focus:border-[#b91142]";
-const btn="rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white disabled:opacity-50";
-const cash=(n:number|string=0)=>Number(n).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
-const empty=():Patient=>({id:"",full_name:"",cpf:"",birth_date:"",phone:"",email:"",status:"em-conversa",doctor_profile_id:null,username:null,address:{},treatment:{},financial:{}});
 
-export default function CadastrosPage(){
- const [patients,setPatients]=useState<Patient[]>([]),[doctors,setDoctors]=useState<Doctor[]>([]),[draft,setDraft]=useState<Patient|null>(null),[tab,setTab]=useState<Tab>("pessoais"),[term,setTerm]=useState(""),[message,setMessage]=useState(""),[saving,setSaving]=useState(false),[payments,setPayments]=useState<Payment[]>([]),[amount,setAmount]=useState(""),[paidAt,setPaidAt]=useState(new Date().toISOString().slice(0,10));
- const visible=useMemo(()=>patients.filter(p=>!term||`${p.full_name} ${p.cpf}`.toLowerCase().includes(term.toLowerCase())),[patients,term]);
- const totalPaid=payments.reduce((s,p)=>s+Number(p.amount),0);
- useEffect(()=>{void (async()=>{try{const s=getSupabaseClient();const [a,b]=await Promise.all([s.from("patients").select("*").order("full_name"),s.from("profiles").select("id,full_name,crm").eq("role","medico").order("full_name")]);if(a.error)throw a.error;setPatients((a.data??[]) as unknown as Patient[]);setDoctors((b.data??[]) as unknown as Doctor[])}catch{setMessage("Não foi possível carregar os dados reais. Entre usando o perfil Secretaria ou ADM.")}})()},[]);
- async function choose(p:Patient){setDraft(structuredClone(p));setPayments([]);const {data}=await getSupabaseClient().from("payments").select("*").eq("patient_id",p.id).order("paid_at",{ascending:false});setPayments((data??[]) as Payment[])}
- const set=(key:keyof Patient,value:unknown)=>setDraft(d=>d?{...d,[key]:value}:d);
- const setJson=(group:"address"|"treatment"|"financial",key:string,value:string|number)=>setDraft(d=>{if(!d)return d;const next={...(d[group]??{}),[key]:value};if(group==="financial"&&(key==="installmentValue"||key==="installments"))next.contractValue=Number(next.installmentValue??0)*Math.max(1,Number(next.installments??1));return {...d,[group]:next}});
- async function cep(v:string){setJson("address","zipCode",v.replace(/\D/g,""));if(v.replace(/\D/g,"").length!==8)return;try{const r=await fetch(`https://viacep.com.br/ws/${v.replace(/\D/g,"")}/json/`),x=await r.json();if(x.erro)throw 0;setDraft(d=>d?{...d,address:{...d.address,street:x.logradouro||"",neighborhood:x.bairro||"",city:x.localidade||"",state:x.uf||"",zipCode:v.replace(/\D/g,"")}}:d);setMessage("Endereço preenchido pelo CEP.")}catch{setMessage("CEP não encontrado; preencha manualmente.")}}
- async function save(){if(!draft?.full_name.trim()||!draft.cpf.trim()||!draft.birth_date){setMessage("Nome, CPF e nascimento são obrigatórios.");return}setSaving(true);try{const s=getSupabaseClient();const {data:{user}}=await s.auth.getUser();const {data:profile,error:profileError}=await s.from("profiles").select("clinic_id").eq("id",user?.id??"").single();if(profileError||!profile?.clinic_id)throw new Error("Não foi possível identificar a clínica deste acesso.");const body={clinic_id:profile.clinic_id,full_name:draft.full_name.trim(),cpf:draft.cpf.trim(),birth_date:draft.birth_date,phone:draft.phone||null,email:draft.email||null,status:draft.status,doctor_profile_id:draft.doctor_profile_id,address:draft.address,treatment:draft.treatment,financial:draft.financial};const q=draft.id?await s.from("patients").update(body).eq("id",draft.id).select().single():await s.from("patients").insert(body).select().single();if(q.error||!q.data)throw q.error;const saved=q.data as unknown as Patient;setPatients(all=>(draft.id?all.map(p=>p.id===saved.id?saved:p):[...all,saved]).sort((a,b)=>a.full_name.localeCompare(b.full_name)));setDraft(saved);setMessage(draft.id?"Cadastro atualizado no Supabase.":"Paciente cadastrado no Supabase.")}catch(e){setMessage(e instanceof Error&&e.message.includes("duplicate")?"CPF já cadastrado.":e instanceof Error&&e.message?e.message:"Não foi possível salvar.")}finally{setSaving(false)}}
- async function access(){if(!draft?.id)return;try{const {data:{session}}=await getSupabaseClient().auth.getSession();const r=await fetch("/api/access",{method:"POST",headers:{"content-type":"application/json",authorization:`Bearer ${session?.access_token??""}`},body:JSON.stringify({kind:"patient",patientId:draft.id,username:patientUsername(draft.full_name),birthDate:draft.birth_date})}),x=await r.json();if(!r.ok)throw Error(x.error);set("username",x.username);setMessage(`Acesso criado: ${x.username}. Senha: ${x.initialPassword??patientInitialPassword(draft.birth_date)}.`)}catch(e){setMessage(e instanceof Error?e.message:"Não foi possível criar o acesso.")}}
- async function pay(){if(!draft?.id||!amount)return;const n=Number(amount.replace(",","."));if(!n)return;const f=draft.financial;const {error}=await getSupabaseClient().from("payments").insert({patient_id:draft.id,amount:n,paid_at:paidAt,payment_method:f.paymentMethod||"A definir",status:"recebido",installment_number:1,installment_count:Number(f.installments||1)});if(error){setMessage("Falha ao registrar pagamento.");return}setAmount("");await choose(draft);setMessage("Pagamento registrado no Supabase.")}
- if(!draft&&patients.length===0)return <main className="min-h-screen bg-[#f8f5f2] p-7 text-[#34292d]"><Header/><section className="mx-auto mt-8 max-w-2xl rounded-3xl bg-white p-8 text-center shadow-sm"><h2 className="text-xl font-bold">Base real pronta</h2><p className="mt-2 text-sm text-[#817578]">Ainda não há pacientes reais no banco.</p><button onClick={()=>setDraft(empty())} className={`${btn} mt-6`}>Cadastrar primeiro paciente</button></section></main>;
- return <main className="min-h-screen bg-[#f8f5f2] p-4 text-[#34292d] sm:p-7"><div className="mx-auto max-w-[1450px]"><Header/>{message&&<p className="mt-4 rounded-xl bg-[#edf8f3] p-3 text-sm text-[#187157]">{message}</p>}<div className="mt-6 grid gap-5 lg:grid-cols-[310px_1fr]"><aside className="rounded-3xl bg-white p-5 shadow-sm lg:sticky lg:top-5 lg:self-start"><button onClick={()=>{setDraft(empty());setPayments([]);setTab("pessoais")}} className={`${btn} w-full`}>+ Novo paciente</button><input value={term} onChange={e=>setTerm(e.target.value)} placeholder="Buscar nome ou CPF" className={`${input} mt-4`}/><div className="mt-4 max-h-[65vh] space-y-2 overflow-y-auto">{visible.map(p=><button key={p.id} onClick={()=>void choose(p)} className={`w-full rounded-xl p-3 text-left ${draft?.id===p.id?"bg-[#fff0f3] text-[#a3113a]":"bg-[#faf6f3]"}`}><b className="text-sm">{p.full_name}</b><p className="text-xs">{p.cpf}</p></button>)}</div></aside>{draft?<section className="rounded-3xl bg-white p-5 shadow-sm sm:p-7"><h2 className="text-2xl font-bold text-[#86203b]">{draft.id?draft.full_name:"Novo paciente"}</h2><div className="mt-5 flex flex-wrap gap-2">{(["pessoais","tratamento","financeiro"] as Tab[]).map(t=><button key={t} onClick={()=>setTab(t)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab===t?"bg-[#a3113a] text-white":"bg-[#f6efec]"}`}>Dados {t}</button>)}</div>{tab==="pessoais"&&<div className="mt-6 grid gap-4 sm:grid-cols-2"><Field l="Nome completo *"><input value={draft.full_name} onChange={e=>set("full_name",e.target.value)} className={input}/></Field><Field l="CPF *"><input value={draft.cpf} onChange={e=>set("cpf",e.target.value)} className={input}/></Field><Field l="Data de nascimento *"><input type="date" value={draft.birth_date} onChange={e=>set("birth_date",e.target.value)} className={input}/></Field><Field l="Telefone"><input value={draft.phone??""} onChange={e=>set("phone",e.target.value)} className={input}/></Field><Field l="E-mail"><input value={draft.email??""} onChange={e=>set("email",e.target.value)} className={input}/></Field><Field l="Médico"><select value={draft.doctor_profile_id??""} onChange={e=>set("doctor_profile_id",e.target.value||null)} className={input}><option value="">Selecione</option>{doctors.map(d=><option key={d.id} value={d.id}>{d.full_name} · CRM {d.crm}</option>)}</select></Field><Field l="CEP"><input value={draft.address?.zipCode??""} onChange={e=>void cep(e.target.value)} className={input}/></Field><Field l="Rua"><input value={draft.address?.street??""} onChange={e=>setJson("address","street",e.target.value)} className={input}/></Field><Field l="Número"><input value={draft.address?.number??""} onChange={e=>setJson("address","number",e.target.value)} className={input}/></Field><Field l="Bairro"><input value={draft.address?.neighborhood??""} onChange={e=>setJson("address","neighborhood",e.target.value)} className={input}/></Field><Field l="Cidade"><input value={draft.address?.city??""} onChange={e=>setJson("address","city",e.target.value)} className={input}/></Field><Field l="Estado"><input value={draft.address?.state??""} onChange={e=>setJson("address","state",e.target.value)} className={input}/></Field><div className="sm:col-span-2 flex flex-wrap gap-3"><button disabled={saving} onClick={()=>void save()} className={btn}>Salvar dados pessoais</button>{draft.id&&<button onClick={()=>void access()} className="rounded-xl border border-[#a3113a] px-4 py-3 text-sm font-semibold text-[#a3113a]">{draft.username?"Restaurar acesso":"Criar acesso do paciente"}</button>}</div></div>}{tab==="tratamento"&&<div className="mt-6 grid gap-4 sm:grid-cols-2">{[["name","Tipo de tratamento"],["phase","Fase"],["startDate","Data de início"],["totalMonths","Tempo em meses"],["bottlesReceived","Frascos recebidos"],["bottlesStarted","Frascos iniciados"],["currentBottle","Frasco atual"],["drops","Gotas"]].map(([k,l])=><Field key={k} l={l}><input type={k.includes("Date")?"date":k.includes("bottles")||k==="drops"||k==="totalMonths"?"number":"text"} value={String(draft.treatment?.[k]??"")} onChange={e=>setJson("treatment",k,e.target.type==="number"?Number(e.target.value):e.target.value)} className={input}/></Field>)}<button disabled={saving} onClick={()=>void save()} className={btn}>Salvar tratamento</button></div>}{tab==="financeiro"&&<div className="mt-6 space-y-5"><div className="grid gap-4 sm:grid-cols-2">{[["acquisitionMethod","Método"],["paymentMethod","Forma de pagamento"],["installmentValue","Valor da parcela"],["installments","Número de parcelas"],["dueDate","Próximo vencimento"]].map(([k,l])=><Field key={k} l={l}><input type={k==="dueDate"?"date":k==="installmentValue"||k==="installments"?"number":"text"} value={String(draft.financial?.[k]??"")} onChange={e=>setJson("financial",k,e.target.type==="number"?Number(e.target.value):e.target.value)} className={input}/></Field>)}<Field l="Valor total contratado"><div className={`${input} flex items-center bg-[#edf8f3] font-bold text-[#187157]`}>{cash(draft.financial?.contractValue as number)}</div></Field><button disabled={saving} onClick={()=>void save()} className={btn}>Salvar financeiro</button></div>{draft.id&&<><div className="rounded-2xl bg-[#faf6f3] p-4"><b>Registrar pagamento</b><div className="mt-3 flex flex-wrap gap-3"><input value={amount} onChange={e=>setAmount(e.target.value)} placeholder="Valor" className={input}/><input type="date" value={paidAt} onChange={e=>setPaidAt(e.target.value)} className={input}/><button onClick={()=>void pay()} className="rounded-xl bg-[#187157] px-4 py-3 text-sm font-semibold text-white">Registrar</button></div></div><p className="font-semibold">Recebido: {cash(totalPaid)} · Pendente: {cash(Math.max(0,Number(draft.financial?.contractValue??0)-totalPaid))}</p>{payments.map(p=><div key={p.id} className="rounded-xl border p-3 text-sm">{cash(p.amount)} · {p.payment_method} · {p.paid_at?.slice(0,10)}</div>)}</>}</div>}</section>:null}</div></div></main>;
+const statusOptions: Array<[NonNullable<DemoPatientRecord["status"]>, string]> = [
+  ["com-pedido", "Com pedido"],
+  ["em-conversa", "Em conversa"],
+  ["ativo", "Ativo"],
+  ["bacteriana", "Bacteriana"],
+  ["tentar-novamente", "Tentar novamente"],
+  ["perdido", "Perdido"],
+  ["desistente", "Desistente"],
+  ["concluido", "Concluído"],
+];
+
+const paymentOptions: NonNullable<DemoPatientRecord["paymentMethod"]>[] = [
+  "A definir",
+  "Dinheiro",
+  "PIX",
+  "Asaas",
+  "Cartão de crédito",
+  "Cartão de débito",
+];
+
+const paymentStatusOptions: NonNullable<DemoPatientRecord["paymentStatus"]>[] = [
+  "A definir",
+  "Pendente",
+  "Em dia",
+  "Vencido",
+  "Cancelado",
+];
+
+const searchText = (value: string) =>
+  value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[.\-/]/g, "");
+
+function formatDate(value?: string, includeTime = false) {
+  if (!value) return "Não informado";
+  const parsed = value.includes("T") ? new Date(value) : new Date(`${value}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return "Não informado";
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: includeTime && value.includes("T") ? "short" : undefined,
+  }).format(parsed);
 }
-function Header(){return <header className="flex items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.15em] text-[#a3113a]">Secretaria · banco real</p><h1 className="mt-2 text-3xl font-bold">Cadastros completos</h1></div><Link href="/secretaria" className="rounded-xl border bg-white px-4 py-3 text-sm font-semibold text-[#a3113a]">← Voltar</Link></header>}
-function Field({l,children}:{l:string;children:React.ReactNode}){return <label className="text-sm font-medium text-[#544449]">{l}{children}</label>}
+
+const money = (value: number) => value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+function parseMoney(value: string) {
+  return Number(value.includes(",") ? value.replace(/\./g, "").replace(",", ".") : value);
+}
+
+export default function PatientRecordsPage() {
+  const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
+  const [portals, setPortals] = useState<Record<string, PatientPortalState>>({});
+  const [context, setContext] = useState<SecretaryContext | null>(null);
+  const [prescriptionRecords, setPrescriptionRecords] = useState<DemoPrescription[]>([]);
+  const [invoiceRecords, setInvoiceRecords] = useState<DemoInvoice[]>([]);
+  const [stockRecords, setStockRecords] = useState<DemoStockItem[]>([]);
+  const [adminMethods, setAdminMethods] = useState<AdminTreatmentMethod[]>([]);
+  const [selectedId, setSelectedId] = useState("");
+  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<Tab>("pessoais");
+  const [draft, setDraft] = useState<DemoPatientRecord | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [message, setMessage] = useState("");
+  const [amount, setAmount] = useState("");
+  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentNotes, setPaymentNotes] = useState("");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [installmentNumber, setInstallmentNumber] = useState(1);
+  const [editingBottle, setEditingBottle] = useState<number | null>(null);
+  const [bottleReason, setBottleReason] = useState("");
+  const [bottleDraft, setBottleDraft] = useState<{ receivedAt: string; startedAt: string; finishedAt: string; status: "recebido" | "em-uso" | "finalizado" }>({ receivedAt: "", startedAt: "", finishedAt: "", status: "recebido" });
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const workspace = await loadSecretaryPatients();
+        const [loadedPortals, loadedPrescriptions, loadedInvoices, loadedStock] = await Promise.all([
+          loadSecretaryPortals(workspace.patients.map((item) => item.id)),
+          loadSecretaryPrescriptions(workspace.context),
+          loadSecretaryInvoices(workspace.context),
+          loadSecretaryStock(workspace.context),
+        ]);
+        if (!active) return;
+        setContext(workspace.context);
+        setPatients(workspace.patients);
+        setPortals(loadedPortals);
+        setPrescriptionRecords(loadedPrescriptions);
+        setInvoiceRecords(loadedInvoices);
+        setStockRecords(loadedStock);
+        setAdminMethods(readAdminMethods().filter((method) => method.active));
+        const hash = window.location.hash.slice(1);
+        const initialId = workspace.patients.some((item) => item.id === hash) ? hash : workspace.patients[0]?.id ?? "";
+        setSelectedId(initialId);
+        setDraft(workspace.patients.find((item) => item.id === initialId) ?? null);
+      } catch {
+        if (active) setMessage("Não foi possível carregar os cadastros reais da Secretaria.");
+      }
+    })();
+    const unsubscribeAdmin = subscribeAdminStore(() => setAdminMethods(readAdminMethods().filter((method) => method.active)));
+    return () => { active = false; unsubscribeAdmin(); };
+  }, []);
+
+  const patient = patients.find((item) => item.id === selectedId);
+
+  const visible = useMemo(() => {
+    const term = searchText(search);
+    return patients.filter((item) => !term || searchText(`${item.name} ${item.cpf}`).includes(term));
+  }, [patients, search]);
+
+  const portal = patient ? portals[patient.id] ?? createDefaultPortalState(patient.id) : undefined;
+  const prescriptions = patient ? prescriptionRecords.filter((item) => item.patientId === patient.id) : [];
+  const invoices = patient ? invoiceRecords.filter((item) => item.patientId === patient.id) : [];
+  const stock = patient ? stockRecords.filter((item) => item.patientId === patient.id) : [];
+  const bottleHistory = patient && portal ? buildBottleHistory(patient, portal, stock) : [];
+  const totalPaid = (patient?.payments ?? []).reduce((sum, item) => sum + item.amount, 0);
+  const remaining = Math.max(0, (patient?.contractValue ?? 0) - totalPaid);
+  const availableMethodNames = Array.from(new Set([draft?.acquisitionMethod, ...adminMethods.map((method) => method.name)].filter(Boolean))) as string[];
+  const availablePaymentMethods = Array.from(new Set([...paymentOptions, ...adminMethods.map((method) => method.paymentMethod)]));
+  const currentBottle = bottleHistory.find((item) => item.status === "em-uso");
+  const nextContact = currentBottle?.startedAt ? (() => {
+    const date = new Date(`${currentBottle.startedAt.slice(0, 10)}T12:00:00`);
+    date.setDate(date.getDate() + 30);
+    return date.toISOString().slice(0, 10);
+  })() : undefined;
+
+  function updateDraft<K extends keyof DemoPatientRecord>(key: K, value: DemoPatientRecord[K]) {
+    setDraft((current) => current ? { ...current, [key]: value } : current);
+  }
+
+  async function fillAddressFromZipCode(value: string) {
+    const zipCode = value.replace(/\D/g, "");
+    if (zipCode.length !== 8) return;
+
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${zipCode}/json/`);
+      const address = await response.json() as { erro?: boolean; logradouro?: string; bairro?: string; localidade?: string; uf?: string };
+      if (!response.ok || address.erro) {
+        setMessage("CEP não encontrado. Confira o número ou preencha o endereço manualmente.");
+        return;
+      }
+      setDraft((current) => current ? {
+        ...current,
+        zipCode,
+        street: address.logradouro || current.street,
+        neighborhood: address.bairro || current.neighborhood,
+        city: address.localidade || current.city,
+        state: address.uf || current.state,
+      } : current);
+      setMessage("Endereço preenchido automaticamente pelo CEP. Informe apenas o número e complemento, se houver.");
+    } catch {
+      setMessage("Não foi possível consultar o CEP agora. Você pode preencher o endereço manualmente.");
+    }
+  }
+
+  async function saveDraft(section: string) {
+    if (!draft) return;
+    if (!draft.name.trim() || !draft.cpf.trim() || !draft.birthDate) {
+      setMessage("Nome completo, CPF e data de nascimento são obrigatórios.");
+      return;
+    }
+    if (!context) { setMessage("Sessão da Secretaria não identificada."); return; }
+    try {
+      await saveSecretaryPatient(context, { ...draft, registrationStatus: "completed" });
+      setPatients((current) => current.map((item) => item.id === draft.id ? draft : item));
+      setEditing(false);
+      setMessage(`${section} atualizados no Supabase com sucesso.`);
+    } catch {
+      setMessage(`Não foi possível salvar ${section.toLowerCase()}.`);
+    }
+  }
+
+  async function addPayment() {
+    if (!patient || !draft) return;
+    const parsed = parseMoney(amount);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setMessage("Informe um valor de pagamento válido.");
+      return;
+    }
+    const payment: PatientPaymentRecord = {
+      id: crypto.randomUUID(),
+      amount: parsed,
+      paidAt: new Date(`${paidAt}T12:00:00`).toISOString(),
+      method: draft.paymentMethod ?? "A definir",
+      installments: draft.paymentMethod === "Cartão de crédito" ? Math.max(1, draft.paymentInstallments ?? 1) : undefined,
+      installmentNumber: (draft.paymentInstallments ?? 1) > 1 ? installmentNumber : undefined,
+      dueAt: draft.paymentDueDate,
+      asaasReference: paymentReference.trim() || undefined,
+      notes: paymentNotes.trim() || undefined,
+    };
+    const updated = { ...draft, paymentStatus: "Em dia" as const, payments: [payment, ...(patient.payments ?? [])] };
+    if (!context) return;
+    try {
+      await saveSecretaryPatient(context, updated);
+      setDraft(updated);
+      setPatients((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setAmount("");
+      setPaymentNotes("");
+      setPaymentReference("");
+      setInstallmentNumber(1);
+      setMessage("Pagamento registrado no Supabase pela Secretaria.");
+    } catch {
+      setMessage("Não foi possível registrar o pagamento.");
+    }
+  }
+
+  async function removePayment(paymentId: string) {
+    if (!draft) return;
+    const updated = { ...draft, payments: (draft.payments ?? []).filter((item) => item.id !== paymentId) };
+    if (!context) return;
+    try {
+      await saveSecretaryPatient(context, updated);
+      setDraft(updated);
+      setPatients((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setMessage("Lançamento removido do histórico real.");
+    } catch {
+      setMessage("Não foi possível remover o lançamento.");
+    }
+  }
+
+  function selectPatient(id: string) {
+    setSelectedId(id);
+    setDraft(patients.find((item) => item.id === id) ?? null);
+    setEditing(false);
+    setMessage("");
+    window.history.replaceState(null, "", `#${id}`);
+  }
+
+  function chooseMethod(method: AdminTreatmentMethod, condition: "À vista" | "Parcelado") {
+    const total = treatmentMethodTotal(method);
+    const agreedValue = condition === "À vista" && method.cashValue ? method.cashValue : total;
+    setDraft((current) => current ? {
+      ...current,
+      acquisitionMethod: method.name,
+      agreedCondition: condition,
+      methodSnapshotId: method.id,
+      methodSnapshotVersion: method.version,
+      contractValue: agreedValue,
+      installmentValue: condition === "À vista" ? agreedValue : agreedValue / Math.max(1, method.maxInstallments),
+      discountAmount: Math.max(0, total - agreedValue),
+      paymentMethod: method.paymentMethod,
+      paymentInstallments: condition === "À vista" ? 1 : method.maxInstallments,
+      paymentStatus: "Pendente",
+    } : current);
+    setEditing(true);
+    setMessage(`${method.name} selecionado: ${condition.toLowerCase()} por ${money(agreedValue)}.`);
+  }
+
+  function openBottleEditor(number: number) {
+    const item = bottleHistory.find((entry) => entry.number === number);
+    if (!item) return;
+    setEditingBottle(number);
+    setBottleReason("");
+    setBottleDraft({ receivedAt: item.receivedAt?.slice(0, 10) ?? "", startedAt: item.startedAt?.slice(0, 10) ?? "", finishedAt: item.finishedAt?.slice(0, 10) ?? "", status: item.status });
+  }
+
+  async function saveBottleAdjustment() {
+    if (!portal || !editingBottle) return;
+    if (!bottleReason.trim()) { setMessage("Informe o motivo do ajuste no histórico do frasco."); return; }
+    if (!context || !patient) return;
+    const adjustment = { ...bottleDraft, reason: bottleReason.trim(), updatedAt: new Date().toISOString(), updatedBy: context.fullName };
+    try {
+      await saveSecretaryBottleAdjustment(context, patient.id, editingBottle, adjustment);
+      setPortals((current) => ({
+        ...current,
+        [patient.id]: { ...portal, bottleHistoryAdjustments: { ...(portal.bottleHistoryAdjustments ?? {}), [editingBottle]: adjustment } },
+      }));
+      setEditingBottle(null);
+      setMessage(`Histórico do frasco ${editingBottle} atualizado no Supabase.`);
+    } catch {
+      setMessage("Não foi possível salvar o ajuste do frasco.");
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-[#f8f5f2] p-4 text-[#34292d] sm:p-7">
+      <div className="mx-auto max-w-[1500px]">
+        <header className="flex flex-wrap items-center justify-between gap-4">
+          <div><p className="text-xs font-bold uppercase tracking-[.15em] text-[#a3113a]">Secretaria</p><h1 className="mt-2 text-3xl font-bold">Cadastros completos</h1><p className="mt-2 text-sm text-[#817578]">Dados pessoais, tratamento e financeiro em um único lugar.</p></div>
+          <Link href="/secretaria" className="rounded-xl border border-[#e6dbd6] bg-white px-4 py-3 text-sm font-semibold text-[#a3113a]">← Voltar</Link>
+        </header>
+
+        {message && <div className="mt-5 flex items-center justify-between rounded-2xl border border-[#cfe9de] bg-[#edf8f3] px-4 py-3 text-sm font-semibold text-[#187157]"><span>{message}</span><button type="button" onClick={() => setMessage("")} aria-label="Fechar mensagem">×</button></div>}
+
+        <div className="mt-7 grid gap-5 lg:grid-cols-[340px_1fr]">
+          <aside className="self-start rounded-3xl border border-[#eee5e0] bg-white p-5 lg:sticky lg:top-5">
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar nome ou CPF" className="h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" />
+            <p className="mt-3 text-xs text-[#817578]">{visible.length} paciente(s) encontrado(s)</p>
+            <div className="mt-4 max-h-[70vh] space-y-2 overflow-y-auto pr-1">
+              {visible.map((item) => <button key={item.id} type="button" onClick={() => selectPatient(item.id)} className={`w-full rounded-xl p-4 text-left transition ${selectedId === item.id ? "bg-[#fff0f3] text-[#a3113a] ring-1 ring-[#efc9d3]" : "bg-[#fbf7f5] hover:bg-[#f7efec]"}`}><strong className="text-sm">{item.name}</strong><p className="mt-1 text-xs opacity-70">{item.cpf}</p></button>)}
+              {visible.length === 0 && <p className="py-8 text-center text-sm text-[#817578]">Nenhum paciente encontrado.</p>}
+            </div>
+          </aside>
+
+          {patient && draft ? <section className="rounded-3xl border border-[#eee5e0] bg-white p-5 sm:p-7">
+            <div className="flex flex-wrap justify-between gap-4">
+              <div><h2 className="text-2xl font-bold text-[#86203b]">{patient.name}</h2><p className="mt-1 text-sm text-[#817578]">CPF {patient.cpf} · {patient.doctor}</p></div>
+              <div className="flex items-center gap-2"><span className="rounded-full bg-[#edf8f3] px-3 py-2 text-xs font-semibold text-[#187157]">{statusOptions.find(([value]) => value === patient.status)?.[1] ?? "Em conversa"}</span><button type="button" onClick={() => { setDraft(patient); setEditing((current) => !current); }} className="rounded-xl border border-[#e5d9d4] px-4 py-2 text-xs font-bold text-[#a3113a]">{editing ? "Cancelar edição" : "Editar cadastro"}</button></div>
+            </div>
+
+            <nav className="mt-6 flex flex-wrap gap-2">{([["pessoais", "Dados pessoais"], ["tratamento", "Dados do tratamento"], ["financeiro", "Dados financeiros"]] as [Tab, string][]).map(([id, label]) => <button key={id} type="button" onClick={() => { setTab(id); setEditing(false); setDraft(patient); }} className={`rounded-xl px-4 py-3 text-sm font-semibold ${tab === id ? "bg-[#a3113a] text-white" : "bg-[#f6efec] text-[#716569]"}`}>{label}</button>)}</nav>
+
+            {tab === "pessoais" && <div className="mt-6">{editing ? <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Nome completo *"><input required value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} className={inputClass} /></Field>
+              <Field label="CPF *"><input required value={draft.cpf} onChange={(event) => updateDraft("cpf", event.target.value)} className={inputClass} /></Field>
+              <Field label="Data de nascimento *"><input type="date" required value={draft.birthDate} onChange={(event) => updateDraft("birthDate", event.target.value)} className={inputClass} /></Field>
+              <Field label="Telefone / WhatsApp (opcional)"><input value={draft.phone ?? ""} onChange={(event) => updateDraft("phone", event.target.value)} className={inputClass} /></Field>
+              <Field label="E-mail (opcional)"><input type="email" value={draft.email ?? ""} onChange={(event) => updateDraft("email", event.target.value)} placeholder="paciente@exemplo.com" className={inputClass} /></Field>
+              <Field label="Médico responsável"><input value={draft.doctor} onChange={(event) => updateDraft("doctor", event.target.value)} className={inputClass} /></Field>
+              <Field label="CEP"><input inputMode="numeric" maxLength={9} value={draft.zipCode ?? ""} onChange={(event) => updateDraft("zipCode", event.target.value.replace(/\D/g, "").replace(/(\d{5})(\d)/, "$1-$2"))} onBlur={(event) => fillAddressFromZipCode(event.target.value)} placeholder="00000-000" className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Ao informar o CEP, rua, bairro, cidade e estado são preenchidos automaticamente.</span></Field>
+              <Field label="Rua"><input value={draft.street ?? draft.address ?? ""} onChange={(event) => updateDraft("street", event.target.value)} className={inputClass} /></Field>
+              <Field label="Número"><input value={draft.addressNumber ?? ""} onChange={(event) => updateDraft("addressNumber", event.target.value)} className={inputClass} /></Field>
+              <Field label="Complemento"><input value={draft.addressComplement ?? ""} onChange={(event) => updateDraft("addressComplement", event.target.value)} className={inputClass} /></Field>
+              <Field label="Bairro"><input value={draft.neighborhood ?? ""} onChange={(event) => updateDraft("neighborhood", event.target.value)} className={inputClass} /></Field>
+              <Field label="Cidade"><input value={draft.city ?? ""} onChange={(event) => updateDraft("city", event.target.value)} className={inputClass} /></Field>
+              <Field label="Estado"><input value={draft.state ?? ""} onChange={(event) => updateDraft("state", event.target.value)} maxLength={2} className={inputClass} /></Field>
+              <Field label="Nome para nota fiscal"><input value={draft.billingName ?? ""} onChange={(event) => updateDraft("billingName", event.target.value)} className={inputClass} /></Field>
+              <Field label="CPF para nota fiscal"><input value={draft.billingCpf ?? ""} onChange={(event) => updateDraft("billingCpf", event.target.value)} className={inputClass} /></Field>
+              <Field label="Situação do cadastro"><select value={draft.registrationStatus} onChange={(event) => updateDraft("registrationStatus", event.target.value as DemoPatientRecord["registrationStatus"])} className={inputClass}><option value="pending-secretary">Pendente da secretaria</option><option value="completed">Completo</option></select></Field>
+              <Field label="Observações de entrega" wide><textarea rows={3} value={draft.deliveryNotes ?? ""} onChange={(event) => updateDraft("deliveryNotes", event.target.value)} className={textareaClass} /></Field>
+              <Field label="Observações da secretaria" wide><textarea rows={4} value={draft.notes ?? ""} onChange={(event) => updateDraft("notes", event.target.value)} className={textareaClass} /></Field>
+              <div className="flex justify-end sm:col-span-2"><button type="button" onClick={() => saveDraft("Dados pessoais")} className={primaryButtonClass}>Salvar dados pessoais</button></div>
+            </div> : <div className="grid gap-4 text-sm sm:grid-cols-2">{[
+              ["Nascimento", formatDate(patient.birthDate)], ["Telefone", patient.phone || "Não informado"], ["E-mail", patient.email || "Não informado"], ["Médico responsável", patient.doctor], ["CEP", patient.zipCode || "Não informado"], ["Endereço", `${patient.street ?? patient.address ?? "Não informado"}, ${patient.addressNumber || "s/n"}`], ["Complemento", patient.addressComplement || "Não informado"], ["Bairro", patient.neighborhood || "Não informado"], ["Cidade/Estado", `${patient.city || "Não informada"}/${patient.state || "--"}`], ["Dados para nota fiscal", `${patient.billingName || patient.name} · ${patient.billingCpf || patient.cpf}`], ["Observações de entrega", patient.deliveryNotes || "Nenhuma"], ["Observações da secretaria", patient.notes || "Nenhuma"],
+            ].map(([label, value]) => <DataCard key={label} label={label} value={value} />)}</div>}</div>}
+
+            {tab === "tratamento" && <div className="mt-6 space-y-5">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"><Metric label="Recebidos" value={String(patient.bottlesReceived ?? 0)} /><Metric label="Iniciados" value={String(portal?.bottles.length ?? 0)} /><Metric label="Concluídos" value={String(portal?.bottles.filter((item) => item.status === "finalizado").length ?? 0)} /><Metric label="Frasco atual" value={currentBottle ? String(currentBottle.number) : "Nenhum"} /><Metric label="Próximo contato" value={formatDate(nextContact)} /></div>
+              {editing ? <div className="grid gap-4 rounded-2xl border border-[#eee5e0] p-5 sm:grid-cols-2">
+                <Field label="Status do tratamento"><select value={draft.status ?? "em-conversa"} onChange={(event) => updateDraft("status", event.target.value as DemoPatientRecord["status"])} className={inputClass}>{statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+                <Field label="Tipo de tratamento"><input value={draft.treatment ?? ""} onChange={(event) => updateDraft("treatment", event.target.value)} className={inputClass} /></Field>
+                <Field label="Fase"><select value={draft.phase ?? treatmentPhases[0]} onChange={(event) => updateDraft("phase", event.target.value)} className={inputClass}>{treatmentPhases.map((phase) => <option key={phase}>{phase}</option>)}</select></Field>
+                <Field label="Posologia (gotas)"><input type="number" min={1} value={draft.drops ?? 0} onChange={(event) => updateDraft("drops", Number(event.target.value))} className={inputClass} /></Field>
+                <Field label="Início do tratamento"><input type="date" value={draft.startDate ?? ""} onChange={(event) => updateDraft("startDate", event.target.value)} className={inputClass} /></Field>
+                <Field label="Duração total (meses)"><input type="number" min={0} value={draft.totalMonths ?? 0} onChange={(event) => updateDraft("totalMonths", Number(event.target.value))} className={inputClass} /></Field>
+                <Field label="Último recebimento"><input type="date" value={draft.lastReceivedDate ?? ""} onChange={(event) => updateDraft("lastReceivedDate", event.target.value)} className={inputClass} /></Field>
+                <Field label="Total de frascos entregues"><input type="number" min={0} value={draft.bottlesReceived ?? 0} onChange={(event) => updateDraft("bottlesReceived", Number(event.target.value))} className={inputClass} /></Field>
+                <Field label="Método de recebimento"><select value={draft.delivery ?? "Retirada"} onChange={(event) => updateDraft("delivery", event.target.value as DemoPatientRecord["delivery"])} className={inputClass}>{["Motoboy", "Retirada", "Sedex", "Aéreo"].map((value) => <option key={value}>{value}</option>)}</select></Field>
+                {draft.status === "desistente" && <Field label="Motivo da desistência"><textarea rows={3} value={draft.abandonmentReason ?? ""} onChange={(event) => updateDraft("abandonmentReason", event.target.value)} className={textareaClass} /></Field>}
+                <div className="flex justify-end sm:col-span-2"><button type="button" onClick={() => saveDraft("Dados do tratamento")} className={primaryButtonClass}>Salvar tratamento</button></div>
+              </div> : <Info title="Tratamento atual">{patient.treatment || "Não informado"} · {patient.phase || "Fase não definida"} · {patient.drops ?? 0} gotas</Info>}
+              <Info title="Observações dos médicos">{prescriptions.filter((item) => item.notes.trim()).map((item) => `${formatDate(item.createdAt)} · ${item.doctor}\n${item.notes}`).join("\n\n") || "Nenhuma observação médica registrada nas receitas."}</Info>
+              <div className="rounded-2xl bg-[#fbf7f5] p-5"><h3 className="font-bold">Histórico completo de receitas e fórmulas ({prescriptions.length})</h3><div className="mt-4 space-y-3">{prescriptions.map((item) => <article key={item.id} className="rounded-xl border border-[#eadfd9] bg-white p-4 text-sm"><div className="flex flex-wrap justify-between gap-2"><strong>{formatDate(item.createdAt)} · {item.phase}</strong><span>{item.bottles} frasco(s)</span></div><p className="mt-2 text-[#66595d]">{item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ")}</p><p className="mt-2 text-xs text-[#817578]">{item.posology} · {item.doctor} · CRM {item.doctorCrm}</p></article>)}{prescriptions.length === 0 && <p className="text-sm text-[#817578]">Nenhuma receita registrada.</p>}</div></div>
+              <div className="rounded-2xl bg-[#fbf7f5] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold">Histórico das avaliações ({portal?.assessments.length ?? 0})</h3><Link href="/secretaria/avaliacoes" className="rounded-xl border border-[#e5d9d4] bg-white px-4 py-2 text-xs font-bold text-[#a3113a]">Gerenciar avaliações</Link></div><div className="mt-4 space-y-3">{portal?.assessments.map((item) => <article key={item.id} className="rounded-xl border border-[#eadfd9] bg-white p-4 text-sm leading-6"><strong>Frasco {item.bottleNumber} · {formatDate(item.createdAt)}</strong><p>Frequência: {item.symptomFrequency ?? "Avaliação anterior"}</p><p>Severidade: {item.symptomSeverity ?? item.feeling ?? "Não informada"}</p><p>Uso de medicamentos: {item.medicationFrequency ?? "Não informado"}</p><p>Relato: {item.notes || "Sem comentário"}</p><p className="mt-2 text-xs text-[#817578]">{item.viewedAt ? `Conferida por ${item.viewedBy ?? "equipe"} em ${formatDate(item.viewedAt, true)}` : "Aguardando conferência da equipe"}</p>{item.response && <p className="mt-2 rounded-lg bg-[#edf8f3] px-3 py-2 text-[#187157]">Resposta: {item.response}</p>}</article>)}{!portal?.assessments.length && <p className="text-sm text-[#817578]">Nenhuma avaliação registrada.</p>}</div></div>
+              <div className="rounded-2xl bg-[#fbf7f5] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Histórico por frasco</h3><p className="mt-1 text-xs text-[#817578]">A Secretaria pode corrigir datas e status, sempre registrando o motivo.</p></div></div><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="text-xs uppercase text-[#817578]"><tr><th className="pb-3">Frasco</th><th className="pb-3">Recebimento</th><th className="pb-3">Início</th><th className="pb-3">Conclusão</th><th className="pb-3">Status</th><th className="pb-3">Ação</th></tr></thead><tbody>{bottleHistory.slice().reverse().map((item) => <tr key={item.number} className="border-t border-[#eadfd9]"><td className="py-3 font-bold">{item.number}</td><td>{formatDate(item.receivedAt)}</td><td>{formatDate(item.startedAt)}</td><td>{formatDate(item.finishedAt)}</td><td>{item.status === "finalizado" ? "Concluído" : item.status === "em-uso" ? "Em uso" : "Recebido"}</td><td><button type="button" onClick={() => openBottleEditor(item.number)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-[#a3113a] ring-1 ring-[#e9dfda]">Ajustar</button></td></tr>)}</tbody></table>{bottleHistory.length === 0 && <p className="py-5 text-sm text-[#817578]">Nenhum frasco recebido.</p>}</div></div>
+              <Info title={`Pedidos e entregas (${stock.length})`}>{stock.map((item) => `${item.batchCode} — ${item.bottles} frasco(s) — ${item.status} — recebido no estoque em ${formatDate(item.receivedAt)} — entregue em ${formatDate(item.deliveredAt)}`).join("\n") || "Nenhum pedido ou entrega registrado."}</Info>
+            </div>}
+
+            {tab === "financeiro" && <div className="mt-6 space-y-5">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Valor contratado" value={money(patient.contractValue ?? 0)} /><Metric label="Total pago" value={money(totalPaid)} /><Metric label="Saldo" value={money(remaining)} /><Metric label="Situação" value={patient.paymentStatus ?? "A definir"} /></div>
+              <div className="rounded-2xl border border-[#eee5e0] bg-[#fffdfc] p-5"><h3 className="font-bold">Condições disponíveis para a venda</h3><p className="mt-1 text-xs text-[#817578]">Valores definidos pelo ADM. A condição escolhida será congelada no histórico do paciente.</p><div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">{adminMethods.map((method) => { const total = treatmentMethodTotal(method); return <article key={method.id} className="rounded-2xl border border-[#eadfd9] bg-white p-4"><p className="text-[10px] font-bold uppercase tracking-wide text-[#a3113a]">{method.category}</p><h4 className="mt-1 font-bold">{method.name}</h4><p className="mt-3 text-lg font-bold text-[#86203b]">{method.category === "Recorrente" ? `${money(method.value)}/mês` : money(total)}</p><p className="mt-1 text-xs text-[#817578]">{method.paymentMethod} · até {method.maxInstallments}x · versão {method.version}</p><div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => chooseMethod(method, "Parcelado")} className="rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-bold text-white">Parcelado: {money(total)}</button>{method.cashValue && <button type="button" onClick={() => chooseMethod(method, "À vista")} className="rounded-lg bg-[#187157] px-3 py-2 text-xs font-bold text-white">À vista: {money(method.cashValue)}</button>}</div></article>; })}</div></div>
+              <div className="rounded-2xl border border-[#eee5e0] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Condições financeiras — somente Secretaria</h3><p className="mt-1 text-xs text-[#817578]">O médico e o paciente não podem alterar estas informações.</p></div>{!editing && <button type="button" onClick={() => setEditing(true)} className="rounded-xl border border-[#e5d9d4] px-4 py-2 text-xs font-bold text-[#a3113a]">Editar financeiro</button>}</div>
+                {editing ? <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                  <Field label="Método de aquisição"><select value={draft.acquisitionMethod ?? availableMethodNames[0] ?? ""} onChange={(event) => updateDraft("acquisitionMethod", event.target.value)} className={inputClass}>{availableMethodNames.map((value) => <option key={value}>{value}</option>)}</select></Field>
+                  <Field label="Forma de pagamento"><select value={draft.paymentMethod ?? "A definir"} onChange={(event) => updateDraft("paymentMethod", event.target.value)} className={inputClass}>{availablePaymentMethods.map((value) => <option key={value}>{value}</option>)}</select></Field>
+                  <Field label="Valor da parcela (R$)"><input type="number" min={0} step="0.01" value={draft.installmentValue ?? ((draft.contractValue ?? 0) / Math.max(1, draft.paymentInstallments ?? 1))} onChange={(event) => { const installmentValue = Number(event.target.value); setDraft((current) => current ? { ...current, installmentValue, contractValue: installmentValue * Math.max(1, current.paymentInstallments ?? 1) } : current); }} className={inputClass} /></Field>
+                  <Field label="Situação do pagamento"><select value={draft.paymentStatus ?? "A definir"} onChange={(event) => updateDraft("paymentStatus", event.target.value as DemoPatientRecord["paymentStatus"])} className={inputClass}>{paymentStatusOptions.map((value) => <option key={value}>{value}</option>)}</select></Field>
+                  <Field label="Vencimento / próximo vencimento"><input type="date" value={draft.paymentDueDate ?? ""} onChange={(event) => updateDraft("paymentDueDate", event.target.value)} className={inputClass} /></Field>
+                  <Field label="Número de parcelas"><input type="number" min={1} value={draft.paymentInstallments ?? 1} onChange={(event) => { const paymentInstallments = Math.max(1, Number(event.target.value)); setDraft((current) => current ? { ...current, paymentInstallments, contractValue: (current.installmentValue ?? ((current.contractValue ?? 0) / Math.max(1, current.paymentInstallments ?? 1))) * paymentInstallments } : current); }} className={inputClass} /></Field>
+                  <Field label="Valor total contratado"><div className="mt-2 flex h-11 items-center rounded-xl bg-[#edf8f3] px-3 font-bold text-[#187157]">{money(draft.contractValue ?? 0)}</div></Field>
+                  <Field label="Referência do ASAAS"><input value={draft.asaasReference ?? ""} onChange={(event) => updateDraft("asaasReference", event.target.value)} placeholder="Cliente, assinatura ou cobrança" className={inputClass} /></Field>
+                  <Field label="Observações financeiras" wide><textarea rows={3} value={draft.financialNotes ?? ""} onChange={(event) => updateDraft("financialNotes", event.target.value)} className={textareaClass} /></Field>
+                  <div className="flex justify-end sm:col-span-2"><button type="button" onClick={() => saveDraft("Dados financeiros")} className={primaryButtonClass}>Salvar financeiro</button></div>
+                </div> : <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3"><DataCard label="Método de aquisição" value={`${patient.acquisitionMethod ?? "Não definido"}${patient.methodSnapshotVersion ? ` · versão ${patient.methodSnapshotVersion}` : ""}`} /><DataCard label="Condição escolhida" value={patient.agreedCondition ?? "Não definida"} /><DataCard label="Forma de pagamento" value={patient.paymentMethod ?? "Não definida"} /><DataCard label="Parcelas" value={patient.paymentInstallments ? `${patient.paymentInstallments}x` : "Não informado"} /><DataCard label="Desconto registrado" value={money(patient.discountAmount ?? 0)} /><DataCard label="Vencimento" value={formatDate(patient.paymentDueDate)} /><DataCard label="Referência ASAAS" value={patient.asaasReference || "Não informada"} /><DataCard label="Observações" value={patient.financialNotes || "Nenhuma"} /></div>}
+              </div>
+              <div className="rounded-2xl border border-[#eee5e0] p-5"><h3 className="font-bold">Registrar valor pago</h3><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Field label="Valor pago (R$)"><input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" className={inputClass} /></Field><Field label="Data do pagamento"><input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} className={inputClass} /></Field><Field label="Parcela atual"><input type="number" min={1} value={installmentNumber} onChange={(event) => setInstallmentNumber(Math.max(1, Number(event.target.value)))} className={inputClass} /></Field><Field label="Referência ASAAS"><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} className={inputClass} /></Field><Field label="Observação" wide><input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: pagamento do 2º frasco" className={inputClass} /></Field></div><button type="button" onClick={addPayment} className="mt-4 rounded-xl bg-[#187157] px-5 py-3 text-sm font-semibold text-white">Registrar pagamento</button></div>
+              <div className="rounded-2xl bg-[#fbf7f5] p-5"><h3 className="font-bold">Histórico de pagamentos ({patient.payments?.length ?? 0})</h3><div className="mt-4 space-y-3">{patient.payments?.map((item) => <article key={item.id} className="flex flex-col gap-3 rounded-xl border border-[#eadfd9] bg-white p-4 sm:flex-row sm:items-center sm:justify-between"><div><strong>{money(item.amount)}</strong><p className="mt-1 text-xs text-[#817578]">{formatDate(item.paidAt)} · {item.method}{item.installments ? ` · ${item.installmentNumber ?? 1}/${item.installments}` : ""}{item.asaasReference ? ` · ASAAS ${item.asaasReference}` : ""}</p>{item.notes && <p className="mt-2 text-sm text-[#66595d]">{item.notes}</p>}</div><button type="button" onClick={() => removePayment(item.id)} className="self-start rounded-lg bg-[#fff1f3] px-3 py-2 text-xs font-semibold text-[#a3113a]">Remover</button></article>)}{!patient.payments?.length && <p className="text-sm text-[#817578]">Nenhum pagamento registrado.</p>}</div></div>
+              <div className="rounded-2xl bg-[#fbf7f5] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Notas fiscais ({invoices.length})</h3><p className="mt-1 text-xs text-[#817578]">Documentos vinculados automaticamente ao CPF.</p></div><Link href="/secretaria/notas-fiscais" className="rounded-xl border border-[#e5d9d4] px-4 py-2 text-xs font-bold text-[#a3113a]">Gerenciar notas</Link></div><div className="mt-4 space-y-3">{invoices.map((invoice) => <article key={invoice.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#eadfd9] bg-white p-4"><div><strong className="text-sm">{invoice.fileName}</strong><p className="mt-1 text-xs text-[#817578]">Enviada em {formatDate(invoice.uploadedAt, true)}</p></div><button type="button" onClick={() => { if (!openDemoInvoicePdf(invoice)) setMessage("Permita a abertura de janelas para visualizar o PDF."); }} className="rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-semibold text-white">Abrir PDF</button></article>)}{invoices.length === 0 && <p className="text-sm text-[#817578]">Nenhuma nota fiscal vinculada.</p>}</div></div>
+            </div>}
+          </section> : <section className="rounded-3xl border border-[#eee5e0] bg-white p-12 text-center text-sm text-[#817578]">Selecione um paciente para abrir o cadastro completo.</section>}
+        </div>
+      </div>
+      {editingBottle && <div className="fixed inset-0 z-[100] flex items-end bg-[#29151b]/55 p-3 sm:items-center sm:justify-center"><div role="dialog" aria-modal="true" className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl sm:p-7"><div className="flex items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-wide text-[#a3113a]">Ajuste administrativo</p><h2 className="mt-1 text-xl font-bold">Frasco {editingBottle}</h2></div><button type="button" onClick={() => setEditingBottle(null)} className="rounded-full bg-[#f7f1ee] px-3 py-2">×</button></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Data de recebimento"><input type="date" value={bottleDraft.receivedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, receivedAt: event.target.value }))} className={inputClass} /></Field><Field label="Data de início"><input type="date" value={bottleDraft.startedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, startedAt: event.target.value }))} className={inputClass} /></Field><Field label="Data de conclusão"><input type="date" value={bottleDraft.finishedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, finishedAt: event.target.value }))} className={inputClass} /></Field><Field label="Status"><select value={bottleDraft.status} onChange={(event) => setBottleDraft((item) => ({ ...item, status: event.target.value as typeof item.status }))} className={inputClass}><option value="recebido">Recebido</option><option value="em-uso">Em uso</option><option value="finalizado">Concluído</option></select></Field><Field label="Motivo do ajuste *" wide><textarea rows={3} value={bottleReason} onChange={(event) => setBottleReason(event.target.value)} placeholder="Ex.: paciente iniciou em outra data." className={textareaClass} /></Field></div><div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><button type="button" onClick={() => setEditingBottle(null)} className="rounded-xl border border-[#e6dbd6] px-4 py-3 text-sm font-semibold">Cancelar</button><button type="button" onClick={saveBottleAdjustment} className={primaryButtonClass}>Salvar ajuste</button></div></div></div>}
+    </main>
+  );
+}
+
+const inputClass = "mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 outline-none focus:border-[#b91142]";
+const textareaClass = "mt-2 w-full rounded-xl border border-[#e9dfda] bg-white px-3 py-3 outline-none focus:border-[#b91142]";
+const primaryButtonClass = "rounded-xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white";
+
+function Field({ label, children, wide = false }: { label: string; children: ReactNode; wide?: boolean }) {
+  return <label className={`text-sm font-medium text-[#544449] ${wide ? "sm:col-span-2" : ""}`}>{label}{children}</label>;
+}
+
+function DataCard({ label, value }: { label: string; value: ReactNode }) {
+  return <div className="rounded-2xl bg-[#fbf7f5] p-4"><p className="text-xs text-[#817578]">{label}</p><div className="mt-2 whitespace-pre-line font-semibold leading-6">{value}</div></div>;
+}
+
+function Info({ title, children }: { title: string; children: ReactNode }) {
+  return <article className="rounded-2xl bg-[#fbf7f5] p-5"><h3 className="font-bold">{title}</h3><div className="mt-3 whitespace-pre-line text-sm leading-7 text-[#66595d]">{children}</div></article>;
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-2xl bg-[#fbf7f5] p-5"><p className="text-xs text-[#817578]">{label}</p><p className="mt-2 text-xl font-bold text-[#a3113a]">{value}</p></div>;
+}

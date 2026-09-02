@@ -18,7 +18,7 @@ export type MedicalDoctorProfile = {
   specialty: string;
 };
 
-type PatientRow = {
+export type MedicalPatientRow = {
   id: string;
   clinic_id: string;
   auth_user_id: string | null;
@@ -94,7 +94,7 @@ function validPaymentStatus(value?: string): DemoPatientRecord["paymentStatus"] 
 }
 
 export function mapMedicalPatient(
-  row: PatientRow,
+  row: MedicalPatientRow,
   doctorName: string,
 ): DemoPatientRecord {
   const address = recordValue(row.address);
@@ -111,6 +111,7 @@ export function mapMedicalPatient(
 
   return {
     id: row.id,
+    username: row.username ?? undefined,
     name: row.full_name,
     cpf: row.cpf,
     birthDate: row.birth_date,
@@ -220,7 +221,7 @@ export async function loadDoctorPatients(doctor: MedicalDoctorProfile) {
     .order("created_at", { ascending: false });
   if (error) throw error;
 
-  return ((data ?? []) as unknown as PatientRow[]).map((row) =>
+  return ((data ?? []) as unknown as MedicalPatientRow[]).map((row) =>
     mapMedicalPatient(row, doctor.fullName),
   );
 }
@@ -254,7 +255,7 @@ export async function createDoctorPatient(
   if (error?.code === "23505") throw new Error("CPF_DUPLICADO");
   if (error || !data) throw error ?? new Error("Paciente não retornado.");
 
-  return mapMedicalPatient(data as unknown as PatientRow, doctor.fullName);
+  return mapMedicalPatient(data as unknown as MedicalPatientRow, doctor.fullName);
 }
 
 export async function loadMedicalPatientWorkspace(patientId: string) {
@@ -299,7 +300,7 @@ export async function loadMedicalPatientWorkspace(patientId: string) {
 
   return {
     doctor,
-    patient: mapMedicalPatient(patientResult.data as unknown as PatientRow, doctor.fullName),
+    patient: mapMedicalPatient(patientResult.data as unknown as MedicalPatientRow, doctor.fullName),
     prescriptions: ((prescriptionResult.data ?? []) as unknown as PrescriptionRow[]).map((row) => mapPrescription(row, doctor)),
     portal,
   };

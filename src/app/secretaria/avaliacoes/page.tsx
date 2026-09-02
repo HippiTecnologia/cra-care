@@ -5,17 +5,18 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   DemoPatientRecord,
-  demoMedicalPatients,
-  readDemoPatients,
-  subscribeDemoPatients,
 } from "../../medico/patient-store";
 import {
   PatientAssessment,
   PatientPortalState,
-  readPortalState,
-  savePortalState,
-  subscribePortalState,
 } from "../../paciente/patient-portal-store";
+import {
+  loadSecretaryContext,
+  loadSecretaryPatients,
+  loadSecretaryPortals,
+  saveSecretaryAssessment,
+  SecretaryContext,
+} from "../../../lib/supabase/secretary-records";
 
 type StatusFilter = "pendentes" | "respondidas" | "todas";
 
@@ -45,12 +46,6 @@ const medicationLabels: Record<string, string> = {
   "todos-os-dias": "Todos os dias",
 };
 
-function mergePatients() {
-  const saved = readDemoPatients();
-  const savedIds = new Set(saved.map((patient) => patient.id));
-  return [...saved, ...demoMedicalPatients.filter((patient) => !savedIds.has(patient.id))];
-}
-
 function formatDate(value?: string, includeTime = false) {
   if (!value) return "Não informado";
   const parsed = value.includes("T") ? new Date(value) : new Date(`${value}T12:00:00`);
@@ -72,21 +67,24 @@ export default function SecretaryAssessmentsPage() {
   const [search, setSearch] = useState("");
   const [responseDrafts, setResponseDrafts] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
+  const [context, setContext] = useState<SecretaryContext | null>(null);
 
   useEffect(() => {
-    const synchronize = () => {
-      const currentPatients = mergePatients();
-      setPatients(currentPatients);
-      setPortals(Object.fromEntries(currentPatients.map((patient) => [patient.id, readPortalState(patient.id)])));
-    };
-
-    queueMicrotask(synchronize);
-    const unsubscribePatients = subscribeDemoPatients(synchronize);
-    const unsubscribePortal = subscribePortalState(synchronize);
-    return () => {
-      unsubscribePatients();
-      unsubscribePortal();
-    };
+    let active = true;
+    void (async () => {
+      try {
+        const loadedContext = await loadSecretaryContext();
+        const workspace = await loadSecretaryPatients(loadedContext);
+        const loadedPortals = await loadSecretaryPortals(workspace.patients.map((patient) => patient.id));
+        if (!active) return;
+        setContext(loadedContext);
+        setPatients(workspace.patients);
+        setPortals(loadedPortals);
+      } catch (cause) {
+        if (active) setMessage(cause instanceof Error ? cause.message : "Não foi possível carregar as avaliações.");
+      }
+    })();
+    return () => { active = false; };
   }, []);
 
   const entries = useMemo<AssessmentEntry[]>(() => patients
@@ -107,26 +105,36 @@ export default function SecretaryAssessmentsPage() {
     return matchesStatus && matchesSearch;
   });
 
-  function updateAssessment(patientId: string, assessmentId: string, changes: Partial<PatientAssessment>) {
-    const portal = readPortalState(patientId);
-    savePortalState({
-      ...portal,
-      assessments: portal.assessments.map((assessment) => assessment.id === assessmentId
-        ? { ...assessment, ...changes }
-        : assessment),
-    });
+  async function updateAssessment(patientId: string, assessmentId: string, changes: Partial<PatientAssessment>) {
+    if (!context) throw new Error("A sessão da Secretaria ainda não foi carregada.");
+    const portal = portals[patientId];
+    const currentAssessment = portal?.assessments.find((assessment) => assessment.id === assessmentId);
+    if (!portal || !currentAssessment) throw new Error("Avaliação não encontrada.");
+    const updated = { ...currentAssessment, ...changes };
+    await saveSecretaryAssessment(context, patientId, updated);
+    setPortals((current) => ({
+      ...current,
+      [patientId]: {
+        ...portal,
+        assessments: portal.assessments.map((assessment) => assessment.id === assessmentId ? updated : assessment),
+      },
+    }));
   }
 
-  function markViewed(entry: AssessmentEntry) {
+  async function markViewed(entry: AssessmentEntry) {
     const now = new Date().toISOString();
-    updateAssessment(entry.patient.id, entry.assessment.id, {
-      viewedAt: entry.assessment.viewedAt ?? now,
-      viewedBy: entry.assessment.viewedBy ?? "Secretaria CRA",
-    });
-    setMessage(`Avaliação de ${entry.patient.name} marcada como visualizada.`);
+    try {
+      await updateAssessment(entry.patient.id, entry.assessment.id, {
+        viewedAt: entry.assessment.viewedAt ?? now,
+        viewedBy: entry.assessment.viewedBy ?? "Secretaria CRA",
+      });
+      setMessage(`Avaliação de ${entry.patient.name} marcada como visualizada.`);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Não foi possível atualizar a avaliação.");
+    }
   }
 
-  function saveResponse(entry: AssessmentEntry) {
+  async function saveResponse(entry: AssessmentEntry) {
     const response = (responseDrafts[entry.assessment.id] ?? entry.assessment.response ?? "").trim();
     if (!response) {
       setMessage("Escreva uma resposta antes de salvar.");
@@ -134,15 +142,19 @@ export default function SecretaryAssessmentsPage() {
     }
 
     const now = new Date().toISOString();
-    updateAssessment(entry.patient.id, entry.assessment.id, {
-      viewedAt: entry.assessment.viewedAt ?? now,
-      viewedBy: entry.assessment.viewedBy ?? "Secretaria CRA",
-      response,
-      respondedAt: now,
-      respondedBy: "Secretaria CRA",
-    });
-    setResponseDrafts((current) => ({ ...current, [entry.assessment.id]: response }));
-    setMessage(`Resposta para ${entry.patient.name} salva e disponibilizada ao paciente e ao médico.`);
+    try {
+      await updateAssessment(entry.patient.id, entry.assessment.id, {
+        viewedAt: entry.assessment.viewedAt ?? now,
+        viewedBy: entry.assessment.viewedBy ?? "Secretaria CRA",
+        response,
+        respondedAt: now,
+        respondedBy: "Secretaria CRA",
+      });
+      setResponseDrafts((current) => ({ ...current, [entry.assessment.id]: response }));
+      setMessage(`Resposta para ${entry.patient.name} salva e disponibilizada ao paciente e ao médico.`);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Não foi possível salvar a resposta.");
+    }
   }
 
   return (
@@ -217,14 +229,14 @@ export default function SecretaryAssessmentsPage() {
 
                   <div className="mt-4 flex flex-col gap-3">
                     {!assessment.viewedAt && (
-                      <button type="button" onClick={() => markViewed(entry)} className="self-start rounded-xl border border-[#a3113a] px-4 py-2.5 text-xs font-bold text-[#a3113a]">Marcar como visualizada</button>
+                      <button type="button" onClick={() => void markViewed(entry)} className="self-start rounded-xl border border-[#a3113a] px-4 py-2.5 text-xs font-bold text-[#a3113a]">Marcar como visualizada</button>
                     )}
                     <label className="text-sm font-bold text-[#544449]">
                       Resposta da Secretaria
                       <textarea value={responseValue} onChange={(event) => setResponseDrafts((current) => ({ ...current, [assessment.id]: event.target.value }))} rows={3} placeholder="Escreva o retorno que ficará visível ao paciente e ao médico" className="mt-2 w-full rounded-xl border border-[#e9dfda] bg-white px-4 py-3 font-normal outline-none focus:border-[#b91142]" />
                     </label>
                     <div className="flex flex-wrap items-center gap-3">
-                      <button type="button" onClick={() => saveResponse(entry)} className="rounded-xl bg-[#a3113a] px-5 py-3 text-xs font-bold text-white">{assessment.response ? "Atualizar resposta" : "Salvar resposta"}</button>
+                      <button type="button" onClick={() => void saveResponse(entry)} className="rounded-xl bg-[#a3113a] px-5 py-3 text-xs font-bold text-white">{assessment.response ? "Atualizar resposta" : "Salvar resposta"}</button>
                       {assessment.response && <span className="text-xs text-[#187157]">Última resposta por {assessment.respondedBy ?? "Secretaria CRA"} em {formatDate(assessment.respondedAt, true)}</span>}
                     </div>
                   </div>

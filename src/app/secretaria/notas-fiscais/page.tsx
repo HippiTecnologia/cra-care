@@ -6,14 +6,16 @@ import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import {
   DemoInvoice,
   DemoPatientRecord,
-  demoMedicalPatients,
-  readDemoInvoices,
-  readDemoPatients,
   openDemoInvoicePdf,
-  removeDemoInvoice,
-  saveDemoInvoice,
-  subscribeDemoPatients,
 } from "../../medico/patient-store";
+import {
+  loadSecretaryContext,
+  loadSecretaryInvoices,
+  loadSecretaryPatients,
+  removeSecretaryInvoice,
+  saveSecretaryInvoice,
+  SecretaryContext,
+} from "../../../lib/supabase/secretary-records";
 
 function normalizeCpf(value: string) {
   return value.replace(/\D/g, "");
@@ -34,17 +36,26 @@ export default function SecretariaNotasFiscaisPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [context, setContext] = useState<SecretaryContext | null>(null);
 
   useEffect(() => {
-    const synchronize = () => {
-      const savedPatients = readDemoPatients();
-      const savedIds = new Set(savedPatients.map((patient) => patient.id));
-      setPatients([...savedPatients, ...demoMedicalPatients.filter((patient) => !savedIds.has(patient.id))]);
-      setInvoices(readDemoInvoices());
-    };
-
-    queueMicrotask(synchronize);
-    return subscribeDemoPatients(synchronize);
+    let active = true;
+    void (async () => {
+      try {
+        const loadedContext = await loadSecretaryContext();
+        const [workspace, loadedInvoices] = await Promise.all([
+          loadSecretaryPatients(loadedContext),
+          loadSecretaryInvoices(loadedContext),
+        ]);
+        if (!active) return;
+        setContext(loadedContext);
+        setPatients(workspace.patients);
+        setInvoices(loadedInvoices);
+      } catch (cause) {
+        if (active) setError(cause instanceof Error ? cause.message : "Não foi possível carregar as notas fiscais.");
+      }
+    })();
+    return () => { active = false; };
   }, []);
 
   const filteredInvoices = useMemo(() => {
@@ -108,7 +119,7 @@ export default function SecretariaNotasFiscaisPage() {
     }
 
     if (file.size > 3 * 1024 * 1024) {
-      setError("Neste protótipo, o PDF deve ter no máximo 3 MB.");
+      setError("O PDF deve ter no máximo 3 MB.");
       return;
     }
 
@@ -144,7 +155,9 @@ export default function SecretariaNotasFiscaisPage() {
         uploadedAt: new Date().toISOString(),
         uploadedBy: "Secretaria CRA",
       };
-      saveDemoInvoice(invoice);
+      if (!context) throw new Error("A sessão da Secretaria ainda não foi carregada.");
+      const savedInvoice = await saveSecretaryInvoice(context, invoice);
+      setInvoices((current) => [savedInvoice, ...current.filter((item) => item.id !== savedInvoice.id)]);
       setMessage(`${file.name} vinculado automaticamente a ${patient.name}.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível armazenar a nota neste navegador.");
@@ -153,10 +166,16 @@ export default function SecretariaNotasFiscaisPage() {
     }
   }
 
-  function deleteInvoice(invoice: DemoInvoice) {
-    removeDemoInvoice(invoice.id);
-    setMessage(`Nota ${invoice.fileName} removida do protótipo.`);
-    setError("");
+  async function deleteInvoice(invoice: DemoInvoice) {
+    if (!context) return;
+    try {
+      await removeSecretaryInvoice(context, invoice.id);
+      setInvoices((current) => current.filter((item) => item.id !== invoice.id));
+      setMessage(`Nota ${invoice.fileName} removida.`);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível remover a nota fiscal.");
+    }
   }
 
   return (
@@ -192,7 +211,7 @@ export default function SecretariaNotasFiscaisPage() {
                   <input type="file" accept="application/pdf,.pdf" onChange={(event) => void uploadInvoice(event)} className="sr-only" />
                 </label>
               </div>
-              <p className="mt-5 rounded-2xl bg-[#fff8eb] px-4 py-3 text-xs leading-5 text-[#806238]"><strong>Protótipo:</strong> o PDF precisa conter texto pesquisável; documentos apenas escaneados precisarão de OCR na versão final. Os arquivos ficam somente neste navegador e nesta aba e depois serão armazenados de forma privada no Supabase.</p>
+              <p className="mt-5 rounded-2xl bg-[#fff8eb] px-4 py-3 text-xs leading-5 text-[#806238]">O PDF precisa conter texto pesquisável para que o CPF seja identificado automaticamente. O documento será armazenado de forma privada no banco da clínica.</p>
             </section>
 
             <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
@@ -201,7 +220,7 @@ export default function SecretariaNotasFiscaisPage() {
                 {filteredInvoices.length === 0 ? <p className="rounded-2xl border border-dashed border-[#e6dbd6] px-5 py-10 text-center text-sm text-[#817578]">Nenhuma nota fiscal encontrada.</p> : filteredInvoices.map((invoice) => (
                   <article key={invoice.id} className="flex flex-col gap-4 rounded-2xl bg-[#fbf5f2] p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div><p className="text-sm font-bold text-[#433438]">{invoice.patientName}</p><p className="mt-1 text-xs text-[#716569]">CPF {invoice.patientCpf} · {invoice.fileName}</p><p className="mt-1 text-xs text-[#817578]">{formatSize(invoice.fileSize)} · Enviado em {formatDate(invoice.uploadedAt)}</p></div>
-                    <div className="flex flex-wrap gap-2"><button type="button" onClick={() => { if (!openDemoInvoicePdf(invoice)) setError("O navegador bloqueou a abertura do PDF. Permita pop-ups para este site ou use o botão Baixar."); }} className="rounded-xl border border-[#e6dbd6] px-4 py-2.5 text-xs font-semibold text-[#a3113a]">Abrir PDF</button><a href={invoice.fileData} download={invoice.fileName} className="rounded-xl bg-[#a3113a] px-4 py-2.5 text-xs font-semibold text-white">Baixar</a><button type="button" onClick={() => deleteInvoice(invoice)} className="rounded-xl bg-[#fff1f3] px-4 py-2.5 text-xs font-semibold text-[#a3113a]">Remover</button></div>
+                    <div className="flex flex-wrap gap-2"><button type="button" onClick={() => { if (!openDemoInvoicePdf(invoice)) setError("O navegador bloqueou a abertura do PDF. Permita pop-ups para este site ou use o botão Baixar."); }} className="rounded-xl border border-[#e6dbd6] px-4 py-2.5 text-xs font-semibold text-[#a3113a]">Abrir PDF</button><a href={invoice.fileData} download={invoice.fileName} className="rounded-xl bg-[#a3113a] px-4 py-2.5 text-xs font-semibold text-white">Baixar</a><button type="button" onClick={() => void deleteInvoice(invoice)} className="rounded-xl bg-[#fff1f3] px-4 py-2.5 text-xs font-semibold text-[#a3113a]">Remover</button></div>
                   </article>
                 ))}
               </div>

@@ -4,15 +4,15 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   DemoPatientRecord,
-  demoMedicalPatients,
-  readDemoPatients,
-  subscribeDemoPatients,
 } from "../../medico/patient-store";
 import {
   PatientPortalState,
-  readPortalState,
-  subscribePortalState,
 } from "../../paciente/patient-portal-store";
+import {
+  loadSecretaryContext,
+  loadSecretaryPatients,
+  loadSecretaryPortals,
+} from "../../../lib/supabase/secretary-records";
 
 type ContractFilter = "todos" | "assinados" | "pendentes";
 type ContractSection = { heading: string; text: string };
@@ -91,18 +91,21 @@ export default function ContractsPage() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    const synchronize = () => {
-      const saved = readDemoPatients();
-      const savedIds = new Set(saved.map((item) => item.id));
-      const active = [...saved, ...demoMedicalPatients.filter((item) => !savedIds.has(item.id))]
-        .filter((item) => item.status === "ativo");
-      setPatients(active);
-      setPortals(Object.fromEntries(active.map((item) => [item.id, readPortalState(item.id)])));
-    };
-    queueMicrotask(synchronize);
-    const unsubscribePatients = subscribeDemoPatients(synchronize);
-    const unsubscribePortal = subscribePortalState(synchronize);
-    return () => { unsubscribePatients(); unsubscribePortal(); };
+    let active = true;
+    void (async () => {
+      try {
+        const context = await loadSecretaryContext();
+        const workspace = await loadSecretaryPatients(context);
+        const currentPatients = workspace.patients.filter((item) => item.status === "ativo");
+        const loadedPortals = await loadSecretaryPortals(currentPatients.map((item) => item.id));
+        if (!active) return;
+        setPatients(currentPatients);
+        setPortals(loadedPortals);
+      } catch (cause) {
+        if (active) setMessage(cause instanceof Error ? cause.message : "Não foi possível carregar os contratos.");
+      }
+    })();
+    return () => { active = false; };
   }, []);
 
   const totals = useMemo(() => ({
@@ -118,7 +121,13 @@ export default function ContractsPage() {
   }), [filter, patients, portals, search]);
 
   function openContract(patient: DemoPatientRecord) {
-    const portal = portals[patient.id] ?? readPortalState(patient.id);
+    const portal = portals[patient.id] ?? {
+      patientId: patient.id,
+      bottles: [],
+      useRecords: [],
+      assessments: [],
+      reminders: { enabled: false, weekdays: [], time: "09:00" },
+    };
     const popup = window.open("", "_blank", "width=900,height=760");
     if (!popup) {
       setMessage("Permita a abertura de janelas para visualizar o contrato.");

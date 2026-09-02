@@ -34,7 +34,10 @@ export async function POST(request: NextRequest) {
       const { data: created, error } = await admin.auth.admin.createUser({ email: authEmailForUsername(body.username), password: initialPassword, email_confirm: true, user_metadata: { username: body.username, role: "paciente" } });
       if (error || !created.user) return NextResponse.json({ error: error?.message ?? "Não foi possível criar o acesso." }, { status: 400 });
       const { error: patientError } = await admin.from("patients").update({ auth_user_id: created.user.id, username: body.username, must_change_password: false }).eq("id", body.patientId).eq("clinic_id", clinicId);
-      if (patientError) return NextResponse.json({ error: patientError.message }, { status: 400 });
+      if (patientError) {
+        await admin.auth.admin.deleteUser(created.user.id);
+        return NextResponse.json({ error: patientError.message }, { status: 400 });
+      }
       return NextResponse.json({ username: body.username, initialPassword });
     }
 
@@ -53,5 +56,49 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ username: body.username, initialPassword, mustChangePassword: requiresPasswordChange(role) });
   } catch {
     return NextResponse.json({ error: "Não foi possível criar o acesso agora." }, { status: 500 });
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const currentActor = await actor(request);
+    if (!currentActor) return unauthorized();
+    const clinicId = currentActor.clinic_id;
+    if (!clinicId) return unauthorized();
+    const body = await request.json();
+    if (!body.userId) return NextResponse.json({ error: "Usuário não informado." }, { status: 400 });
+    const admin = getSupabaseAdminClient();
+    const { data: profile } = await admin.from("profiles")
+      .select("id, clinic_id, role, crm, username")
+      .eq("id", body.userId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    if (profile) {
+      const role = profile.role as StaffRole;
+      if (role === "admin" && !["admin", "super_admin"].includes(currentActor.role)) {
+        return unauthorized("Somente o ADM pode redefinir outro acesso administrativo.");
+      }
+      const temporaryPassword = role === "medico"
+        ? doctorInitialPassword(profile.crm ?? "")
+        : String(body.temporaryPassword || "1234");
+      const { error } = await admin.auth.admin.updateUserById(profile.id, { password: temporaryPassword });
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      const mustChangePassword = requiresPasswordChange(role);
+      await admin.from("profiles").update({ must_change_password: mustChangePassword }).eq("id", profile.id);
+      return NextResponse.json({ username: profile.username, temporaryPassword, mustChangePassword });
+    }
+
+    const { data: patient } = await admin.from("patients")
+      .select("id, auth_user_id, username, birth_date")
+      .eq("auth_user_id", body.userId)
+      .eq("clinic_id", clinicId)
+      .maybeSingle();
+    if (!patient?.auth_user_id) return NextResponse.json({ error: "Acesso não encontrado nesta clínica." }, { status: 404 });
+    const temporaryPassword = patientInitialPassword(patient.birth_date);
+    const { error } = await admin.auth.admin.updateUserById(patient.auth_user_id, { password: temporaryPassword });
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    return NextResponse.json({ username: patient.username, temporaryPassword, mustChangePassword: false });
+  } catch {
+    return NextResponse.json({ error: "Não foi possível redefinir a senha agora." }, { status: 500 });
   }
 }

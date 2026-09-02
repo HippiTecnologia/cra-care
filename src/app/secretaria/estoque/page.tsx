@@ -5,18 +5,18 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   DemoPatientRecord,
+  DemoPrescription,
   DemoStockItem,
   DemoStockStatus,
-  assignReadyStockToPatient,
-  demoMedicalPatients,
-  getPatientBillingRequirement,
-  readDemoPatients,
-  readDemoPrescriptions,
-  readDemoStock,
-  saveDemoPatient,
-  saveDemoStockItem,
-  subscribeDemoPatients,
 } from "../../medico/patient-store";
+import {
+  loadSecretaryPatients,
+  loadSecretaryPrescriptions,
+  loadSecretaryStock,
+  saveSecretaryPatient,
+  saveSecretaryStockItem,
+  SecretaryContext,
+} from "../../../lib/supabase/secretary-records";
 
 type StockFilter = "todos" | DemoStockStatus;
 type StockOriginFilter = "todos" | "pedido-paciente" | "pronta-entrega";
@@ -76,23 +76,59 @@ export default function SecretariaEstoquePage() {
   const [assignmentAsaasConfirmed, setAssignmentAsaasConfirmed] = useState(false);
   const [assignmentError, setAssignmentError] = useState("");
   const [deliveredRetentionCutoff, setDeliveredRetentionCutoff] = useState(0);
+  const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
+  const [context, setContext] = useState<SecretaryContext | null>(null);
 
   useEffect(() => {
-    const synchronize = () => {
-      const savedPatients = readDemoPatients();
-      const savedIds = new Set(savedPatients.map((patient) => patient.id));
-      setStock(readDemoStock());
-      setDeliveredRetentionCutoff(new Date().getTime() - 30 * 86_400_000);
-      setPatients([
-        ...savedPatients,
-        ...demoMedicalPatients.filter((patient) => !savedIds.has(patient.id)),
-      ]);
-    };
-
-    queueMicrotask(synchronize);
-
-    return subscribeDemoPatients(synchronize);
+    let active = true;
+    void (async () => {
+      try {
+        const workspace = await loadSecretaryPatients();
+        const [loadedStock, loadedPrescriptions] = await Promise.all([
+          loadSecretaryStock(workspace.context),
+          loadSecretaryPrescriptions(workspace.context),
+        ]);
+        if (!active) return;
+        setContext(workspace.context);
+        setStock(loadedStock);
+        setPrescriptions(loadedPrescriptions);
+        setPatients(workspace.patients);
+        setDeliveredRetentionCutoff(new Date().getTime() - 30 * 86_400_000);
+      } catch (cause) {
+        if (active) setMessage(cause instanceof Error ? cause.message : "Não foi possível carregar o estoque real.");
+      }
+    })();
+    return () => { active = false; };
   }, []);
+
+  async function persistStockItem(item: DemoStockItem) {
+    if (!context) throw new Error("A sessão da Secretaria ainda não foi carregada.");
+    const saved = await saveSecretaryStockItem(context, item);
+    setStock((current) => current.some((record) => record.id === saved.id)
+      ? current.map((record) => record.id === saved.id ? saved : record)
+      : [saved, ...current]);
+    return saved;
+  }
+
+  function getBillingRequirement(patient: DemoPatientRecord) {
+    const acquisitionMethod = patient.acquisitionMethod ?? "Por frasco";
+    const paymentMethod = patient.paymentMethod ?? "A definir";
+    const assignedReadyBottles = stock.filter((item) => item.origin === "pronta-entrega" && item.patientId === patient.id)
+      .reduce((total, item) => total + item.bottles, 0);
+    const nextBottleNumber = (patient.bottlesReceived ?? 0) + assignedReadyBottles + 1;
+    const renewalBottle = nextBottleNumber > 3 && (nextBottleNumber - 1) % 3 === 0;
+    const recurringAsaas = acquisitionMethod === "Recorrente — ASAAS";
+    const paymentRequired = !recurringAsaas && (acquisitionMethod === "Por frasco" || renewalBottle);
+    const asaasRequired = recurringAsaas || (paymentRequired && paymentMethod === "Asaas");
+    const explanation = recurringAsaas
+      ? "Pagamento recorrente: confirme no ASAAS se a cobrança está em dia."
+      : acquisitionMethod === "Por frasco"
+        ? "Cada novo frasco precisa de pagamento confirmado."
+        : paymentRequired
+          ? `Novo pagamento necessário para o ${nextBottleNumber}º frasco.`
+          : `Frasco ${nextBottleNumber} incluído no pagamento do tratamento.`;
+    return { paymentRequired, asaasRequired, explanation };
+  }
 
   const filteredStock = useMemo(() => {
     const normalized = normalizeSearch(search);
@@ -115,8 +151,8 @@ export default function SecretariaEstoquePage() {
   const selectedItem =
     filteredStock.find((item) => item.id === selectedItemId) ?? filteredStock[0];
   const assignmentPatient = patients.find((patient) => patient.id === assignmentPatientId);
-  const assignmentPrescription = assignmentPatient ? readDemoPrescriptions(assignmentPatient.id)[0] : undefined;
-  const assignmentBilling = assignmentPatient ? getPatientBillingRequirement(assignmentPatient) : undefined;
+  const assignmentPrescription = assignmentPatient ? prescriptions.find((prescription) => prescription.patientId === assignmentPatient.id) : undefined;
+  const assignmentBilling = assignmentPatient ? getBillingRequirement(assignmentPatient) : undefined;
   const selectedPatient = selectedItem?.patientId ? patients.find((patient) => patient.id === selectedItem.patientId) : undefined;
   const availableBatches = Array.from(new Map(stock.map((item) => [item.batchId, item.batchCode])).entries());
   const readyBottleCount = stock
@@ -172,12 +208,12 @@ export default function SecretariaEstoquePage() {
     },
   ];
 
-  function toggleReservation(item: DemoStockItem) {
+  async function toggleReservation(item: DemoStockItem) {
     if (item.status === "entregue" || !item.patientId) return;
 
     const reserve = item.status === "disponivel";
 
-    saveDemoStockItem({
+    await persistStockItem({
       ...item,
       status: reserve ? "reservado" : "disponivel",
       reservedAt: reserve ? new Date().toISOString() : undefined,
@@ -190,21 +226,23 @@ export default function SecretariaEstoquePage() {
     );
   }
 
-  function confirmDelivery(item: DemoStockItem) {
+  async function confirmDelivery(item: DemoStockItem) {
     if (!item.patientId || item.status !== "reservado") return;
 
     const deliveredAt = new Date().toISOString();
     const patient = patients.find((record) => record.id === item.patientId);
 
-    saveDemoStockItem({ ...item, status: "entregue", deliveredAt });
+    await persistStockItem({ ...item, status: "entregue", deliveredAt });
 
-    if (patient) {
-      saveDemoPatient({
+    if (patient && context) {
+      const updatedPatient = {
         ...patient,
         lastReceivedDate: deliveredAt.slice(0, 10),
         bottlesReceived: (patient.bottlesReceived ?? 0) + item.bottles,
         status: patient.status === "com-pedido" ? "ativo" : patient.status,
-      });
+      };
+      await saveSecretaryPatient(context, updatedPatient);
+      setPatients((current) => current.map((record) => record.id === patient.id ? updatedPatient : record));
     }
 
     setSelectedItemId(item.id);
@@ -219,19 +257,39 @@ export default function SecretariaEstoquePage() {
     setAssignmentError("");
   }
 
-  function assignSelectedItem() {
+  async function assignSelectedItem() {
     if (!selectedItem || !assignmentPatient) {
       setAssignmentError("Selecione o paciente que receberá o frasco.");
       return;
     }
 
     try {
-      const assigned = assignReadyStockToPatient(
-        selectedItem,
-        assignmentPatient,
-        assignmentPaymentConfirmed,
-        assignmentAsaasConfirmed,
-      );
+      if (selectedItem.origin !== "pronta-entrega" || selectedItem.patientId) throw new Error("Este frasco não está mais disponível como pronta entrega.");
+      if (assignmentPatient.registrationStatus !== "completed") throw new Error("Complete o cadastro do paciente antes de vincular o frasco.");
+      if (!assignmentPrescription) throw new Error("O paciente precisa de uma receita médica antes da vinculação.");
+      if (assignmentBilling?.paymentRequired && !assignmentPaymentConfirmed) throw new Error("Confirme o pagamento antes de vincular o frasco ao paciente.");
+      if (assignmentBilling?.asaasRequired && !assignmentAsaasConfirmed) throw new Error("Confirme no ASAAS se o pagamento está em dia.");
+      const now = new Date().toISOString();
+      const assigned = await persistStockItem({
+        ...selectedItem,
+        id: selectedItem.bottles > 1 ? crypto.randomUUID() : selectedItem.id,
+        prescriptionId: assignmentPrescription.id,
+        patientId: assignmentPatient.id,
+        patientName: assignmentPatient.name,
+        patientCpf: assignmentPatient.cpf,
+        patientPhone: assignmentPatient.phone,
+        doctor: assignmentPrescription.doctor,
+        treatment: assignmentPrescription.treatment,
+        phase: assignmentPrescription.phase,
+        formulas: assignmentPrescription.formulas,
+        bottles: 1,
+        delivery: assignmentPatient.delivery,
+        status: "disponivel",
+        assignedAt: now,
+        paymentConfirmedAt: assignmentBilling?.paymentRequired ? now : undefined,
+        asaasConfirmedAt: assignmentBilling?.asaasRequired ? now : undefined,
+      });
+      if (selectedItem.bottles > 1) await persistStockItem({ ...selectedItem, bottles: selectedItem.bottles - 1 });
       setSelectedItemId(assigned.id);
       setAssignmentError("");
       setOriginFilter("pedido-paciente");
@@ -251,10 +309,10 @@ export default function SecretariaEstoquePage() {
     setSelectedStockIds(allSelected ? [] : selectableIds);
   }
 
-  function reserveSelected() {
+  async function reserveSelected() {
     const selected = stock.filter((item) => selectedStockIds.includes(item.id) && item.patientId && item.status === "disponivel");
     const reservedAt = new Date().toISOString();
-    selected.forEach((item) => saveDemoStockItem({ ...item, status: "reservado", reservedAt }));
+    await Promise.all(selected.map((item) => persistStockItem({ ...item, status: "reservado", reservedAt })));
     setSelectedStockIds([]);
     setMessage(`${selected.length} envio(s) reservado(s) em conjunto.`);
   }

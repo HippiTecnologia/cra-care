@@ -2,17 +2,21 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
-  DemoPatientRecord,
-  PatientPaymentRecord,
-  readDemoPatients,
-  saveDemoPatient,
-  subscribeDemoPatients,
   treatmentPhases,
 } from "../medico/patient-store";
-import { readPortalState } from "../paciente/patient-portal-store";
+import type { DemoPatientRecord, PatientPaymentRecord } from "../medico/patient-store";
+import { createDefaultPortalState, type PatientPortalState } from "../paciente/patient-portal-store";
+import { patientUsername } from "../../lib/auth/credentials";
+import {
+  createSecretaryPatientAccess,
+  loadSecretaryPatients,
+  loadSecretaryPortals,
+  saveSecretaryPatient,
+  updateSecretaryPatientStatus,
+  type SecretaryContext,
+} from "../../lib/supabase/secretary-records";
 
 type PatientStatus =
   | "com-pedido"
@@ -30,6 +34,8 @@ type PaymentMethod = string;
 
 type Patient = {
   id: string;
+  username?: string;
+  createdAt: string;
   name: string;
   cpf: string;
   phone: string;
@@ -160,123 +166,6 @@ function dateDaysAgo(days: number) {
   return date.toISOString().slice(0, 10);
 }
 
-function birthdayToday(year: number) {
-  const today = new Date();
-
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-}
-
-const initialPatients: Patient[] = [
-  {
-    id: "001",
-    name: "Maria Fernanda Lima",
-    cpf: "123.456.789-00",
-    phone: "(41) 99999-1001",
-    email: "maria.fernanda@exemplo.com",
-    birthDate: birthdayToday(1994),
-    doctor: "Dr. Flavio Mizoguchi",
-    treatment: "Imunoterapia para rinite",
-    startDate: "2025-02-10",
-    totalMonths: 36,
-    lastReceivedDate: dateDaysAgo(38),
-    bottlesReceived: 8,
-    drops: 6,
-    phase: "FASE 1:10 - 500 UBE",
-    delivery: "Motoboy",
-    status: "com-pedido",
-  },
-  {
-    id: "002",
-    name: "João Pedro Martins",
-    cpf: "234.567.890-11",
-    phone: "(41) 99999-1002",
-    birthDate: "1987-11-18",
-    doctor: "Dra. Camila Rodrigues",
-    treatment: "Imunobacteriana",
-    startDate: "2025-09-14",
-    totalMonths: 48,
-    lastReceivedDate: dateDaysAgo(12),
-    bottlesReceived: 4,
-    drops: 5,
-    phase: "FASE 1:100 - 100 UBE",
-    delivery: "Retirada",
-    status: "bacteriana",
-  },
-  {
-    id: "003",
-    name: "Ana Clara Ribeiro",
-    cpf: "345.678.901-22",
-    phone: "(41) 99999-1003",
-    email: "ana.ribeiro@exemplo.com",
-    birthDate: "1998-04-21",
-    doctor: "Dr. Flavio Mizoguchi",
-    treatment: "Imunoterapia para rinite",
-    startDate: "2025-05-03",
-    totalMonths: 36,
-    lastReceivedDate: dateDaysAgo(31),
-    bottlesReceived: 6,
-    drops: 6,
-    phase: "FASE 1:1000 - 10 UBE",
-    delivery: "Sedex",
-    status: "ativo",
-  },
-  {
-    id: "004",
-    name: "Carlos Henrique Souza",
-    cpf: "456.789.012-33",
-    phone: "(41) 99999-1004",
-    birthDate: "1979-08-02",
-    doctor: "Dra. Camila Rodrigues",
-    treatment: "Imunoterapia para rinite",
-    startDate: "2026-01-11",
-    totalMonths: 36,
-    lastReceivedDate: dateDaysAgo(5),
-    bottlesReceived: 1,
-    drops: 4,
-    phase: "FASE 1:10.000 - 1 UBE",
-    delivery: "Aéreo",
-    status: "em-conversa",
-  },
-  {
-    id: "005",
-    name: "Juliana Carvalho",
-    cpf: "567.890.123-44",
-    phone: "(41) 99999-1005",
-    email: "juliana.carvalho@exemplo.com",
-    birthDate: "1991-12-09",
-    doctor: "Dr. Flavio Mizoguchi",
-    treatment: "Imunobacteriana",
-    startDate: "2025-10-07",
-    totalMonths: 60,
-    lastReceivedDate: dateDaysAgo(44),
-    bottlesReceived: 3,
-    drops: 6,
-    phase: "FASE 1:4 - 1250 UBE",
-    delivery: "Motoboy",
-    status: "bacteriana",
-  },
-  {
-    id: "006",
-    name: "Beatriz Oliveira",
-    cpf: "678.901.234-55",
-    phone: "(41) 99999-1006",
-    birthDate: "1985-06-15",
-    doctor: "Dra. Camila Rodrigues",
-    treatment: "Imunoterapia para rinite",
-    startDate: "2022-03-01",
-    totalMonths: 36,
-    lastReceivedDate: dateDaysAgo(80),
-    bottlesReceived: 18,
-    drops: 6,
-    phase: "FASE 1:10 - 500 UBE",
-    delivery: "Retirada",
-    status: "concluido",
-  },
-];
-
 const phaseOptions = treatmentPhases;
 
 function createEmptyPatientForm(): NewPatientForm {
@@ -299,7 +188,7 @@ function createEmptyPatientForm(): NewPatientForm {
     deliveryNotes: "",
     billingName: "",
     billingCpf: "",
-    doctor: initialPatients[0]?.doctor ?? "",
+    doctor: "",
     treatment: "Imunoterapia para rinite",
     startDate: today,
     totalMonths: 36,
@@ -340,6 +229,8 @@ function patientFromMedicalRecord(record: DemoPatientRecord): Patient {
 
   return {
     id: record.id,
+    username: record.username,
+    createdAt: record.createdAt,
     name: record.name,
     cpf: record.cpf,
     birthDate: record.birthDate,
@@ -418,9 +309,10 @@ function requiresNewOrder(patient: Patient) {
 }
 
 export default function SecretariaPage() {
-  const router = useRouter();
   const cardWasDragged = useRef(false);
-  const [patients, setPatients] = useState<Patient[]>(initialPatients);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [context, setContext] = useState<SecretaryContext | null>(null);
+  const [portals, setPortals] = useState<Record<string, PatientPortalState>>({});
   const [search, setSearch] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("Todos os médicos");
   const [filter, setFilter] = useState<FilterMode>("todos");
@@ -439,23 +331,25 @@ export default function SecretariaPage() {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState(() => dateDaysAgo(0));
   const [paymentNotes, setPaymentNotes] = useState("");
+  const [savingPatient, setSavingPatient] = useState(false);
   const [kanbanMenuOpen, setKanbanMenuOpen] = useState(false);
   const [kanbanStatusFilter, setKanbanStatusFilter] = useState<PatientStatus | "todos">("todos");
 
   useEffect(() => {
-    const syncPatients = () => {
-      const receivedPatients = readDemoPatients().map(patientFromMedicalRecord);
-      const receivedIds = new Set(receivedPatients.map((patient) => patient.id));
-
-      setPatients([
-        ...receivedPatients,
-        ...initialPatients.filter((patient) => !receivedIds.has(patient.id)),
-      ]);
-    };
-
-    queueMicrotask(syncPatients);
-
-    return subscribeDemoPatients(syncPatients);
+    let active = true;
+    void (async () => {
+      try {
+        const workspace = await loadSecretaryPatients();
+        const loadedPortals = await loadSecretaryPortals(workspace.patients.map((patient) => patient.id));
+        if (!active) return;
+        setContext(workspace.context);
+        setPatients(workspace.patients.map(patientFromMedicalRecord));
+        setPortals(loadedPortals);
+      } catch {
+        if (active) setSuccessMessage("Não foi possível carregar a operação real da Secretaria.");
+      }
+    })();
+    return () => { active = false; };
   }, []);
 
   const doctors = [
@@ -477,7 +371,7 @@ export default function SecretariaPage() {
   }, [patients]);
 
   const pendingAssessments = patients.reduce(
-    (total, patient) => total + readPortalState(patient.id).assessments.filter((assessment) => !assessment.response).length,
+    (total, patient) => total + (portals[patient.id]?.assessments ?? []).filter((assessment) => !assessment.response).length,
     0,
   );
 
@@ -546,6 +440,48 @@ export default function SecretariaPage() {
     setFormError("");
   }
 
+  function openPatient(patient: Patient) {
+    setEditingPatientId(patient.id);
+    setNewPatient({
+      name: patient.name,
+      cpf: patient.cpf,
+      birthDate: patient.birthDate,
+      phone: patient.phone,
+      email: patient.email ?? "",
+      address: patient.address ?? "",
+      zipCode: patient.zipCode ?? "",
+      street: patient.street ?? "",
+      addressNumber: patient.addressNumber ?? "",
+      addressComplement: patient.addressComplement ?? "",
+      neighborhood: patient.neighborhood ?? "",
+      city: patient.city ?? "",
+      state: patient.state ?? "",
+      deliveryNotes: patient.deliveryNotes ?? "",
+      billingName: patient.billingName ?? patient.name,
+      billingCpf: patient.billingCpf ?? patient.cpf,
+      doctor: patient.doctor,
+      treatment: patient.treatment,
+      startDate: patient.startDate,
+      totalMonths: patient.totalMonths,
+      lastReceivedDate: patient.lastReceivedDate,
+      bottlesReceived: patient.bottlesReceived,
+      drops: patient.drops,
+      phase: patient.phase,
+      delivery: patient.delivery,
+      status: patient.status,
+      acquisitionMethod: patient.acquisitionMethod ?? "Por frasco",
+      paymentMethod: patient.paymentMethod ?? "A definir",
+      paymentInstallments: patient.paymentInstallments ?? 1,
+      payments: patient.payments ?? [],
+      notes: patient.notes ?? "",
+      abandonmentReason: patient.abandonmentReason ?? "",
+    });
+    setPaymentAmount("");
+    setPaymentNotes("");
+    setFormError("");
+    setShowPatientForm(true);
+  }
+
   function addPayment() {
     const amount = Number(paymentAmount.replace(",", "."));
 
@@ -585,7 +521,7 @@ export default function SecretariaPage() {
     setFormError("");
   }
 
-  function saveNewPatient(event: FormEvent<HTMLFormElement>) {
+  async function saveNewPatient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!editingPatientId) {
@@ -623,8 +559,15 @@ export default function SecretariaPage() {
       return;
     }
 
+    if (!context) {
+      setFormError("Não foi possível identificar a sessão da Secretaria.");
+      return;
+    }
+    const previous = patients.find((item) => item.id === editingPatientId);
     const patient: Patient = {
       id: editingPatientId,
+      username: previous?.username,
+      createdAt: previous?.createdAt ?? new Date().toISOString(),
       name: newPatient.name.trim(),
       cpf: newPatient.cpf,
       phone: newPatient.phone,
@@ -660,30 +603,36 @@ export default function SecretariaPage() {
       registrationComplete: true,
     };
 
-    const previousRecord = readDemoPatients().find(
-      (record) => record.id === editingPatientId,
-    );
-
-    saveDemoPatient({
-      ...patient,
-      createdAt: previousRecord?.createdAt ?? new Date().toISOString(),
-      registrationStatus: "completed",
-    });
-
-    setPatients((current) =>
-      current.map((existing) =>
-        existing.id === editingPatientId ? patient : existing,
-      ),
-    );
-    setNewPatient(createEmptyPatientForm());
-    setSearch("");
-    setSelectedDoctor("Todos os médicos");
-    setFilter("todos");
-    setSuccessMessage(`${patient.name} teve o cadastro complementado com sucesso.`);
-    closePatientForm();
+    setSavingPatient(true);
+    setFormError("");
+    try {
+      const record: DemoPatientRecord = {
+        ...patient,
+        username: patient.username ?? patientUsername(patient.name),
+        registrationStatus: "completed",
+      };
+      await saveSecretaryPatient(context, record);
+      let accessMessage = "";
+      if (!patient.username) {
+        const access = await createSecretaryPatientAccess(record);
+        patient.username = access.username;
+        accessMessage = ` Usuário: ${access.username}. Senha inicial: ${access.initialPassword}.`;
+      }
+      setPatients((current) => current.map((existing) => existing.id === editingPatientId ? patient : existing));
+      setNewPatient(createEmptyPatientForm());
+      setSearch("");
+      setSelectedDoctor("Todos os médicos");
+      setFilter("todos");
+      setSuccessMessage(`${patient.name} teve o cadastro complementado e salvo no Supabase.${accessMessage}`);
+      closePatientForm();
+    } catch (cause) {
+      setFormError(cause instanceof Error ? cause.message : "Não foi possível salvar o cadastro.");
+    } finally {
+      setSavingPatient(false);
+    }
   }
 
-  function movePatient(patient: Patient, status: PatientStatus, reason?: string) {
+  async function movePatient(patient: Patient, status: PatientStatus, reason?: string) {
     if (patient.status === status) return;
 
     if (status === "desistente" && !reason?.trim()) {
@@ -693,22 +642,26 @@ export default function SecretariaPage() {
       return;
     }
 
-    const previousRecord = readDemoPatients().find((record) => record.id === patient.id);
     const updatedPatient: Patient = {
       ...patient,
       status,
       abandonmentReason: status === "desistente" ? reason?.trim() : undefined,
     };
 
-    saveDemoPatient({
-      ...updatedPatient,
-      createdAt: previousRecord?.createdAt ?? new Date().toISOString(),
-      registrationStatus: patient.registrationComplete === false ? "pending-secretary" : "completed",
-    });
-    setSuccessMessage(`${patient.name} movido para ${columns.find((column) => column.id === status)?.title.toLowerCase()}.`);
-    setAbandoningPatient(null);
-    setAbandonmentReason("");
-    setAbandonmentError("");
+    if (!context) return;
+    try {
+      await updateSecretaryPatientStatus(context, {
+        ...updatedPatient,
+        registrationStatus: patient.registrationComplete === false ? "pending-secretary" : "completed",
+      });
+      setPatients((current) => current.map((item) => item.id === updatedPatient.id ? updatedPatient : item));
+      setSuccessMessage(`${patient.name} movido para ${columns.find((column) => column.id === status)?.title.toLowerCase()}.`);
+      setAbandoningPatient(null);
+      setAbandonmentReason("");
+      setAbandonmentError("");
+    } catch {
+      setSuccessMessage("Não foi possível atualizar o status do paciente.");
+    }
   }
 
   function confirmAbandonment(event: FormEvent<HTMLFormElement>) {
@@ -719,7 +672,7 @@ export default function SecretariaPage() {
       return;
     }
 
-    if (abandoningPatient) movePatient(abandoningPatient, "desistente", abandonmentReason);
+    if (abandoningPatient) void movePatient(abandoningPatient, "desistente", abandonmentReason);
   }
 
   const summaryCards: {
@@ -1001,7 +954,7 @@ export default function SecretariaPage() {
                       const patient = patients.find((item) => item.id === patientId);
                       setDraggedPatientId(null);
                       setDragOverStatus(null);
-                      if (patient) movePatient(patient, column.id);
+                      if (patient) void movePatient(patient, column.id);
                     }}
                     className={`w-[320px] shrink-0 rounded-3xl border border-[#ece4df] border-t-4 p-4 transition ${column.color} ${dragOverStatus === column.id ? "bg-[#fff1f4] ring-2 ring-[#b91142]/35" : "bg-[#f1edea]"}`}
                   >
@@ -1025,7 +978,7 @@ export default function SecretariaPage() {
                       )}
 
                       {columnPatients.map((patient) => {
-                        const portal = readPortalState(patient.id);
+                        const portal = portals[patient.id] ?? createDefaultPortalState(patient.id);
                         const currentBottle = portal.bottles.find((bottle) => bottle.status === "em-uso");
                         const nextContact = currentBottle ? (() => { const date = new Date(`${currentBottle.startedAt}T12:00:00`); date.setDate(date.getDate() + 30); return date; })() : null;
                         const receivedAfterCurrentStart = Boolean(currentBottle && patient.lastReceivedDate && patient.lastReceivedDate > currentBottle.startedAt.slice(0, 10));
@@ -1041,13 +994,13 @@ export default function SecretariaPage() {
                             onClick={() => {
                               if (cardWasDragged.current) return;
                               setKanbanMenuOpen(false);
-                              router.push(`/secretaria/cadastros#${patient.id}`);
+                              openPatient(patient);
                             }}
                             onKeyDown={(event) => {
                               if (event.key !== "Enter" && event.key !== " ") return;
                               event.preventDefault();
                               setKanbanMenuOpen(false);
-                              router.push(`/secretaria/cadastros#${patient.id}`);
+                              openPatient(patient);
                             }}
                             onDragStart={(event) => {
                               cardWasDragged.current = true;
@@ -1157,8 +1110,7 @@ export default function SecretariaPage() {
           </section>
 
           <p className="mt-2 text-xs text-[#8a7d80]">
-            Ambiente demonstrativo com pacientes fictícios. A conexão segura
-            com o Supabase será implementada posteriormente.
+            Operação sincronizada com a base segura do CRA Care.
           </p>
         </section>
       </div>
@@ -1605,9 +1557,10 @@ export default function SecretariaPage() {
               <button
                 form="new-patient-form"
                 type="submit"
+                disabled={savingPatient}
                 className="rounded-xl bg-[#a3113a] px-6 py-3 text-sm font-semibold text-white"
               >
-                Salvar dados complementares
+                {savingPatient ? "Salvando..." : "Salvar dados complementares"}
               </button>
             </div>
           </div>

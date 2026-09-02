@@ -10,17 +10,17 @@ import {
   DemoPatientRecord,
   DemoPrescription,
   availableFormulas,
-  confirmDemoBatch,
-  demoDoctor,
-  demoMedicalPatients,
-  getPatientBillingRequirement,
-  readDemoBatches,
-  readDemoPatients,
-  readDemoPrescriptions,
-  saveDemoBatch,
-  subscribeDemoPatients,
   treatmentPhases,
 } from "../../medico/patient-store";
+import {
+  confirmSecretaryBatch,
+  loadSecretaryBatches,
+  loadSecretaryPatients,
+  loadSecretaryPrescriptions,
+  saveSecretaryBatch,
+  SecretaryContext,
+  SecretaryDoctor,
+} from "../../../lib/supabase/secretary-records";
 
 type BatchFilter = "todos" | DemoBatchStatus;
 
@@ -110,25 +110,64 @@ export default function SecretariaLotesPage() {
   const [readyFormula, setReadyFormula] = useState(availableFormulas[0]);
   const [readyPhase, setReadyPhase] = useState(treatmentPhases[0]);
   const [readyBottles, setReadyBottles] = useState(1);
-  const [readyDoctor, setReadyDoctor] = useState(demoDoctor.name);
+  const [readyDoctor, setReadyDoctor] = useState("");
+  const [context, setContext] = useState<SecretaryContext | null>(null);
+  const [doctors, setDoctors] = useState<SecretaryDoctor[]>([]);
 
   useEffect(() => {
-    const synchronize = () => {
-      const savedPatients = readDemoPatients();
-      const savedIds = new Set(savedPatients.map((patient) => patient.id));
-
-      setPatients([
-        ...savedPatients,
-        ...demoMedicalPatients.filter((patient) => !savedIds.has(patient.id)),
-      ]);
-      setPrescriptions(readDemoPrescriptions());
-      setBatches(readDemoBatches());
-    };
-
-    queueMicrotask(synchronize);
-
-    return subscribeDemoPatients(synchronize);
+    let active = true;
+    void (async () => {
+      try {
+        const workspace = await loadSecretaryPatients();
+        const [loadedPrescriptions, loadedBatches] = await Promise.all([
+          loadSecretaryPrescriptions(workspace.context),
+          loadSecretaryBatches(workspace.context),
+        ]);
+        if (!active) return;
+        setContext(workspace.context);
+        setDoctors(workspace.doctors);
+        setPatients(workspace.patients);
+        setPrescriptions(loadedPrescriptions);
+        setBatches(loadedBatches);
+        setReadyDoctor(workspace.doctors[0]?.fullName ?? "");
+      } catch (cause) {
+        if (active) setError(cause instanceof Error ? cause.message : "Não foi possível carregar os lotes reais.");
+      }
+    })();
+    return () => { active = false; };
   }, []);
+
+  async function persistBatch(batch: DemoBatch) {
+    if (!context) throw new Error("A sessão da Secretaria ainda não foi carregada.");
+    const saved = await saveSecretaryBatch(context, batch);
+    setBatches((current) => {
+      const exists = current.some((item) => item.id === saved.id);
+      return exists ? current.map((item) => item.id === saved.id ? saved : item) : [saved, ...current];
+    });
+    return saved;
+  }
+
+  function getBillingRequirement(patient: DemoPatientRecord, requestedBottles = 1) {
+    const acquisitionMethod = patient.acquisitionMethod ?? "Por frasco";
+    const paymentMethod = patient.paymentMethod ?? "A definir";
+    const pendingBatchBottles = batches.reduce((total, batch) => total + batch.items
+      .filter((item) => item.patientId === patient.id)
+      .reduce((count, item) => count + item.bottles, 0), 0);
+    const nextBottleNumber = (patient.bottlesReceived ?? 0) + pendingBatchBottles + 1;
+    const bottleNumbers = Array.from({ length: Math.max(1, Math.trunc(requestedBottles)) }, (_, index) => nextBottleNumber + index);
+    const renewalBottle = bottleNumbers.find((number) => number > 3 && (number - 1) % 3 === 0);
+    const recurringAsaas = acquisitionMethod === "Recorrente — ASAAS";
+    const paymentRequired = !recurringAsaas && (acquisitionMethod === "Por frasco" || Boolean(renewalBottle));
+    const asaasRequired = recurringAsaas || (paymentRequired && paymentMethod === "Asaas");
+    const explanation = recurringAsaas
+      ? "Pagamento recorrente: confirme no ASAAS se a cobrança está em dia."
+      : acquisitionMethod === "Por frasco"
+        ? "Cada novo frasco precisa de pagamento confirmado."
+        : paymentRequired
+          ? `Novo pagamento necessário: o pedido inclui o ${renewalBottle}º frasco.`
+          : `Frasco ${nextBottleNumber} incluído no pagamento do tratamento.`;
+    return { acquisitionMethod, paymentMethod, nextBottleNumber, paymentRequired, asaasRequired, explanation };
+  }
 
   const patientById = useMemo(
     () => new Map(patients.map((patient) => [patient.id, patient])),
@@ -222,7 +261,7 @@ export default function SecretariaLotesPage() {
       ? selectedPrescriptions.find((prescription) => {
           const patient = patientById.get(prescription.patientId);
           if (!patient) return true;
-          const billing = getPatientBillingRequirement(patient, prescription.bottles);
+          const billing = getBillingRequirement(patient, prescription.bottles);
           const confirmation = paymentConfirmations[prescription.id];
           return (billing.paymentRequired && !confirmation?.payment) || (billing.asaasRequired && !confirmation?.asaas);
         })
@@ -230,7 +269,7 @@ export default function SecretariaLotesPage() {
 
     if (missingPayment) {
       const patient = patientById.get(missingPayment.patientId);
-      const billing = patient ? getPatientBillingRequirement(patient, missingPayment.bottles) : undefined;
+      const billing = patient ? getBillingRequirement(patient, missingPayment.bottles) : undefined;
       setError(billing?.asaasRequired && !paymentConfirmations[missingPayment.id]?.asaas
         ? `Confirmar no ASAAS se o pagamento de ${patient?.name} está em dia.`
         : `Confirme o pagamento de ${patient?.name ?? "todos os pacientes"} antes de incluir no lote.`);
@@ -246,7 +285,7 @@ export default function SecretariaLotesPage() {
         const patient = patientById.get(prescription.patientId);
 
         if (!patient) return [];
-        const billing = getPatientBillingRequirement(patient, prescription.bottles);
+        const billing = getBillingRequirement(patient, prescription.bottles);
         const confirmedAt = new Date().toISOString();
 
         return [
@@ -273,7 +312,7 @@ export default function SecretariaLotesPage() {
     );
   }
 
-  function createBatch() {
+  async function createBatch() {
     if (!batchName.trim()) {
       setError("Informe o nome do lote, por exemplo: 15-08-2026.");
       return;
@@ -307,18 +346,18 @@ export default function SecretariaLotesPage() {
       items,
     };
 
-    saveDemoBatch(batch);
+    const savedBatch = await persistBatch(batch);
     setSelectedIds([]);
     setReadyItems([]);
     setPaymentConfirmations({});
     setNotes("");
-    setEditingBatchId(orderType === "pedido-paciente" ? batch.id : null);
-    setExpandedBatchId(batch.id);
+    setEditingBatchId(orderType === "pedido-paciente" ? savedBatch.id : null);
+    setExpandedBatchId(savedBatch.id);
     setError("");
     setMessage(`Lote ${batch.name} criado em ${formatDate(createdAt)}. Adicione os pacientes e envie manualmente ao laboratório quando estiver pronto.`);
   }
 
-  function addSelectedPatientsToBatch() {
+  async function addSelectedPatientsToBatch() {
     if (!editingBatch || selectedPrescriptions.length === 0) {
       setError("Selecione ao menos um paciente para adicionar ao lote.");
       return;
@@ -327,7 +366,7 @@ export default function SecretariaLotesPage() {
     if (!validateSelectedPayments()) return;
 
     const items = createSelectedPatientItems();
-    saveDemoBatch({ ...editingBatch, items: [...editingBatch.items, ...items] });
+    await persistBatch({ ...editingBatch, items: [...editingBatch.items, ...items] });
     setSelectedIds([]);
     setPaymentConfirmations({});
     setExpandedBatchId(editingBatch.id);
@@ -335,10 +374,10 @@ export default function SecretariaLotesPage() {
     setMessage(`${items.length} paciente(s) adicionado(s) ao lote ${editingBatch.name ?? editingBatch.code}.`);
   }
 
-  function removeBatchItem(batch: DemoBatch, item: DemoBatchItem) {
+  async function removeBatchItem(batch: DemoBatch, item: DemoBatchItem) {
     if (batch.status !== "rascunho") return;
 
-    saveDemoBatch({
+    await persistBatch({
       ...batch,
       items: batch.items.filter((current) => current.prescriptionId !== item.prescriptionId),
     });
@@ -375,7 +414,7 @@ export default function SecretariaLotesPage() {
         patientName: "Pronta entrega · sem paciente",
         patientCpf: "",
         doctor: readyDoctor,
-        doctorCrm: demoDoctor.crm,
+        doctorCrm: doctors.find((doctor) => doctor.fullName === readyDoctor)?.crm ?? "",
         preparedBy: "Secretaria CRA",
         prescriptionStatus: "aguardando-aprovacao",
         treatment: "Imunoterapia para pronta entrega",
@@ -388,14 +427,14 @@ export default function SecretariaLotesPage() {
     setReadyBottles(1);
   }
 
-  function sendBatch(batch: DemoBatch) {
+  async function sendBatch(batch: DemoBatch) {
     if (batch.items.length === 0) {
       setError("Adicione pelo menos um paciente ou frasco antes de enviar o lote ao laboratório.");
       setExpandedBatchId(batch.id);
       return;
     }
 
-    saveDemoBatch({
+    await persistBatch({
       ...batch,
       status: "enviado",
       sentAt: new Date().toISOString(),
@@ -417,7 +456,7 @@ export default function SecretariaLotesPage() {
     setError("");
   }
 
-  function toggleCheckedItem(batch: DemoBatch, prescriptionId: string) {
+  async function toggleCheckedItem(batch: DemoBatch, prescriptionId: string) {
     if (batch.status !== "pronto") return;
 
     const current = batch.checkedPrescriptionIds ?? [];
@@ -425,17 +464,27 @@ export default function SecretariaLotesPage() {
       ? current.filter((id) => id !== prescriptionId)
       : [...current, prescriptionId];
 
-    saveDemoBatch({ ...batch, checkedPrescriptionIds });
+    await persistBatch({ ...batch, checkedPrescriptionIds });
     setError("");
   }
 
-  function approveBatch(batch: DemoBatch) {
+  async function approveBatch(batch: DemoBatch) {
     try {
-      const stockItems = confirmDemoBatch(
+      if (!context) throw new Error("A sessão da Secretaria ainda não foi carregada.");
+      const stockItems = await confirmSecretaryBatch(
+        context,
         batch,
         conferenceResponsible,
         conferenceNotes,
+        patients,
       );
+      setBatches((current) => current.map((item) => item.id === batch.id ? {
+        ...item,
+        status: "conferido",
+        checkedAt: new Date().toISOString(),
+        checkedBy: conferenceResponsible.trim(),
+        conferenceNotes: conferenceNotes.trim(),
+      } : item));
       const bottleCount = stockItems.reduce((total, item) => total + item.bottles, 0);
 
       setError("");
@@ -644,7 +693,7 @@ export default function SecretariaLotesPage() {
                     const selected = selectedIds.includes(prescription.id);
                     const registrationPending =
                       patient?.registrationStatus !== "completed";
-                    const billing = patient ? getPatientBillingRequirement(patient, prescription.bottles) : undefined;
+                    const billing = patient ? getBillingRequirement(patient, prescription.bottles) : undefined;
 
                     return (
                       <button
@@ -718,7 +767,7 @@ export default function SecretariaLotesPage() {
                   <div className="mt-6 grid gap-4 sm:grid-cols-2">
                     <label className="text-sm font-semibold text-[#544449] sm:col-span-2">Médico solicitante
                       <select value={readyDoctor} onChange={(event) => setReadyDoctor(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
-                        <option value={demoDoctor.name}>{demoDoctor.name} · CRM {demoDoctor.crm}</option>
+                        {doctors.map((doctor) => <option key={doctor.id} value={doctor.fullName}>{doctor.fullName} · CRM {doctor.crm}</option>)}
                       </select>
                       <span className="mt-2 block text-xs font-normal leading-5 text-[#817578]">A receita será preparada pela secretaria e ficará aguardando a aprovação deste médico.</span>
                     </label>
@@ -790,7 +839,7 @@ export default function SecretariaLotesPage() {
                   {selectedPrescriptions.map((prescription) => {
                     const patient = patientById.get(prescription.patientId);
                     if (!patient) return null;
-                    const billing = getPatientBillingRequirement(patient, prescription.bottles);
+                    const billing = getBillingRequirement(patient, prescription.bottles);
                     const confirmation = paymentConfirmations[prescription.id] ?? { payment: false, asaas: false };
 
                     return (
