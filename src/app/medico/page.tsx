@@ -8,26 +8,15 @@ import {
   demoDoctor,
   demoMedicalPatients,
   readDemoPatients,
-  saveDemoPatient,
   subscribeDemoPatients,
 } from "./patient-store";
 import { readPortalState } from "../paciente/patient-portal-store";
+import { getSupabaseClient } from "../../lib/supabase/client";
 
 type DoctorSection = "dashboard" | "pacientes" | "evolucao";
 type DoctorPatientFilter = "todos" | "ativo" | "com-pedido" | "tentar-novamente" | "concluido" | "perdido" | "desistente";
 
 const loggedDoctor = demoDoctor.name;
-
-const existingPatients = demoMedicalPatients.map((patient) => ({
-  id: patient.id,
-  name: patient.name,
-  cpf: patient.cpf,
-  birthDate: patient.birthDate,
-  status:
-    patient.status === "tentar-novamente"
-      ? "Em acompanhamento"
-      : "Tratamento ativo",
-}));
 
 function formatCpf(value: string) {
   const digits = value.replace(/\D/g, "").slice(0, 11);
@@ -120,7 +109,7 @@ export default function MedicoPage() {
     setError("");
   }
 
-  function registerPatient(event: FormEvent<HTMLFormElement>) {
+  async function registerPatient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const normalizedCpf = cpf.replace(/\D/g, "");
@@ -130,35 +119,22 @@ export default function MedicoPage() {
       return;
     }
 
-    const duplicate = [...existingPatients, ...records].some(
-      (patient) => patient.cpf.replace(/\D/g, "") === normalizedCpf,
-    );
-
-    if (duplicate) {
-      setError("Já existe um paciente cadastrado com esse CPF.");
-      return;
+    try {
+      const supabase = getSupabaseClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: clinicId, error: clinicError } = await supabase.rpc("current_clinic_id");
+      if (!user || clinicError || !clinicId) throw new Error("Não foi possível identificar o médico logado.");
+      const { error: duplicateError, data: duplicate } = await supabase.from("patients").select("id").eq("cpf", cpf).maybeSingle();
+      if (duplicateError) throw duplicateError;
+      if (duplicate) { setError("Já existe um paciente cadastrado com esse CPF."); return; }
+      const { error } = await supabase.from("patients").insert({ clinic_id: clinicId as string, doctor_profile_id: user.id, full_name: name.trim(), cpf, birth_date: birthDate, phone: phone.trim() || null, status: "em-conversa", address: {}, treatment: {}, financial: {} });
+      if (error) throw error;
+      setName(""); setCpf(""); setBirthDate(""); setPhone(""); setSearch("");
+      setMessage(`${name.trim()} foi encaminhado para a secretaria completar o cadastro.`);
+      closeForm();
+    } catch {
+      setError("Não foi possível salvar o pré-cadastro agora. Tente novamente.");
     }
-
-    const patient: DemoPatientRecord = {
-      id: crypto.randomUUID(),
-      name: name.trim(),
-      cpf,
-      birthDate,
-      phone: phone.trim() || undefined,
-      doctor: loggedDoctor,
-      createdAt: new Date().toISOString(),
-      registrationStatus: "pending-secretary",
-      status: "em-conversa",
-    };
-
-    saveDemoPatient(patient);
-    setName("");
-    setCpf("");
-    setBirthDate("");
-    setPhone("");
-    setSearch("");
-    setMessage(`${patient.name} foi encaminhado para a secretaria completar o cadastro.`);
-    closeForm();
   }
 
   return (
