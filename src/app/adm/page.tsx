@@ -1,19 +1,13 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DemoInvoice,
   DemoPatientRecord,
   PatientPaymentRecord,
-  demoMedicalPatients,
   openDemoInvoicePdf,
-  readDemoInvoices,
-  readDemoPatients,
-  saveDemoPatient,
-  subscribeDemoPatients,
 } from "../medico/patient-store";
 import {
   AdminAuditEntry,
@@ -23,22 +17,19 @@ import {
   AdminSaleSnapshot,
   AdminTreatmentMethod,
   COMMISSION_PER_BOTTLE,
+  treatmentMethodTotal,
+} from "./admin-store";
+import {
+  AdminContext,
+  loadAdminWorkspace,
   markAdminCommissionPaid,
-  readAdminAudit,
-  readAdminCommissions,
-  readAdminCosts,
-  readAdminDoctors,
-  readAdminMethods,
-  readAdminSales,
   removeAdminCost,
   reverseAdminCommissionPayment,
   saveAdminCost,
   saveAdminDoctor,
   saveAdminMethod,
-  subscribeAdminStore,
-  synchronizeAdminSales,
-  treatmentMethodTotal,
-} from "./admin-store";
+} from "../../lib/supabase/admin-records";
+import { getSupabaseClient } from "../../lib/supabase/client";
 
 type Section = "dashboard" | "relatorios" | "financeiro" | "custos" | "medicos" | "comissoes" | "parcelas" | "metodos" | "auditoria";
 type ReportType = "Vendas" | "Recebimentos" | "Parcelas" | "Notas fiscais" | "Comissões" | "Custos" | "Vendas por médico" | "Conversões" | "Desistências";
@@ -77,12 +68,6 @@ const reportTypes: ReportType[] = ["Vendas", "Recebimentos", "Parcelas", "Notas 
 
 const blankCost = (): AdminFixedCost => ({ id: "", description: "", category: "Produção", amount: 0, active: true, updatedAt: "" });
 const blankMethod = (): AdminTreatmentMethod => ({ id: "", name: "", category: "Método", value: 0, cashValue: undefined, paymentMethod: "Asaas", maxInstallments: 1, billingPeriodMonths: 1, discountType: "valor", discountValue: 0, active: true, version: 1, updatedAt: "" });
-
-function mergePatients() {
-  const saved = readDemoPatients();
-  const savedIds = new Set(saved.map((patient) => patient.id));
-  return [...saved, ...demoMedicalPatients.filter((patient) => !savedIds.has(patient.id))];
-}
 
 function formatMoney(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -226,37 +211,28 @@ export default function AdminPage() {
   const [commissionDoctorFilter, setCommissionDoctorFilter] = useState("Todos");
   const [commissionStatusFilter, setCommissionStatusFilter] = useState("Disponíveis");
   const [doctorBottleCommissions, setDoctorBottleCommissions] = useState<Record<string, number>>({});
+  const [context, setContext] = useState<AdminContext | null>(null);
   const costFormRef = useRef<HTMLDivElement>(null);
   const methodFormRef = useRef<HTMLDivElement>(null);
 
+  const reloadAdmin = useCallback(async () => {
+    const workspace = await loadAdminWorkspace();
+    setContext(workspace.context);
+    setPatients(workspace.patients);
+    setMethods(workspace.methods);
+    setCosts(workspace.costs);
+    setDoctors(workspace.doctors);
+    setDoctorBottleCommissions((current) => Object.fromEntries(workspace.doctors.map((doctor) => [doctor.id, current[doctor.id] ?? doctor.commissionPerBottle ?? COMMISSION_PER_BOTTLE])));
+    setSales(workspace.sales);
+    setCommissions(workspace.commissions);
+    setAudit(workspace.audit);
+    setInvoices(workspace.invoices);
+    setAuthorized(true);
+  }, []);
+
   useEffect(() => {
-    if (!window.sessionStorage.getItem("cra-care-demo-admin-session")) {
-      router.replace("/");
-      return;
-    }
-    const synchronize = () => {
-      const nextPatients = mergePatients();
-      const nextMethods = readAdminMethods();
-      const nextDoctors = readAdminDoctors();
-      const nextSales = synchronizeAdminSales(nextPatients, nextMethods, nextDoctors);
-      setPatients(nextPatients);
-      setMethods(nextMethods);
-      setCosts(readAdminCosts());
-      setDoctors(nextDoctors);
-      setDoctorBottleCommissions((current) => Object.fromEntries(nextDoctors.map((doctor) => [doctor.id, current[doctor.id] ?? doctor.commissionPerBottle ?? COMMISSION_PER_BOTTLE])));
-      setSales(nextSales);
-      setCommissions(readAdminCommissions());
-      setAudit(readAdminAudit());
-      setInvoices(readDemoInvoices());
-    };
-    queueMicrotask(() => {
-      setAuthorized(true);
-      synchronize();
-    });
-    const unsubscribeAdmin = subscribeAdminStore(synchronize);
-    const unsubscribePatients = subscribeDemoPatients(synchronize);
-    return () => { unsubscribeAdmin(); unsubscribePatients(); };
-  }, [router]);
+    queueMicrotask(() => void reloadAdmin().catch(() => router.replace("/")));
+  }, [reloadAdmin, router]);
 
   const installments = useMemo(() => createInstallments(sales, patients, invoices, commissions), [commissions, invoices, patients, sales]);
   const activeSales = sales.filter((sale) => sale.status !== "cancelada");
@@ -361,14 +337,20 @@ export default function AdminPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function submitCost() {
+  async function submitCost() {
     if (!costDraft.description.trim() || costDraft.amount < 0) {
       setMessage("Informe a descrição e um valor válido para o custo.");
       return;
     }
-    saveAdminCost({ ...costDraft, id: costDraft.id || crypto.randomUUID(), description: costDraft.description.trim() });
-    setCostDraft(blankCost());
-    setMessage(costDraft.id ? "Custo atualizado. A alteração foi registrada no histórico do ADM." : "Custo cadastrado. A alteração foi registrada no histórico do ADM.");
+    if (!context) return setMessage("Sessão administrativa não identificada.");
+    try {
+      await saveAdminCost(context, { ...costDraft, description: costDraft.description.trim() });
+      await reloadAdmin();
+      setCostDraft(blankCost());
+      setMessage(costDraft.id ? "Custo atualizado. A alteração foi registrada no histórico do ADM." : "Custo cadastrado. A alteração foi registrada no histórico do ADM.");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Não foi possível salvar o custo.");
+    }
   }
 
   function editCost(cost: AdminFixedCost) {
@@ -379,19 +361,25 @@ export default function AdminPage() {
     });
   }
 
-  function deleteCost(cost: AdminFixedCost) {
+  async function deleteCost(cost: AdminFixedCost) {
     const confirmed = window.confirm(
       `Remover o custo "${cost.description}"? O registro da remoção ficará no histórico do ADM.`,
     );
 
     if (!confirmed) return;
 
-    removeAdminCost(cost.id);
-    if (costDraft.id === cost.id) setCostDraft(blankCost());
-    setMessage("Custo removido. A ação foi registrada no histórico do ADM.");
+    if (!context) return setMessage("Sessão administrativa não identificada.");
+    try {
+      await removeAdminCost(context, cost);
+      await reloadAdmin();
+      if (costDraft.id === cost.id) setCostDraft(blankCost());
+      setMessage("Custo removido. A ação foi registrada no histórico do ADM.");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Não foi possível remover o custo.");
+    }
   }
 
-  function submitMethod() {
+  async function submitMethod() {
     if (!methodDraft.name.trim() || methodDraft.value <= 0) {
       setMessage("Informe o nome e um valor válido para a modalidade.");
       return;
@@ -408,15 +396,20 @@ export default function AdminPage() {
         ? total * (1 - discountValue / 100)
         : total - discountValue;
     }
-    saveAdminMethod({
-      ...methodDraft,
-      id: methodDraft.id || crypto.randomUUID(),
-      name: methodDraft.name.trim(),
-      cashValue,
-      discountValue,
-    });
-    setMethodDraft(blankMethod());
-    setMessage("Modalidade salva em uma nova versão. Vendas antigas permanecem inalteradas.");
+    if (!context) return setMessage("Sessão administrativa não identificada.");
+    try {
+      await saveAdminMethod(context, {
+        ...methodDraft,
+        name: methodDraft.name.trim(),
+        cashValue,
+        discountValue,
+      });
+      await reloadAdmin();
+      setMethodDraft(blankMethod());
+      setMessage("Modalidade salva em uma nova versão. Vendas antigas permanecem inalteradas.");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Não foi possível salvar a modalidade.");
+    }
   }
 
   function editMethod(methodRecord: AdminTreatmentMethod) {
@@ -431,63 +424,64 @@ export default function AdminPage() {
     if (!invoice || !openDemoInvoicePdf(invoice)) setMessage("Nota fiscal indisponível ou abertura de janelas bloqueada.");
   }
 
-  function updateDoctorBottleCommission(doctor: AdminDoctor) {
+  async function updateDoctorBottleCommission(doctor: AdminDoctor) {
     const value = doctorBottleCommissions[doctor.id];
     if (!Number.isFinite(value) || value < 0) {
       setMessage("Informe um valor válido de comissão por frasco.");
       return;
     }
-    saveAdminDoctor({ ...doctor, commissionPerBottle: value });
-    setMessage("Comissão por frasco atualizada para novas vendas. Vendas anteriores preservam o valor contratado.");
+    if (!context) return setMessage("Sessão administrativa não identificada.");
+    try {
+      await saveAdminDoctor(context, { ...doctor, commissionPerBottle: value });
+      await reloadAdmin();
+      setMessage("Comissão por frasco atualizada para novas vendas. Vendas anteriores preservam o valor contratado.");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Não foi possível atualizar a comissão.");
+    }
   }
 
-  function markCommissionAsPaid(installment: InstallmentView) {
+  async function markCommissionAsPaid(installment: InstallmentView) {
     if (!installment.payment || !installment.commissionAt || installment.commissionRecord) return;
-    markAdminCommissionPaid({
-      installmentId: installment.id,
-      saleId: installment.sale.id,
-      patientId: installment.sale.patientId,
-      patientName: installment.sale.patientName,
-      doctor: installment.sale.doctor,
-      paymentId: installment.payment.id,
-      receivedAt: installment.payment.paidAt,
-      accountingAt: installment.commissionAt,
-      receivedValue: installment.receivedValue,
-      commissionRate: installment.sale.commissionRateSnapshot,
-      bottleCount: installment.bottleCount,
-      commissionPerBottle: installment.commissionPerBottle,
-      commissionValue: installment.commissionValue,
-    });
-    setMessage(`Comissão de ${formatMoney(installment.commissionValue)} marcada como paga para ${installment.sale.doctor}.`);
+    if (!context) return setMessage("Sessão administrativa não identificada.");
+    try {
+      await markAdminCommissionPaid(context, {
+        installmentId: installment.id,
+        saleId: installment.sale.id,
+        patientId: installment.sale.patientId,
+        patientName: installment.sale.patientName,
+        doctor: installment.sale.doctor,
+        paymentId: installment.payment.id,
+        receivedAt: installment.payment.paidAt,
+        accountingAt: installment.commissionAt,
+        receivedValue: installment.receivedValue,
+        commissionRate: installment.sale.commissionRateSnapshot,
+        bottleCount: installment.bottleCount,
+        commissionPerBottle: installment.commissionPerBottle,
+        commissionValue: installment.commissionValue,
+      });
+      await reloadAdmin();
+      setMessage(`Comissão de ${formatMoney(installment.commissionValue)} marcada como paga para ${installment.sale.doctor}.`);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Não foi possível baixar a comissão.");
+    }
   }
 
-  function reverseCommissionPayment(installment: InstallmentView) {
+  async function reverseCommissionPayment(installment: InstallmentView) {
     if (!installment.commissionRecord) return;
     if (!window.confirm(`Estornar o pagamento da comissão de ${formatMoney(installment.commissionValue)} para ${installment.sale.doctor}?`)) return;
-    reverseAdminCommissionPayment(installment.id);
-    setMessage("Pagamento de comissão estornado. A parcela volta para a lista de disponíveis.");
+    if (!context) return setMessage("Sessão administrativa não identificada.");
+    try {
+      await reverseAdminCommissionPayment(context, installment.commissionRecord);
+      await reloadAdmin();
+      setMessage("Pagamento de comissão estornado. A parcela volta para a lista de disponíveis.");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Não foi possível estornar a comissão.");
+    }
   }
 
-  function loadCommissionDemo() {
-    const demoPatients: DemoPatientRecord[] = [
-      { id: "commission-demo-001", name: "Eduardo Martins", cpf: "418.725.390-16", birthDate: "1987-03-14", doctor: "Dr. Flavio Mizoguchi", createdAt: "2026-07-15T10:00:00", registrationStatus: "completed", phone: "(41) 99999-2101", treatment: "Imunoterapia para rinite", startDate: "2026-07-15", totalMonths: 6, bottlesReceived: 2, status: "ativo", acquisitionMethod: "Método 1.0", agreedCondition: "Parcelado", paymentMethod: "Cartão de crédito", paymentInstallments: 2, contractValue: 640, payments: [{ id: "payment-demo-001", amount: 320, paidAt: "2026-07-15", method: "Cartão de crédito", installmentNumber: 1 }] },
-      { id: "commission-demo-002", name: "Camila Nogueira", cpf: "729.480.163-52", birthDate: "1992-08-21", doctor: "Dra. Camila Rodrigues", createdAt: "2026-08-05T10:00:00", registrationStatus: "completed", phone: "(41) 99999-2102", treatment: "Imunoterapia para rinite", startDate: "2026-08-05", totalMonths: 6, bottlesReceived: 3, status: "ativo", acquisitionMethod: "Tratamento de 6 meses", agreedCondition: "À vista", paymentMethod: "PIX", paymentInstallments: 1, contractValue: 1620, payments: [{ id: "payment-demo-002", amount: 1620, paidAt: "2026-08-05", method: "PIX", installmentNumber: 1 }] },
-      { id: "commission-demo-003", name: "Rafael Bittencourt", cpf: "184.630.927-40", birthDate: "1979-11-30", doctor: "Dr. Flavio Mizoguchi", createdAt: "2026-08-12T10:00:00", registrationStatus: "completed", phone: "(41) 99999-2103", treatment: "Imunoterapia para rinite", startDate: "2026-08-12", totalMonths: 6, bottlesReceived: 3, status: "ativo", acquisitionMethod: "Recorrente 1.0", agreedCondition: "Parcelado", paymentMethod: "Asaas", paymentInstallments: 6, contractValue: 1620, payments: [{ id: "payment-demo-003", amount: 270, paidAt: "2026-08-12", method: "Asaas", installmentNumber: 1 }] },
-      { id: "commission-demo-004", name: "Larissa Almeida", cpf: "506.348.172-61", birthDate: "1995-06-07", doctor: "Dra. Camila Rodrigues", createdAt: "2026-08-26T10:00:00", registrationStatus: "completed", phone: "(41) 99999-2104", treatment: "Imunoterapia para rinite", startDate: "2026-08-26", totalMonths: 1, bottlesReceived: 1, status: "ativo", acquisitionMethod: "Por frasco", agreedCondition: "À vista", paymentMethod: "Débito", paymentInstallments: 1, contractValue: 500, payments: [{ id: "payment-demo-004", amount: 500, paidAt: "2026-08-26", method: "Débito", installmentNumber: 1 }] },
-    ];
-    demoPatients.forEach((patient) => saveDemoPatient(patient));
-    const syncedSales = readAdminSales();
-    ["commission-demo-001", "commission-demo-002"].forEach((patientId) => {
-      const sale = syncedSales.find((item) => item.patientId === patientId);
-      const patient = demoPatients.find((item) => item.id === patientId);
-      const payment = patient?.payments?.[0];
-      if (!sale || !payment) return;
-      const bottles = bottleCountForSale(sale);
-      const perBottle = sale.commissionPerBottleSnapshot ?? COMMISSION_PER_BOTTLE;
-      const totalCommission = bottles * perBottle;
-      markAdminCommissionPaid({ installmentId: `${sale.id}-1`, saleId: sale.id, patientId, patientName: patient.name, doctor: sale.doctor, paymentId: payment.id, receivedAt: payment.paidAt, accountingAt: commissionDate(payment) ?? payment.paidAt, receivedValue: payment.amount, commissionRate: sale.commissionRateSnapshot, bottleCount: bottles, commissionPerBottle: perBottle, commissionValue: totalCommission / sale.installments });
-    });
-    setMessage("Cenário fictício carregado: PIX, débito, cartão com 30 dias, recorrente, comissões pagas e pendentes.");
+  async function signOut() {
+    await getSupabaseClient().auth.signOut();
+    router.replace("/");
   }
 
   const maxMonthly = Math.max(1, ...monthly.map((item) => Math.max(item.expected, item.received)));
@@ -504,11 +498,11 @@ export default function AdminPage() {
           <div className="mt-5 border-b border-white/15 pb-5"><p className="text-sm font-bold">Painel Administrativo</p><p className="mt-1 text-xs text-white/60">Gestão financeira e estratégica</p></div>
           <nav className="mt-6 space-y-1">{sections.map((item) => <button key={item.id} type="button" onClick={() => chooseSection(item.id)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition ${section === item.id ? "bg-white/16 font-bold text-white" : "text-white/75 hover:bg-white/10"}`}><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10 text-xs font-bold">{item.icon}</span>{item.label}</button>)}</nav>
           <div className="mt-8 rounded-2xl border border-white/15 bg-white/8 p-4"><p className="text-xs font-bold">Acesso protegido</p><p className="mt-2 text-[11px] leading-5 text-white/65">Preços, custos e comissões são exclusivos do ADM e possuem histórico.</p></div>
-          <Link href="/" onClick={() => window.sessionStorage.removeItem("cra-care-demo-admin-session")} className="mt-6 block rounded-xl px-3 py-3 text-sm font-semibold text-white/80 hover:bg-white/10">← Sair do painel</Link>
+          <button type="button" onClick={() => void signOut()} className="mt-6 block w-full rounded-xl px-3 py-3 text-left text-sm font-semibold text-white/80 hover:bg-white/10">← Sair do painel</button>
         </aside>
 
         <div className="min-w-0 p-4 sm:p-7 lg:ml-[280px] xl:p-9">
-          <header className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#a3113a]">Gestão executiva</p><h1 className="mt-2 text-3xl font-bold">Olá, Administrador</h1><p className="mt-2 text-sm text-[#817578]">Acompanhe vendas, caixa, custos e desempenho da clínica.</p></div><div className="rounded-2xl border border-[#e8ddd8] bg-white px-4 py-3 shadow-sm"><p className="text-sm font-bold">ADM CRA</p><p className="text-xs text-[#817578]">Acesso total às configurações</p></div></header>
+          <header className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#a3113a]">Gestão executiva</p><h1 className="mt-2 text-3xl font-bold">Olá, Administrador</h1><p className="mt-2 text-sm text-[#817578]">Acompanhe vendas, caixa, custos e desempenho da clínica.</p></div><div className="rounded-2xl border border-[#e8ddd8] bg-white px-4 py-3 shadow-sm"><p className="text-sm font-bold">{context?.fullName ?? "ADM CRA"}</p><p className="text-xs text-[#817578]">Acesso total às configurações</p></div></header>
           {message && <div className="mt-5 flex items-center justify-between rounded-2xl border border-[#d7e9df] bg-[#edf8f3] px-4 py-3 text-sm font-semibold text-[#187157]"><span>{message}</span><button type="button" onClick={() => setMessage("")} aria-label="Fechar">×</button></div>}
 
           {section === "dashboard" && <div className="mt-7 space-y-6">
@@ -533,7 +527,7 @@ export default function AdminPage() {
                 <Select label="Médico" value={commissionDoctorFilter} onChange={setCommissionDoctorFilter} options={["Todos", ...doctors.map((doctor) => doctor.name)]} />
                 <Select label="Situação" value={commissionStatusFilter} onChange={setCommissionStatusFilter} options={["Disponíveis", "Pagas", "Todas"]} />
               </div>
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[#fbf7f5] p-4"><p className="text-xs leading-5 text-[#66595d]">Quer apresentar o fluxo completo? Carregue um cenário fictício com PIX, débito, cartão, recorrência e repasses pagos.</p><button type="button" onClick={loadCommissionDemo} className="rounded-xl border border-[#a3113a] px-4 py-2 text-xs font-bold text-[#a3113a]">Carregar demonstração</button></div>
+              <div className="mt-4 rounded-2xl bg-[#fbf7f5] p-4"><p className="text-xs leading-5 text-[#66595d]">As parcelas recebidas aparecem automaticamente conforme os pagamentos reais registrados pela Secretaria. PIX e débito liberam a comissão no dia; cartão libera após 30 dias.</p></div>
             </Panel>
             <div className="grid gap-4 sm:grid-cols-3"><Kpi label="Comissões disponíveis" value={formatMoney(commissionAvailable)} detail="Prontas para fechar no período" tone="wine" /><Kpi label="Comissões já pagas" value={formatMoney(commissionPaid)} detail="Baixadas no período filtrado" tone="green" /><Kpi label="Parcelas no fechamento" value={String(commissionInstallments.length)} detail="Recebimentos sem duplicidade" tone="blue" /></div>
             <Panel title={selectedCommissionMonth ? `Comissões de ${monthLabel(selectedCommissionMonth)}` : "Comissões por parcela recebida"} subtitle="Cada tratamento gera R$ 68,00 por frasco na primeira parcela recebida; marque como paga ao realizar o repasse ao médico."><InstallmentTable installments={commissionInstallments} showCommission openInvoice={openInvoice} onMarkCommission={markCommissionAsPaid} onReverseCommission={reverseCommissionPayment} /></Panel>

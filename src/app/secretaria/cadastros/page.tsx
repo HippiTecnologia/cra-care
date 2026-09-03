@@ -19,11 +19,10 @@ import {
   createDefaultPortalState,
 } from "../../paciente/patient-portal-store";
 import {
-  AdminTreatmentMethod,
-  readAdminMethods,
-  subscribeAdminStore,
   treatmentMethodTotal,
 } from "../../adm/admin-store";
+import type { AdminTreatmentMethod } from "../../adm/admin-store";
+import { loadActiveAdminMethods } from "../../../lib/supabase/admin-records";
 import {
   loadSecretaryInvoices,
   loadSecretaryPatients,
@@ -112,11 +111,12 @@ export default function PatientRecordsPage() {
     void (async () => {
       try {
         const workspace = await loadSecretaryPatients();
-        const [loadedPortals, loadedPrescriptions, loadedInvoices, loadedStock] = await Promise.all([
+        const [loadedPortals, loadedPrescriptions, loadedInvoices, loadedStock, loadedMethods] = await Promise.all([
           loadSecretaryPortals(workspace.patients.map((item) => item.id)),
           loadSecretaryPrescriptions(workspace.context),
           loadSecretaryInvoices(workspace.context),
           loadSecretaryStock(workspace.context),
+          loadActiveAdminMethods(workspace.context),
         ]);
         if (!active) return;
         setContext(workspace.context);
@@ -125,7 +125,7 @@ export default function PatientRecordsPage() {
         setPrescriptionRecords(loadedPrescriptions);
         setInvoiceRecords(loadedInvoices);
         setStockRecords(loadedStock);
-        setAdminMethods(readAdminMethods().filter((method) => method.active));
+        setAdminMethods(loadedMethods);
         const hash = window.location.hash.slice(1);
         const initialId = workspace.patients.some((item) => item.id === hash) ? hash : workspace.patients[0]?.id ?? "";
         setSelectedId(initialId);
@@ -134,8 +134,7 @@ export default function PatientRecordsPage() {
         if (active) setMessage("Não foi possível carregar os cadastros reais da Secretaria.");
       }
     })();
-    const unsubscribeAdmin = subscribeAdminStore(() => setAdminMethods(readAdminMethods().filter((method) => method.active)));
-    return () => { active = false; unsubscribeAdmin(); };
+    return () => { active = false; };
   }, []);
 
   const patient = patients.find((item) => item.id === selectedId);
