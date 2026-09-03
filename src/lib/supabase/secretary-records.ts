@@ -368,27 +368,36 @@ function assessmentFromRow(row: Record<string, unknown>): PatientAssessment {
 }
 
 function bottleFromRow(row: Record<string, unknown>): PatientBottle {
+  const rawStatus = text(row.status).toLowerCase();
   return {
     id: text(row.id),
     number: number(row.bottle_number),
     receivedAt: text(row.received_at) || undefined,
     startedAt: text(row.started_at) || text(row.received_at),
     finishedAt: text(row.completed_at) || undefined,
-    status: row.completed_at ? "finalizado" : "em-uso",
+    status: row.completed_at || rawStatus === "finalizado"
+      ? "finalizado"
+      : row.started_at || rawStatus === "em-uso"
+        ? "em-uso"
+        : "recebido",
   };
 }
 
 export async function loadSecretaryPortals(patientIds: string[]) {
   if (!patientIds.length) return {} as Record<string, PatientPortalState>;
   const supabase = getSupabaseClient();
-  const [assessmentResult, bottleResult, contractResult] = await Promise.all([
+  const [assessmentResult, bottleResult, contractResult, settingsResult, useResult] = await Promise.all([
     supabase.from("patient_assessments").select("*").in("patient_id", patientIds).order("created_at", { ascending: false }),
     supabase.from("bottles").select("*").in("patient_id", patientIds).order("bottle_number", { ascending: false }),
     supabase.from("patient_contracts").select("*").in("patient_id", patientIds),
+    supabase.from("patient_portal_settings").select("*").in("patient_id", patientIds),
+    supabase.from("patient_use_records").select("*").in("patient_id", patientIds).order("use_date", { ascending: false }),
   ]);
   if (assessmentResult.error) throw assessmentResult.error;
   if (bottleResult.error) throw bottleResult.error;
   if (contractResult.error) throw contractResult.error;
+  if (settingsResult.error) throw settingsResult.error;
+  if (useResult.error) throw useResult.error;
   const result = Object.fromEntries(patientIds.map((id) => [id, createDefaultPortalState(id)])) as Record<string, PatientPortalState>;
   for (const row of (assessmentResult.data ?? []) as unknown as Record<string, unknown>[]) {
     const patientId = text(row.patient_id);
@@ -413,6 +422,29 @@ export async function loadSecretaryPortals(patientIds: string[]) {
     result[patientId].signedAt = text(row.signed_at) || undefined;
     result[patientId].signedName = text(row.signed_name) || undefined;
     result[patientId].signedCpf = text(row.signed_cpf) || undefined;
+  }
+  for (const row of (settingsResult.data ?? []) as unknown as Record<string, unknown>[]) {
+    const patientId = text(row.patient_id);
+    if (!result[patientId]) continue;
+    const reminders = objectValue(row.reminders);
+    result[patientId].reminders = {
+      enabled: reminders.enabled === true,
+      weekdays: Array.isArray(reminders.weekdays) ? reminders.weekdays.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6) : [1, 3, 5],
+      time: text(reminders.time, "09:00"),
+    };
+    result[patientId].dayOverrides = objectValue(row.day_overrides) as PatientPortalState["dayOverrides"];
+    result[patientId].readNotificationIds = Array.isArray(row.read_notification_ids) ? row.read_notification_ids.map(String) : [];
+  }
+  for (const row of (useResult.data ?? []) as unknown as Record<string, unknown>[]) {
+    const patientId = text(row.patient_id);
+    if (!result[patientId]) continue;
+    result[patientId].useRecords.push({
+      id: text(row.id),
+      bottleId: text(row.bottle_id),
+      date: text(row.use_date),
+      registeredAt: text(row.registered_at),
+      drops: number(row.drops, 6),
+    });
   }
   return result;
 }

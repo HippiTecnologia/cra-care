@@ -231,6 +231,89 @@ export async function loadDoctorPatients(doctor: MedicalDoctorProfile) {
   );
 }
 
+export async function loadDoctorPortalStates(
+  doctor: MedicalDoctorProfile,
+  patientIds: string[],
+) {
+  if (!patientIds.length) return {} as Record<string, PatientPortalState>;
+
+  const supabase = getSupabaseClient();
+  const [assessmentResult, bottleResult, settingsResult, useResult] = await Promise.all([
+    supabase.from("patient_assessments").select("*").in("patient_id", patientIds).order("created_at", { ascending: false }),
+    supabase.from("bottles").select("*").in("patient_id", patientIds).order("bottle_number", { ascending: false }),
+    supabase.from("patient_portal_settings").select("*").in("patient_id", patientIds),
+    supabase.from("patient_use_records").select("*").in("patient_id", patientIds).order("use_date", { ascending: false }),
+  ]);
+  if (assessmentResult.error) throw assessmentResult.error;
+  if (bottleResult.error) throw bottleResult.error;
+  if (settingsResult.error) throw settingsResult.error;
+  if (useResult.error) throw useResult.error;
+
+  const result = Object.fromEntries(patientIds.map((id) => [id, createDefaultPortalState(id)])) as Record<string, PatientPortalState>;
+  for (const row of (assessmentResult.data ?? []) as unknown as Record<string, unknown>[]) {
+    const patientId = String(row.patient_id ?? "");
+    if (!result[patientId]) continue;
+    result[patientId].assessments.push({
+      id: String(row.id),
+      bottleId: String(row.bottle_reference ?? ""),
+      bottleNumber: Number(row.bottle_number ?? 0),
+      feeling: row.feeling as PatientAssessment["feeling"],
+      symptomFrequency: row.frequency as PatientAssessment["symptomFrequency"],
+      symptomSeverity: row.severity as PatientAssessment["symptomSeverity"],
+      medicationFrequency: row.medication_frequency as PatientAssessment["medicationFrequency"],
+      notes: typeof row.comment === "string" ? row.comment : "",
+      createdAt: String(row.created_at ?? ""),
+      viewedAt: typeof row.viewed_at === "string" ? row.viewed_at : undefined,
+      viewedBy: typeof row.viewed_by === "string" ? row.viewed_by : undefined,
+      response: typeof row.response === "string" ? row.response : undefined,
+      respondedAt: typeof row.responded_at === "string" ? row.responded_at : undefined,
+      respondedBy: typeof row.responded_by === "string" ? row.responded_by : undefined,
+    });
+  }
+  for (const row of (bottleResult.data ?? []) as unknown as Record<string, unknown>[]) {
+    const patientId = String(row.patient_id ?? "");
+    if (!result[patientId]) continue;
+    const rawStatus = String(row.status ?? "").toLowerCase();
+    result[patientId].bottles.push({
+      id: String(row.id),
+      number: Number(row.bottle_number ?? 0),
+      receivedAt: typeof row.received_at === "string" ? row.received_at : undefined,
+      startedAt: typeof row.started_at === "string" ? row.started_at : String(row.received_at ?? row.created_at ?? ""),
+      finishedAt: typeof row.completed_at === "string" ? row.completed_at : undefined,
+      status: row.completed_at || rawStatus === "finalizado"
+        ? "finalizado"
+        : row.started_at || rawStatus === "em-uso"
+          ? "em-uso"
+          : "recebido",
+    });
+  }
+  for (const row of (settingsResult.data ?? []) as unknown as Record<string, unknown>[]) {
+    const patientId = String(row.patient_id ?? "");
+    if (!result[patientId]) continue;
+    const reminders = recordValue(row.reminders);
+    result[patientId].reminders = {
+      enabled: reminders.enabled === true,
+      weekdays: Array.isArray(reminders.weekdays)
+        ? reminders.weekdays.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+        : [1, 3, 5],
+      time: typeof reminders.time === "string" ? reminders.time : "09:00",
+    };
+    result[patientId].dayOverrides = recordValue(row.day_overrides) as PatientPortalState["dayOverrides"];
+  }
+  for (const row of (useResult.data ?? []) as unknown as Record<string, unknown>[]) {
+    const patientId = String(row.patient_id ?? "");
+    if (!result[patientId]) continue;
+    result[patientId].useRecords.push({
+      id: String(row.id),
+      bottleId: String(row.bottle_id ?? ""),
+      date: String(row.use_date ?? ""),
+      registeredAt: String(row.registered_at ?? ""),
+      drops: Number(row.drops ?? 0),
+    });
+  }
+  return result;
+}
+
 export async function createDoctorPatient(
   doctor: MedicalDoctorProfile,
   input: { name: string; cpf: string; birthDate: string; phone?: string },
@@ -266,17 +349,21 @@ export async function createDoctorPatient(
 export async function loadMedicalPatientWorkspace(patientId: string) {
   const doctor = await loadCurrentDoctorProfile();
   const supabase = getSupabaseClient();
-  const [patientResult, prescriptionResult, assessmentResult, bottleResult] = await Promise.all([
+  const [patientResult, prescriptionResult, assessmentResult, bottleResult, settingsResult, useResult] = await Promise.all([
     supabase.from("patients").select("*").eq("id", patientId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id).maybeSingle(),
     supabase.from("prescriptions").select("id, patient_id, content, signature_status, created_at").eq("patient_id", patientId).eq("doctor_profile_id", doctor.id).order("created_at", { ascending: false }),
     supabase.from("patient_assessments").select("*").eq("patient_id", patientId).order("created_at", { ascending: false }),
     supabase.from("bottles").select("*").eq("patient_id", patientId).order("bottle_number", { ascending: false }),
+    supabase.from("patient_portal_settings").select("*").eq("patient_id", patientId).maybeSingle(),
+    supabase.from("patient_use_records").select("*").eq("patient_id", patientId).order("use_date", { ascending: false }),
   ]);
 
   if (patientResult.error) throw patientResult.error;
   if (prescriptionResult.error) throw prescriptionResult.error;
   if (assessmentResult.error) throw assessmentResult.error;
   if (bottleResult.error) throw bottleResult.error;
+  if (settingsResult.error) throw settingsResult.error;
+  if (useResult.error) throw useResult.error;
   if (!patientResult.data) return { doctor, patient: null, prescriptions: [], portal: createDefaultPortalState(patientId) };
 
   const assessments = ((assessmentResult.data ?? []) as unknown as Record<string, unknown>[]).map((row): PatientAssessment => ({
@@ -289,19 +376,48 @@ export async function loadMedicalPatientWorkspace(patientId: string) {
     notes: typeof row.comment === "string" ? row.comment : "",
     createdAt: String(row.created_at),
   }));
-  const bottles = ((bottleResult.data ?? []) as unknown as Record<string, unknown>[]).map((row): PatientBottle => ({
-    id: String(row.id),
-    number: Number(row.bottle_number ?? 0),
-    receivedAt: typeof row.received_at === "string" ? row.received_at : undefined,
-    startedAt: typeof row.started_at === "string" ? row.started_at : String(row.received_at ?? row.created_at ?? ""),
-    finishedAt: typeof row.completed_at === "string" ? row.completed_at : undefined,
-    status: row.completed_at ? "finalizado" : "em-uso",
-  }));
+  const bottles = ((bottleResult.data ?? []) as unknown as Record<string, unknown>[]).map((row): PatientBottle => {
+    const rawStatus = String(row.status ?? "").toLowerCase();
+    return {
+      id: String(row.id),
+      number: Number(row.bottle_number ?? 0),
+      receivedAt: typeof row.received_at === "string" ? row.received_at : undefined,
+      startedAt: typeof row.started_at === "string" ? row.started_at : String(row.received_at ?? row.created_at ?? ""),
+      finishedAt: typeof row.completed_at === "string" ? row.completed_at : undefined,
+      status: row.completed_at || rawStatus === "finalizado"
+        ? "finalizado"
+        : row.started_at || rawStatus === "em-uso"
+          ? "em-uso"
+          : "recebido",
+    };
+  });
   const portal: PatientPortalState = {
     ...createDefaultPortalState(patientId),
     assessments,
     bottles,
+    useRecords: ((useResult.data ?? []) as unknown as Record<string, unknown>[]).map((row) => ({
+      id: String(row.id),
+      bottleId: String(row.bottle_id ?? ""),
+      date: String(row.use_date ?? ""),
+      registeredAt: String(row.registered_at ?? ""),
+      drops: Number(row.drops ?? 0),
+    })),
   };
+  const settings = settingsResult.data as unknown as Record<string, unknown> | null;
+  if (settings) {
+    const reminders = recordValue(settings.reminders);
+    portal.reminders = {
+      enabled: reminders.enabled === true,
+      weekdays: Array.isArray(reminders.weekdays)
+        ? reminders.weekdays.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+        : [1, 3, 5],
+      time: typeof reminders.time === "string" ? reminders.time : "09:00",
+    };
+    portal.dayOverrides = recordValue(settings.day_overrides) as PatientPortalState["dayOverrides"];
+    portal.readNotificationIds = Array.isArray(settings.read_notification_ids)
+      ? settings.read_notification_ids.map(String)
+      : [];
+  }
 
   return {
     doctor,

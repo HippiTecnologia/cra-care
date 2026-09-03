@@ -3,7 +3,6 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { setActivePortalPatient } from "./paciente/patient-portal-store";
 import { authEmailForUsername, requiresPasswordChange, type AccountRole } from "../lib/auth/credentials";
 import { getSupabaseClient } from "../lib/supabase/client";
 
@@ -61,7 +60,6 @@ export default function Home() {
         setMessage("Este acesso ainda não foi vinculado a um perfil. Procure a secretaria.");
         return;
       }
-      setActivePortalPatient(patient.id);
       router.push("/paciente");
     } catch {
       setMessage("Não foi possível conectar ao acesso seguro agora. Tente novamente em instantes.");

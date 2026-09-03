@@ -1,16 +1,10 @@
-import {
-  DemoPatientRecord,
-  demoMedicalPatients,
-  readDemoPatients,
-} from "../medico/patient-store";
-
 export type PatientBottle = {
   id: string;
   number: number;
   receivedAt?: string;
   startedAt: string;
   finishedAt?: string;
-  status: "em-uso" | "finalizado";
+  status: "recebido" | "em-uso" | "finalizado";
 };
 
 export type PatientUseRecord = {
@@ -67,63 +61,8 @@ export type PatientPortalState = {
   }>;
 };
 
-const ACTIVE_PATIENT_KEY = "cra-care-demo-active-patient";
-const PORTAL_KEY_PREFIX = "cra-care-demo-patient-portal-";
-const PORTAL_UPDATE_EVENT = "cra-care-demo-patient-portal-updated";
-
-const demoAssessments: PatientAssessment[] = [
-  {
-    id: "assessment-demo-pending",
-    bottleId: "bottle-demo-2",
-    bottleNumber: 2,
-    symptomFrequency: "as-vezes",
-    symptomSeverity: "moderados",
-    medicationFrequency: "1-2",
-    notes: "Senti melhora na respiração, mas ainda tenho espirros nos dias mais frios.",
-    createdAt: "2026-08-27T08:30:00",
-  },
-  {
-    id: "assessment-demo-answered",
-    bottleId: "bottle-demo-1",
-    bottleNumber: 1,
-    symptomFrequency: "frequentemente",
-    symptomSeverity: "moderados",
-    medicationFrequency: "3-5",
-    notes: "Nas primeiras semanas ainda precisei usar antialérgico.",
-    createdAt: "2026-07-24T16:00:00",
-    viewedAt: "2026-07-25T09:10:00",
-    viewedBy: "Secretaria CRA",
-    response: "Relato recebido. A equipe continuará acompanhando sua evolução e avisará o médico responsável.",
-    respondedAt: "2026-07-25T09:15:00",
-    respondedBy: "Secretaria CRA",
-  },
-];
-
 export function normalizeCpf(value: string) {
   return value.replace(/\D/g, "");
-}
-
-export function findPatientByCpf(cpf: string): DemoPatientRecord | undefined {
-  const normalized = normalizeCpf(cpf);
-
-  return [...readDemoPatients(), ...demoMedicalPatients].find(
-    (patient) => normalizeCpf(patient.cpf) === normalized,
-  );
-}
-
-export function setActivePortalPatient(patientId: string) {
-  window.sessionStorage.setItem(ACTIVE_PATIENT_KEY, patientId);
-}
-
-export function getActivePortalPatient(): DemoPatientRecord | undefined {
-  if (typeof window === "undefined") return undefined;
-
-  const patientId = window.sessionStorage.getItem(ACTIVE_PATIENT_KEY);
-  const allPatients = [...readDemoPatients(), ...demoMedicalPatients];
-
-  return patientId
-    ? allPatients.find((patient) => patient.id === patientId)
-    : demoMedicalPatients[0];
 }
 
 export function createDefaultPortalState(patientId: string): PatientPortalState {
@@ -132,7 +71,7 @@ export function createDefaultPortalState(patientId: string): PatientPortalState 
     bottles: [],
     useRecords: [],
     dayOverrides: {},
-    assessments: patientId === "001" ? demoAssessments.map((assessment) => ({ ...assessment })) : [],
+    assessments: [],
     readNotificationIds: [],
     bottleHistoryAdjustments: {},
     reminders: {
@@ -140,46 +79,5 @@ export function createDefaultPortalState(patientId: string): PatientPortalState 
       weekdays: [1, 3, 5],
       time: "09:00",
     },
-  };
-}
-
-export function readPortalState(patientId: string): PatientPortalState {
-  if (typeof window === "undefined") {
-    return createDefaultPortalState(patientId);
-  }
-
-  try {
-    const stored = window.sessionStorage.getItem(`${PORTAL_KEY_PREFIX}${patientId}`);
-    const parsed = stored ? (JSON.parse(stored) as PatientPortalState) : undefined;
-
-    if (parsed && patientId === "001" && parsed.assessments.length === 0) {
-      return { ...parsed, assessments: demoAssessments.map((assessment) => ({ ...assessment })) };
-    }
-
-    return parsed ?? createDefaultPortalState(patientId);
-  } catch {
-    return createDefaultPortalState(patientId);
-  }
-}
-
-export function savePortalState(state: PatientPortalState) {
-  window.sessionStorage.setItem(
-    `${PORTAL_KEY_PREFIX}${state.patientId}`,
-    JSON.stringify(state),
-  );
-  window.dispatchEvent(new Event(PORTAL_UPDATE_EVENT));
-
-  return state;
-}
-
-export function subscribePortalState(listener: () => void) {
-  if (typeof window === "undefined") return () => undefined;
-
-  window.addEventListener(PORTAL_UPDATE_EVENT, listener);
-  window.addEventListener("storage", listener);
-
-  return () => {
-    window.removeEventListener(PORTAL_UPDATE_EVENT, listener);
-    window.removeEventListener("storage", listener);
   };
 }

@@ -4,11 +4,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { DemoPatientRecord } from "./patient-store";
-import { readPortalState } from "../paciente/patient-portal-store";
+import { createDefaultPortalState, type PatientPortalState } from "../paciente/patient-portal-store";
 import {
   createDoctorPatient,
   loadCurrentDoctorProfile,
   loadDoctorPatients,
+  loadDoctorPortalStates,
   type MedicalDoctorProfile,
 } from "../../lib/supabase/medical-records";
 
@@ -50,6 +51,7 @@ export default function MedicoPage() {
   const [error, setError] = useState("");
   const [section, setSection] = useState<DoctorSection>("dashboard");
   const [patientFilter, setPatientFilter] = useState<DoctorPatientFilter>("todos");
+  const [portalStates, setPortalStates] = useState<Record<string, PatientPortalState>>({});
 
   useEffect(() => {
     let active = true;
@@ -58,9 +60,11 @@ export default function MedicoPage() {
       try {
         const profile = await loadCurrentDoctorProfile();
         const patients = await loadDoctorPatients(profile);
+        const portals = await loadDoctorPortalStates(profile, patients.map((patient) => patient.id));
         if (!active) return;
         setDoctor(profile);
         setRecords(patients);
+        setPortalStates(portals);
       } catch {
         if (active) setError("Não foi possível carregar o perfil médico e os pacientes reais.");
       }
@@ -105,7 +109,7 @@ export default function MedicoPage() {
   ].map((item) => ({ ...item, value: countByStatus(item.id), percentage: percentage(countByStatus(item.id)) }));
   const recentPatients = [...allDoctorPatients].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
   const evolution = allDoctorPatients.map((patient) => {
-    const portal = readPortalState(patient.id);
+    const portal = portalStates[patient.id] ?? createDefaultPortalState(patient.id);
     const scheduled = portal.bottles.length ? Math.max(1, portal.useRecords.length + Object.values(portal.dayOverrides ?? {}).filter((value) => value === "nao-registrado").length) : 0;
     const regularity = scheduled ? Math.round((portal.useRecords.length / scheduled) * 100) : 0;
     const positive = portal.assessments.filter((assessment) => ["muito-bem", "bem"].includes(assessment.feeling ?? "") || ["leves", "moderados"].includes(assessment.symptomSeverity ?? "")).length;

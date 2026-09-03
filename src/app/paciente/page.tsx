@@ -2,16 +2,13 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   DemoPatientRecord,
   DemoPrescription,
   DemoInvoice,
-  readDemoInvoices,
   openDemoInvoicePdf,
-  readDemoPrescriptions,
-  readDemoStock,
-  subscribeDemoPatients,
 } from "../medico/patient-store";
 import { buildBottleHistory } from "./bottle-history";
 import { buildAutomaticPatientNotifications } from "./patient-notifications";
@@ -21,12 +18,10 @@ import {
   PatientPortalState,
   PatientReminderSettings,
   createDefaultPortalState,
-  getActivePortalPatient,
   normalizeCpf,
-  readPortalState,
-  savePortalState,
-  subscribePortalState,
 } from "./patient-portal-store";
+import { loadPatientWorkspace, savePatientPortalState } from "../../lib/supabase/patient-records";
+import { getSupabaseClient } from "../../lib/supabase/client";
 
 type PatientSection = "inicio" | "frasco" | "alertas" | "calendario" | "receitas" | "notas" | "notas-fiscais" | "termo";
 
@@ -210,6 +205,7 @@ function AssessmentQuestion<T extends string>({ title, options, value, onChange 
 }
 
 export default function PatientPortalPage() {
+  const router = useRouter();
   const [patient, setPatient] = useState<DemoPatientRecord | null>(null);
   const [portal, setPortal] = useState<PatientPortalState | null>(null);
   const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
@@ -241,34 +237,22 @@ export default function PatientPortalPage() {
   const [showNotifications, setShowNotifications] = useState(false);
 
   useEffect(() => {
-    const synchronize = () => {
-      const activePatient = getActivePortalPatient();
-
-      if (!activePatient) {
-        setPatient(null);
-        setPortal(null);
-        setLoaded(true);
-        return;
-      }
-
-      const current = readPortalState(activePatient.id);
-      setPatient(activePatient);
-      setPortal(current);
-      setReminderDraft(current.reminders);
-      setPrescriptions(readDemoPrescriptions(activePatient.id));
-      setInvoices(readDemoInvoices(activePatient.id));
+    let active = true;
+    void loadPatientWorkspace().then((workspace) => {
+      if (!active) return;
+      setPatient(workspace.patient);
+      setPortal(workspace.portal);
+      setReminderDraft(workspace.portal.reminders);
+      setPrescriptions(workspace.prescriptions);
+      setInvoices(workspace.invoices);
       setLoaded(true);
-    };
-
-    queueMicrotask(synchronize);
-
-    const unsubscribePortal = subscribePortalState(synchronize);
-    const unsubscribePatients = subscribeDemoPatients(synchronize);
-
-    return () => {
-      unsubscribePortal();
-      unsubscribePatients();
-    };
+    }).catch(() => {
+      if (!active) return;
+      setPatient(null);
+      setPortal(null);
+      setLoaded(true);
+    });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -279,10 +263,13 @@ export default function PatientPortalPage() {
 
   const safePortal = portal ?? createDefaultPortalState(patient?.id ?? "");
   const bottleHistory = patient
-    ? buildBottleHistory(patient, safePortal, readDemoStock())
+    ? buildBottleHistory(patient, safePortal, [])
     : [];
   const currentBottle = safePortal.bottles.find((bottle) => bottle.status === "em-uso");
   const lastBottle = safePortal.bottles[0];
+  const startedBottleCount = safePortal.bottles.filter((bottle) => bottle.status !== "recebido").length;
+  const receivedBottleCount = Math.max(patient?.bottlesReceived ?? 0, safePortal.bottles.length);
+  const waitingBottleCount = Math.max(0, receivedBottleCount - startedBottleCount);
   const pendingAssessmentBottle = safePortal.bottles.find(
     (bottle) =>
       bottle.status === "finalizado" &&
@@ -389,8 +376,13 @@ export default function PatientPortalPage() {
   }, [currentBottle, patient, permission, portal]);
 
   function updatePortal(next: PatientPortalState) {
-    savePortalState(next);
     setPortal(next);
+    void savePatientPortalState(next).catch(() => setMessage("Não foi possível salvar esta alteração no Supabase."));
+  }
+
+  async function signOut() {
+    await getSupabaseClient().auth.signOut();
+    router.push("/");
   }
 
   function signTerm() {
@@ -424,17 +416,22 @@ export default function PatientPortalPage() {
   function startBottle() {
     if (!portal || currentBottle || pendingAssessmentBottle) return;
 
-    const bottle: PatientBottle = {
-      id: crypto.randomUUID(),
-      number: portal.bottles.length + 1,
-      receivedAt: bottleHistory.find(
-        (item) => item.number === portal.bottles.length + 1,
-      )?.receivedAt,
-      startedAt: today,
-      status: "em-uso",
-    };
+    const receivedBottle = portal.bottles.find((candidate) => candidate.status === "recebido");
+    const nextNumber = Math.max(0, ...portal.bottles.map((candidate) => candidate.number)) + 1;
+    const bottle: PatientBottle = receivedBottle
+      ? { ...receivedBottle, startedAt: today, status: "em-uso" }
+      : {
+          id: crypto.randomUUID(),
+          number: nextNumber,
+          receivedAt: bottleHistory.find((item) => item.number === nextNumber)?.receivedAt,
+          startedAt: today,
+          status: "em-uso",
+        };
+    const bottles = receivedBottle
+      ? portal.bottles.map((candidate) => candidate.id === receivedBottle.id ? bottle : candidate)
+      : [bottle, ...portal.bottles];
 
-    updatePortal({ ...portal, bottles: [bottle, ...portal.bottles] });
+    updatePortal({ ...portal, bottles });
     setShowFinishForm(false);
     setMessage(`Frasco ${bottle.number} iniciado! Agora você já pode registrar seus dias de uso.`);
     setSection("frasco");
@@ -631,7 +628,7 @@ export default function PatientPortalPage() {
       <main className="flex min-h-screen items-center justify-center bg-[#faf7f5] px-5">
         <div className="w-full max-w-md rounded-[32px] border border-[#eee5e0] bg-white p-8 text-center shadow-sm">
           <h1 className="text-2xl font-bold text-[#86203b]">Acesso do paciente</h1>
-          <p className="mt-3 text-sm text-[#766b6e]">Entre com o CPF cadastrado pela clínica para continuar.</p>
+          <p className="mt-3 text-sm text-[#766b6e]">Entre com o usuário e a senha informados pela secretaria para continuar.</p>
           <Link href="/" className="mt-6 inline-flex rounded-2xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white">
             Voltar ao login
           </Link>
@@ -766,7 +763,7 @@ export default function PatientPortalPage() {
             <p className="text-sm font-semibold">Seu cuidado, no seu ritmo</p>
             <p className="mt-2 text-xs leading-5 text-white/75">Acompanhe sua evolução e mantenha contato com sua equipe.</p>
           </div>
-          <Link href="/" className="mt-8 inline-flex text-sm font-semibold text-white/85 hover:text-white">← Sair do portal</Link>
+          <button type="button" onClick={() => void signOut()} className="mt-8 inline-flex text-sm font-semibold text-white/85 hover:text-white">← Sair do portal</button>
         </aside>
 
         <div className="min-w-0">
@@ -785,7 +782,7 @@ export default function PatientPortalPage() {
                     🔔
                     {unreadCount > 0 && <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#ffd45c] px-1 text-[10px] font-bold text-[#7a1833]">{unreadCount}</span>}
                   </button>
-                  <Link href="/" className="rounded-xl border border-white/25 bg-white/10 px-4 py-2.5 text-xs font-semibold text-white hover:bg-white/20">Sair</Link>
+                  <button type="button" onClick={() => void signOut()} className="rounded-xl border border-white/25 bg-white/10 px-4 py-2.5 text-xs font-semibold text-white hover:bg-white/20">Sair</button>
                 </div>
                 {showNotifications && (
                   <div className="absolute right-0 top-full z-[70] mt-3 w-[min(92vw,460px)] overflow-hidden rounded-2xl border border-[#eadfd9] bg-white text-[#34292d] shadow-[0_24px_70px_rgba(52,20,30,0.28)]">
@@ -821,9 +818,9 @@ export default function PatientPortalPage() {
 
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                   {[
-                    { label: "Frascos recebidos", value: String(patient.bottlesReceived ?? 0), detail: patient.lastReceivedDate ? `Última entrega: ${formatDate(patient.lastReceivedDate)}` : "Sem entrega registrada" },
-                    { label: "Frascos iniciados", value: String(portal.bottles.length), detail: "Registrados no portal" },
-                    { label: "Aguardando início", value: String(Math.max(0, (patient.bottlesReceived ?? 0) - portal.bottles.length)), detail: "Recebidos e ainda fechados" },
+                    { label: "Frascos recebidos", value: String(receivedBottleCount), detail: patient.lastReceivedDate ? `Última entrega: ${formatDate(patient.lastReceivedDate)}` : "Sem entrega registrada" },
+                    { label: "Frascos iniciados", value: String(startedBottleCount), detail: "Registrados no portal" },
+                    { label: "Aguardando início", value: String(waitingBottleCount), detail: "Recebidos e ainda fechados" },
                     { label: "Frasco atual", value: currentBottle ? `#${currentBottle.number}` : "—" },
                     { label: "Uso correto", value: `${regularity}%`, detail: `${portal.useRecords.length} dia(s) registrado(s)` },
                   ].map((item) => <article key={item.label} className="rounded-[22px] border border-[#eee5e0] bg-white p-4 shadow-sm"><p className="text-xs text-[#817578]">{item.label}</p><p className="mt-3 text-2xl font-bold text-[#a3113a]">{item.value}</p>{item.detail && <p className="mt-2 text-[11px] leading-4 text-[#817578]">{item.detail}</p>}</article>)}
@@ -849,7 +846,7 @@ export default function PatientPortalPage() {
                 <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Acompanhamento do tratamento</p>
                   <h2 className="mt-2 text-2xl font-bold text-[#433438]">Meu frasco</h2>
-                  <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{[{ label: "Recebidos", value: patient.bottlesReceived ?? 0 }, { label: "Iniciados", value: portal.bottles.length }, { label: "Concluídos", value: portal.bottles.filter((bottle) => bottle.status === "finalizado").length }, { label: "Aguardando início", value: Math.max(0, (patient.bottlesReceived ?? 0) - portal.bottles.length) }].map((item) => <div key={item.label} className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">{item.label}</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{item.value}</p></div>)}</div>
+                  <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{[{ label: "Recebidos", value: receivedBottleCount }, { label: "Iniciados", value: startedBottleCount }, { label: "Concluídos", value: safePortal.bottles.filter((bottle) => bottle.status === "finalizado").length }, { label: "Aguardando início", value: waitingBottleCount }].map((item) => <div key={item.label} className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">{item.label}</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{item.value}</p></div>)}</div>
                   {currentBottle ? <><div className="mt-6 rounded-[24px] bg-gradient-to-br from-[#fff3f5] to-[#faf5f1] p-5"><div className="flex items-center justify-between gap-3"><span className="text-3xl">💊</span><span className="rounded-full bg-[#eaf8f3] px-3 py-1 text-xs font-semibold text-[#187157]">Em uso</span></div><h3 className="mt-4 text-xl font-bold text-[#86203b]">Frasco {currentBottle.number}</h3><p className="mt-2 text-sm text-[#66595d]">Iniciado em {formatDate(currentBottle.startedAt)}</p><p className="mt-1 text-sm text-[#66595d]">Fase: {latestPrescription?.phase ?? patient.phase ?? "A definir"}</p><p className="mt-1 text-sm text-[#66595d]">{latestPrescription?.posology ?? `${patient.drops ?? 6} gotas, conforme orientação médica.`}</p></div><div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Dias registrados</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{currentBottleRecords.length}</p></div><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Regularidade</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{regularity}%</p></div></div><button type="button" onClick={() => toggleUse(today)} className={`mt-5 w-full rounded-2xl px-4 py-3.5 text-sm font-semibold ${todayRecord ? "bg-[#edf8f3] text-[#187157]" : "bg-[#a3113a] text-white"}`}>{todayRecord ? "✓ Uso de hoje registrado" : "Registrar uso de hoje"}</button><button type="button" onClick={() => setShowFinishForm(!showFinishForm)} className="mt-3 w-full rounded-2xl border border-[#eadfd9] px-4 py-3.5 text-sm font-semibold text-[#a3113a]">Finalizar frasco</button>{showFinishForm && <div className="mt-4 rounded-2xl border border-[#eee5e0] bg-[#fcfaf8] p-4"><label className="block text-sm font-semibold text-[#544449]">Data de finalização<input type="date" min={currentBottle.startedAt} max={today} value={finishDate} onChange={(event) => setFinishDate(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal" /></label><button type="button" onClick={finishBottle} className="mt-4 w-full rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">Confirmar finalização</button></div>}</> : <div className="mt-6 rounded-[24px] border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-10 text-center"><p className="text-3xl">💊</p><h3 className="mt-4 text-lg font-bold text-[#433438]">{lastBottle ? "Tudo pronto para a próxima etapa" : "Vamos começar o seu acompanhamento?"}</h3><p className="mt-2 text-sm leading-6 text-[#817578]">{lastBottle ? "Adicione o próximo frasco para continuar registrando seu tratamento." : "Inicie seu frasco e acompanhe seus dias de uso de um jeito simples."}</p><button type="button" onClick={startBottle} disabled={Boolean(pendingAssessmentBottle)} className="mt-5 rounded-2xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-45">{lastBottle ? "Adicionar próximo frasco" : "Iniciar frasco"}</button></div>}
                 </article>
 
