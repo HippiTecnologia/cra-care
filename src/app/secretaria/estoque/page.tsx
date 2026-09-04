@@ -493,7 +493,7 @@ export default function SecretariaEstoquePage() {
                 ) : (
                   filteredStock.map((item) => {
                     const active = selectedItem?.id === item.id;
-                    const status = stockStatuses[item.status];
+                    const status = stockStatuses[item.status] ?? stockStatuses.disponivel ?? { label: "Disponível", badge: "bg-[#eaf8f3] text-[#187157]" };
 
                     return (
                       <div key={item.id} className="flex items-start gap-2">
@@ -554,8 +554,8 @@ export default function SecretariaEstoquePage() {
                     {selectedItem.patientId ? selectedItem.patientName : "Pronta entrega"}
                   </h2>
                   <p className="mt-1 text-sm text-[#817578]">{selectedItem.patientId ? `CPF ${selectedItem.patientCpf}` : "Frasco disponível para vinculação a um paciente."}</p>
-                  <span className={`mt-4 inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${!selectedItem.patientId ? "bg-[#f3edff] text-[#7351a3]" : stockStatuses[selectedItem.status].badge}`}>
-                    {!selectedItem.patientId ? "Pronta entrega" : stockStatuses[selectedItem.status].label}
+                  <span className={`mt-4 inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${!selectedItem.patientId ? "bg-[#f3edff] text-[#7351a3]" : (stockStatuses[selectedItem.status] ?? stockStatuses.disponivel ?? { badge: "bg-[#eaf8f3] text-[#187157]" }).badge}`}>
+                    {!selectedItem.patientId ? "Pronta entrega" : (stockStatuses[selectedItem.status] ?? stockStatuses.disponivel ?? { label: "Disponível" }).label}
                   </span>
 
                   <div className="mt-6 grid grid-cols-2 gap-3">
