@@ -160,9 +160,7 @@ export async function markLaboratoryBatchOk(
   batch: DemoBatch,
 ) {
   if (batch.status !== "pronto") throw new Error("O lote precisa estar finalizado antes de receber o OK do laboratório.");
-  if (!batch.items.length || (batch.preparedPrescriptionIds ?? []).length !== batch.items.length) {
-    throw new Error("Confira todas as fórmulas antes de dar OK no lote.");
-  }
+  if (!batch.items.length) throw new Error("O lote não possui itens para confirmar.");
   const approved = {
     ...batch,
     laboratoryOkAt: new Date().toISOString(),

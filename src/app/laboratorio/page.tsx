@@ -162,27 +162,9 @@ export default function LaboratorioPage() {
     filteredBatches.find((batch) => batch.id === selectedBatchId) ??
     filteredBatches[0];
 
-  const selectedPreparedIds = selectedBatch?.preparedPrescriptionIds ?? [];
   const selectedBottleCount = selectedBatch?.items.reduce(
     (total, item) => total + item.bottles,
     0,
-  );
-  const selectedFormulaSummary = useMemo(() => {
-    const summary = new Map<string, { percentage: number; occurrences: number }>();
-    for (const item of selectedBatch?.items ?? []) {
-      for (const formula of item.formulas) {
-        const current = summary.get(formula.name) ?? { percentage: 0, occurrences: 0 };
-        summary.set(formula.name, {
-          percentage: current.percentage + formula.percentage,
-          occurrences: current.occurrences + 1,
-        });
-      }
-    }
-    return Array.from(summary.entries()).map(([name, values]) => ({ name, ...values }));
-  }, [selectedBatch]);
-
-  const allItemsPrepared = Boolean(
-    selectedBatch && selectedPreparedIds.length === selectedBatch.items.length,
   );
 
   const summaryCards = [
@@ -256,25 +238,7 @@ export default function LaboratorioPage() {
     }
   }
 
-  function togglePreparedItem(batch: DemoBatch, prescriptionId: string) {
-    if (batch.status !== "em-producao") return;
-
-    const current = batch.preparedPrescriptionIds ?? [];
-    const preparedPrescriptionIds = current.includes(prescriptionId)
-      ? current.filter((id) => id !== prescriptionId)
-      : [...current, prescriptionId];
-
-    void persistBatch({ ...batch, preparedPrescriptionIds })
-      .then(() => setError(""))
-      .catch((cause) => setError(cause instanceof Error ? cause.message : "Não foi possível salvar a conferência."));
-  }
-
   async function finishProduction(batch: DemoBatch) {
-    if ((batch.preparedPrescriptionIds ?? []).length !== batch.items.length) {
-      setError("Confira todas as receitas do lote antes de concluir a produção.");
-      return;
-    }
-
     try {
       await persistBatch({
         ...batch,
@@ -658,9 +622,9 @@ export default function LaboratorioPage() {
                       </p>
                     </div>
                     <div className="rounded-2xl bg-[#fbf5f2] p-4">
-                      <p className="text-xs text-[#817578]">Receitas conferidas</p>
+                      <p className="text-xs text-[#817578]">Itens de produção</p>
                       <p className="mt-2 text-2xl font-bold text-[#a3113a]">
-                        {selectedPreparedIds.length}/{selectedBatch.items.length}
+                        {selectedBatch.items.length}
                       </p>
                     </div>
                   </div>
@@ -678,24 +642,18 @@ export default function LaboratorioPage() {
                         Receitas e composição
                       </h3>
                       <span className="text-xs text-[#817578]">
-                        Confira cada formulação antes de finalizar.
+                        Produza cada item conforme a receita médica.
                       </span>
                     </div>
 
                     <div className="mt-4 space-y-4">
                       {selectedBatch.items.map((item) => {
-                        const prepared = selectedPreparedIds.includes(item.prescriptionId);
-                        const editable = selectedBatch.status === "em-producao";
                         const prescription = prescriptions.find((record) => record.id === item.prescriptionId);
 
                         return (
                           <article
                             key={item.prescriptionId}
-                            className={`rounded-2xl border p-4 sm:p-5 ${
-                              prepared
-                                ? "border-[#cfe9df] bg-[#f3fbf7]"
-                                : "border-[#eee6e2] bg-[#fdfbf9]"
-                            }`}
+                            className="rounded-2xl border border-[#eee6e2] bg-[#fdfbf9] p-4 sm:p-5"
                           >
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                               <div>
@@ -754,23 +712,6 @@ export default function LaboratorioPage() {
                               </button>
                             )}
 
-                            {(editable || prepared) && (
-                              <button
-                                type="button"
-                                disabled={!editable}
-                                onClick={() =>
-                                  togglePreparedItem(selectedBatch, item.prescriptionId)
-                                }
-                                className={`mt-4 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ${
-                                  prepared
-                                    ? "bg-[#e5f5ed] text-[#187157]"
-                                    : "bg-[#f5efec] text-[#67595d] hover:bg-[#eee5e0]"
-                                }`}
-                              >
-                                <span>{prepared ? "✓" : "○"}</span>
-                                {prepared ? "Formulação conferida" : "Marcar formulação como conferida"}
-                              </button>
-                            )}
                           </article>
                         );
                       })}
@@ -779,13 +720,12 @@ export default function LaboratorioPage() {
 
                   <div className="mt-7 grid gap-5 border-t border-[#eee5e0] pt-6 lg:grid-cols-[1fr_0.85fr]">
                     <section className="rounded-2xl border border-[#eee5e0] bg-[#fdfbf9] p-5">
-                      <h3 className="text-base font-bold text-[#433438]">Resumo das fórmulas do lote</h3>
-                      <p className="mt-1 text-xs text-[#817578]">Consolidação para produção e conferência.</p>
+                      <h3 className="text-base font-bold text-[#433438]">Relatório geral da produção</h3>
+                      <p className="mt-1 text-xs text-[#817578]">Paciente / fase / composição / médico / quantidade de frascos.</p>
                       <div className="mt-4 space-y-2">
-                        {selectedFormulaSummary.length === 0 ? <p className="text-sm text-[#817578]">Nenhuma fórmula registrada.</p> : selectedFormulaSummary.map((formula) => (
-                          <div key={formula.name} className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 text-sm">
-                            <span>{formula.name}</span>
-                            <span className="text-xs font-semibold text-[#a3113a]">{formula.occurrences} fórmula(s) · {formula.percentage}% somados</span>
+                        {selectedBatch.items.map((item) => (
+                          <div key={item.prescriptionId} className="rounded-xl bg-white px-3 py-3 text-sm text-[#433438]">
+                            {item.patientName} / {item.phase} / {item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ") || "Composição não informada"} / {item.doctor} / {item.bottles} frasco(s)
                           </div>
                         ))}
                       </div>
@@ -845,12 +785,9 @@ export default function LaboratorioPage() {
                       <button
                         type="button"
                         onClick={() => void finishProduction(selectedBatch)}
-                        disabled={!allItemsPrepared}
-                        className="mt-5 w-full rounded-xl bg-[#187157] px-4 py-3.5 text-sm font-semibold text-white hover:bg-[#115842] disabled:cursor-not-allowed disabled:opacity-45"
+                        className="mt-5 w-full rounded-xl bg-[#187157] px-4 py-3.5 text-sm font-semibold text-white hover:bg-[#115842]"
                       >
-                        {allItemsPrepared
-                          ? "Concluir produção e avisar secretaria"
-                          : `Confira as receitas para concluir (${selectedPreparedIds.length}/${selectedBatch.items.length})`}
+                        Concluir produção
                       </button>
                     )}
 
@@ -858,9 +795,9 @@ export default function LaboratorioPage() {
                       <button
                         type="button"
                         onClick={() => void approveLaboratoryBatch(selectedBatch)}
-                        className="mt-5 w-full rounded-xl bg-[#263f73] px-4 py-3.5 text-sm font-semibold text-white hover:bg-[#1d315b]"
+                        className="mt-5 w-full rounded-xl bg-[#7351a3] px-4 py-3.5 text-sm font-semibold text-white hover:bg-[#5e3e8d]"
                       >
-                        Dar OK no lote e enviar para a Secretaria
+                        Confirmar lote
                       </button>
                     )}
 
