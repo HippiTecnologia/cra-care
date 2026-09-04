@@ -141,6 +141,19 @@ function contractSections(patient: DemoPatientRecord, portal: PatientPortalState
   const paymentDetails = installments > 1
     ? `${patient.paymentMethod ?? "Forma não informada"} · ${installments}x de ${formatContractMoney(installmentValue)}${patient.paymentDueDate ? ` · primeira cobrança em ${formatDate(patient.paymentDueDate)}` : ""}`
     : patient.paymentMethod ?? "Não informada";
+  const acquisitionGuidance = (() => {
+    const method = (patient.acquisitionMethod ?? "").toLowerCase();
+    if (method.includes("frasco")) {
+      return "Neste método, cada frasco é liberado conforme a confirmação do pagamento correspondente e o acompanhamento da equipe.";
+    }
+    if (method.includes("asaas") || method.includes("recorr")) {
+      return "Neste método, as cobranças recorrentes são acompanhadas pela equipe e cada frasco é liberado conforme a situação da cobrança.";
+    }
+    if (method.includes("tratamento") || method.includes("plano")) {
+      return "Neste método, o valor e o número de parcelas correspondem ao plano de tratamento registrado pela Secretaria.";
+    }
+    return "O método de aquisição, os valores e as condições exibidos neste termo correspondem ao cadastro confirmado pela Secretaria.";
+  })();
   return [
     {
       heading: "Identificação do paciente",
@@ -160,7 +173,7 @@ function contractSections(patient: DemoPatientRecord, portal: PatientPortalState
     },
     {
       heading: "Valores, pagamento e cancelamento",
-      text: `Tratamento Imunoterápico (Alérgeno Específico) — orientação e planejamento técnico.\nValor total contratado: ${formatContractMoney(contractValue)}.\nMétodo de aquisição: ${patient.acquisitionMethod ?? "Não informado"}.\nForma de pagamento: ${paymentDetails}.\nCondição escolhida: ${patient.agreedCondition ?? "Não informada"}.\nO paciente poderá cancelar o tratamento a qualquer momento, conforme as condições registradas e acordadas com a equipe responsável.`,
+      text: `Tratamento Imunoterápico (Alérgeno Específico) — orientação e planejamento técnico.\nValor total contratado: ${formatContractMoney(contractValue)}.\nMétodo de aquisição: ${patient.acquisitionMethod ?? "Não informado"}.\nForma de pagamento: ${paymentDetails}.\nCondição escolhida: ${patient.agreedCondition ?? "Não informada"}.\n\n${acquisitionGuidance}\n\nO paciente poderá cancelar o tratamento a qualquer momento, conforme as condições registradas e acordadas com a equipe responsável.`,
     },
     {
       heading: "Possíveis efeitos adversos e crises de rinite",
@@ -720,6 +733,7 @@ export default function PatientPortalPage() {
     : 0;
   const automaticNotifications = buildAutomaticPatientNotifications(patient, currentBottle, new Date());
   const notifications = [
+    ...(portal.manualNotifications ?? []),
     ...automaticNotifications,
     ...(currentBottle && portal.reminders.enabled && portal.reminders.weekdays.includes(new Date().getDay()) && !todayRecord
       ? [{ id: `reminder-${today}-${portal.reminders.time}`, icon: "💊", title: "Uso programado para hoje", text: `Seu lembrete está configurado para ${portal.reminders.time}. Registre o uso quando realizar o tratamento.` }]

@@ -12,11 +12,17 @@ import {
 import { getSupabaseClient } from "../../lib/supabase/client";
 import {
   loadLaboratoryWorkspace,
+  markLaboratoryBatchOk,
   saveLaboratoryBatch,
   type LaboratoryContext,
 } from "../../lib/supabase/laboratory-records";
 
 type LaboratoryFilter = "todos" | "enviado" | "em-producao" | "pronto";
+
+const technicalDoctor = {
+  name: "Dr. Sérgio Fabricio Maniglia",
+  crm: "20762",
+};
 
 const statusAppearance: Record<
   Exclude<DemoBatchStatus, "rascunho">,
@@ -156,6 +162,19 @@ export default function LaboratorioPage() {
     (total, item) => total + item.bottles,
     0,
   );
+  const selectedFormulaSummary = useMemo(() => {
+    const summary = new Map<string, { percentage: number; occurrences: number }>();
+    for (const item of selectedBatch?.items ?? []) {
+      for (const formula of item.formulas) {
+        const current = summary.get(formula.name) ?? { percentage: 0, occurrences: 0 };
+        summary.set(formula.name, {
+          percentage: current.percentage + formula.percentage,
+          occurrences: current.occurrences + 1,
+        });
+      }
+    }
+    return Array.from(summary.entries()).map(([name, values]) => ({ name, ...values }));
+  }, [selectedBatch]);
 
   const allItemsPrepared = Boolean(
     selectedBatch && selectedPreparedIds.length === selectedBatch.items.length,
@@ -199,6 +218,13 @@ export default function LaboratorioPage() {
       description: "Encaminhados à secretaria",
       color: "text-[#187157]",
       icon: "✓",
+    },
+    {
+      label: "Fórmulas produzidas",
+      value: batches.filter((batch) => ["pronto", "conferido"].includes(batch.status)).reduce((total, batch) => total + batch.items.length, 0),
+      description: "Formulações finalizadas pelo laboratório",
+      color: "text-[#28728a]",
+      icon: "∑",
     },
   ];
 
@@ -260,6 +286,21 @@ export default function LaboratorioPage() {
     }
   }
 
+  async function approveLaboratoryBatch(batch: DemoBatch) {
+    if (!context) {
+      setError("Sessão do Laboratório não encontrada.");
+      return;
+    }
+    try {
+      const saved = await markLaboratoryBatchOk(context, batch);
+      setBatches((current) => current.map((item) => item.id === saved.id ? saved : item));
+      setError("");
+      setMessage(`OK do laboratório registrado no lote ${batch.code}. A secretaria já pode conferir e liberar o estoque.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível registrar o OK do lote.");
+    }
+  }
+
   function selectBatch(batch: DemoBatch) {
     setSelectedBatchId(batch.id);
     setResponsible(batch.productionResponsible ?? "Equipe de manipulação CRA");
@@ -278,10 +319,25 @@ export default function LaboratorioPage() {
   function downloadPrescription(item: DemoBatchItem, batch: DemoBatch) {
     const prescription = prescriptions.find((record) => record.id === item.prescriptionId);
 
-    if (!prescription) {
+    if (!prescription && item.formulas.length === 0) {
       setError("A receita médica deste paciente não está disponível para download.");
       return;
     }
+
+    const documentData = prescription ?? {
+      createdAt: batch.createdAt,
+      doctor: item.doctor || technicalDoctor.name,
+      doctorCrm: item.doctorCrm || technicalDoctor.crm,
+      treatment: item.treatment,
+      phase: item.phase,
+      bottles: item.bottles,
+      posology: "Conforme orientação da equipe técnica.",
+      frequency: "Conforme orientação da equipe técnica.",
+      drops: 0,
+      formulas: item.formulas,
+      notes: "Pedido de pronta entrega.",
+      signatureStatus: "ready" as const,
+    };
 
     const printWindow = window.open("", "_blank", "width=900,height=900");
 
@@ -309,21 +365,21 @@ export default function LaboratorioPage() {
     logo.className = "brand-logo";
     header.append(logo);
     addText("h1", "CRA Care · Receita médica", header);
-    addText("p", `Lote ${batch.name ?? batch.code} · Emitida em ${formatDate(prescription.createdAt)}`, header);
+    addText("p", `Lote ${batch.name ?? batch.code} · Emitida em ${formatDate(documentData.createdAt)}`, header);
     document.body.append(header);
     addText("h2", "Dados do paciente");
     addText("p", `Paciente: ${item.patientName}`);
     addText("p", `CPF: ${item.patientCpf}`);
     addText("h2", "Prescrição médica");
-    addText("p", `Médico responsável: ${prescription.doctor} · CRM ${prescription.doctorCrm}`);
-    addText("p", `Tratamento: ${prescription.treatment}`);
-    addText("p", `Fase: ${prescription.phase}`);
-    addText("p", `Quantidade: ${prescription.bottles} frasco(s)`);
-    addText("p", `Posologia: ${prescription.posology}`);
-    addText("p", `Frequência: ${prescription.frequency} · ${prescription.drops} gotas`);
+    addText("p", `Médico solicitante: ${documentData.doctor} · CRM ${documentData.doctorCrm}`);
+    addText("p", `Tratamento: ${documentData.treatment}`);
+    addText("p", `Fase: ${documentData.phase}`);
+    addText("p", `Quantidade: ${documentData.bottles} frasco(s)`);
+    addText("p", `Posologia: ${documentData.posology}`);
+    addText("p", `Frequência: ${documentData.frequency} · ${documentData.drops} gotas`);
     addText("h2", "Fórmula e composição");
 
-    for (const formula of prescription.formulas) {
+    for (const formula of documentData.formulas) {
       const row = document.createElement("div");
       row.className = "formula";
       const name = document.createElement("span");
@@ -334,15 +390,15 @@ export default function LaboratorioPage() {
       document.body.append(row);
     }
 
-    if (prescription.notes) {
+    if (documentData.notes) {
       addText("h2", "Observações do médico");
-      addText("p", prescription.notes);
+      addText("p", documentData.notes);
     }
 
     const signature = document.createElement("div");
     signature.className = "signature";
-    addText("p", `${prescription.doctor} · CRM ${prescription.doctorCrm}`, signature);
-    addText("p", prescription.signatureStatus === "signed" ? "Receita assinada" : "Assinatura pendente", signature);
+    addText("p", `${technicalDoctor.name} · CRM ${technicalDoctor.crm}`, signature);
+    addText("p", `Responsável técnico e assinatura final · ${documentData.signatureStatus === "signed" ? "Receita assinada" : "Documento preparado para assinatura"}`, signature);
     document.body.append(signature);
     printWindow.focus();
     void logo.decode().catch(() => undefined).then(() => {
@@ -642,7 +698,7 @@ export default function LaboratorioPage() {
                                   {item.patientName}
                                 </h4>
                                 <p className="mt-1 text-xs text-[#776b6e]">
-                                  {item.patientId ? `CPF ${item.patientCpf} · ${item.doctor}` : "Estoque de pronta entrega · sem paciente definido"}
+                                  {item.patientId ? `CPF ${item.patientCpf} · Médico solicitante: ${item.doctor} · Final: ${technicalDoctor.name}` : `Estoque de pronta entrega · sem paciente definido · Final: ${technicalDoctor.name}`}
                                 </p>
                               </div>
                               <span className="self-start rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#a3113a]">
@@ -653,7 +709,7 @@ export default function LaboratorioPage() {
                             <div className="mt-4 grid gap-3 text-xs text-[#66595d] sm:grid-cols-2">
                               <p><strong>Tratamento:</strong> {item.treatment}</p>
                               <p><strong>Fase:</strong> {item.phase}</p>
-                              {prescription && <p><strong>CRM:</strong> {prescription.doctorCrm}</p>}
+                              {prescription && <p><strong>CRM solicitante:</strong> {prescription.doctorCrm} · <strong>Final:</strong> CRM {technicalDoctor.crm}</p>}
                               {prescription && <p><strong>Receita emitida:</strong> {formatDate(prescription.createdAt)}</p>}
                               {prescription && <p><strong>Posologia:</strong> {prescription.posology}</p>}
                               {prescription && <p><strong>Frequência:</strong> {prescription.frequency} · {prescription.drops} gotas</p>}
@@ -682,14 +738,14 @@ export default function LaboratorioPage() {
                               </div>
                             </div>
 
-                            {item.patientId && (
+                            {(item.patientId || item.orderType === "pronta-entrega") && (
                               <button
                                 type="button"
-                                disabled={!prescription}
+                                disabled={!prescription && item.orderType !== "pronta-entrega"}
                                 onClick={() => downloadPrescription(item, selectedBatch)}
                                 className="mt-4 rounded-xl border border-[#e6dbd6] px-4 py-2.5 text-xs font-semibold text-[#a3113a] hover:bg-[#fff5f7] disabled:cursor-not-allowed disabled:opacity-45"
                               >
-                                ↓ Baixar receita em PDF
+                                ↓ Baixar documento em PDF
                               </button>
                             )}
 
@@ -714,6 +770,28 @@ export default function LaboratorioPage() {
                         );
                       })}
                     </div>
+                  </div>
+
+                  <div className="mt-7 grid gap-5 border-t border-[#eee5e0] pt-6 lg:grid-cols-[1fr_0.85fr]">
+                    <section className="rounded-2xl border border-[#eee5e0] bg-[#fdfbf9] p-5">
+                      <h3 className="text-base font-bold text-[#433438]">Resumo das fórmulas do lote</h3>
+                      <p className="mt-1 text-xs text-[#817578]">Consolidação para produção e conferência.</p>
+                      <div className="mt-4 space-y-2">
+                        {selectedFormulaSummary.length === 0 ? <p className="text-sm text-[#817578]">Nenhuma fórmula registrada.</p> : selectedFormulaSummary.map((formula) => (
+                          <div key={formula.name} className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 text-sm">
+                            <span>{formula.name}</span>
+                            <span className="text-xs font-semibold text-[#a3113a]">{formula.occurrences} fórmula(s) · {formula.percentage}% somados</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                    <section className="rounded-2xl border border-[#d8e4f5] bg-[#f7faff] p-5">
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#3c5da0]">Responsável técnico</p>
+                      <h3 className="mt-2 text-base font-bold text-[#263f73]">{technicalDoctor.name}</h3>
+                      <p className="mt-1 text-sm text-[#566c99]">CRM PR {technicalDoctor.crm}</p>
+                      <p className="mt-4 text-xs leading-5 text-[#647399]">Todos os documentos deste lote saem com a identificação final do Dr. Sérgio. A assinatura digital real será aplicada quando o certificado estiver configurado.</p>
+                      {selectedBatch.laboratoryOkAt ? <p className="mt-3 rounded-xl bg-[#eaf8f3] px-3 py-2 text-xs font-semibold text-[#187157]">✓ OK registrado por {selectedBatch.laboratoryOkBy} em {formatDate(selectedBatch.laboratoryOkAt)}</p> : <p className="mt-3 rounded-xl bg-[#fff8eb] px-3 py-2 text-xs font-semibold text-[#88642c]">Aguardando OK do laboratório.</p>}
+                    </section>
                   </div>
 
                   <div className="mt-7 border-t border-[#eee5e0] pt-6">
@@ -768,6 +846,16 @@ export default function LaboratorioPage() {
                         {allItemsPrepared
                           ? "Concluir produção e avisar secretaria"
                           : `Confira as receitas para concluir (${selectedPreparedIds.length}/${selectedBatch.items.length})`}
+                      </button>
+                    )}
+
+                    {selectedBatch.status === "pronto" && !selectedBatch.laboratoryOkAt && (
+                      <button
+                        type="button"
+                        onClick={() => void approveLaboratoryBatch(selectedBatch)}
+                        className="mt-5 w-full rounded-xl bg-[#263f73] px-4 py-3.5 text-sm font-semibold text-white hover:bg-[#1d315b]"
+                      >
+                        Dar OK no lote e enviar para a Secretaria
                       </button>
                     )}
 

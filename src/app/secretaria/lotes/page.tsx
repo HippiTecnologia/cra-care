@@ -19,10 +19,14 @@ import {
   loadSecretaryPrescriptions,
   saveSecretaryBatch,
   SecretaryContext,
-  SecretaryDoctor,
 } from "../../../lib/supabase/secretary-records";
 
 type BatchFilter = "todos" | DemoBatchStatus;
+
+const technicalDoctor = {
+  name: "Dr. Sérgio Fabricio Maniglia",
+  crm: "20762",
+};
 
 const batchStatuses: Record<
   DemoBatchStatus,
@@ -110,9 +114,7 @@ export default function SecretariaLotesPage() {
   const [readyFormula, setReadyFormula] = useState(availableFormulas[0]);
   const [readyPhase, setReadyPhase] = useState(treatmentPhases[0]);
   const [readyBottles, setReadyBottles] = useState(1);
-  const [readyDoctor, setReadyDoctor] = useState("");
   const [context, setContext] = useState<SecretaryContext | null>(null);
-  const [doctors, setDoctors] = useState<SecretaryDoctor[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -125,11 +127,9 @@ export default function SecretariaLotesPage() {
         ]);
         if (!active) return;
         setContext(workspace.context);
-        setDoctors(workspace.doctors);
         setPatients(workspace.patients);
         setPrescriptions(loadedPrescriptions);
         setBatches(loadedBatches);
-        setReadyDoctor(workspace.doctors[0]?.fullName ?? "");
       } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : "Não foi possível carregar os lotes reais.");
       }
@@ -413,8 +413,8 @@ export default function SecretariaLotesPage() {
         patientId: "",
         patientName: "Pronta entrega · sem paciente",
         patientCpf: "",
-        doctor: readyDoctor,
-        doctorCrm: doctors.find((doctor) => doctor.fullName === readyDoctor)?.crm ?? "",
+        doctor: technicalDoctor.name,
+        doctorCrm: technicalDoctor.crm,
         preparedBy: "Secretaria CRA",
         prescriptionStatus: "aguardando-aprovacao",
         treatment: "Imunoterapia para pronta entrega",
@@ -571,14 +571,15 @@ export default function SecretariaLotesPage() {
             >
               Vacinas em estoque
             </Link>
-            {["Notas fiscais", "Contratos", "Configurações"].map(
+            {["Notas fiscais", "Contratos", "Notificações aos pacientes", "Configurações"].map(
               (item) => (
-                <span
+                <Link
                   key={item}
-                  className="block rounded-2xl px-4 py-3 text-sm text-white/65"
+                  href={item === "Notas fiscais" ? "/secretaria/notas-fiscais" : item === "Contratos" ? "/secretaria/contratos" : item === "Notificações aos pacientes" ? "/secretaria/notificacoes" : "/secretaria/configuracoes"}
+                  className="block rounded-2xl px-4 py-3 text-sm text-white/80 hover:bg-white/10"
                 >
                   {item}
-                </span>
+                </Link>
               ),
             )}
             <Link href="/" className="block rounded-2xl px-4 py-3 text-sm font-semibold text-white/85 hover:bg-white/10">
@@ -765,11 +766,9 @@ export default function SecretariaLotesPage() {
                   <p className="mt-1 text-sm text-[#817578]">A secretaria prepara a receita de pronta entrega e seleciona o médico que deverá conferi-la e aprová-la.</p>
 
                   <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                    <label className="text-sm font-semibold text-[#544449] sm:col-span-2">Médico solicitante
-                      <select value={readyDoctor} onChange={(event) => setReadyDoctor(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
-                        {doctors.map((doctor) => <option key={doctor.id} value={doctor.fullName}>{doctor.fullName} · CRM {doctor.crm}</option>)}
-                      </select>
-                      <span className="mt-2 block text-xs font-normal leading-5 text-[#817578]">A receita será preparada pela secretaria e ficará aguardando a aprovação deste médico.</span>
+                    <label className="text-sm font-semibold text-[#544449] sm:col-span-2">Médico responsável pela pronta entrega
+                      <input value={`${technicalDoctor.name} · CRM ${technicalDoctor.crm}`} readOnly className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-[#f7f4f2] px-3 text-sm font-normal text-[#786c70] outline-none" />
+                      <span className="mt-2 block text-xs font-normal leading-5 text-[#817578]">Pedidos de pronta entrega saem com o nome final e a assinatura técnica do Dr. Sérgio.</span>
                     </label>
                     <label className="text-sm font-semibold text-[#544449]">Fórmula
                       <select value={readyFormula} onChange={(event) => setReadyFormula(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
@@ -1063,7 +1062,7 @@ export default function SecretariaLotesPage() {
                                   </span>
                                 </div>
                                 <p className="mt-1 text-xs text-[#776b6e]">
-                                  {item.patientId ? `CPF ${item.patientCpf} · ${item.doctor}` : "Sem paciente definido · pronta entrega"} · {item.phase}
+                                  {item.patientId ? `CPF ${item.patientCpf} · ${item.doctor}` : `Sem paciente definido · pronta entrega · ${technicalDoctor.name}`} · {item.phase}
                                 </p>
                                 <p className="mt-2 text-xs text-[#776b6e]">
                                   {item.formulas
@@ -1114,6 +1113,7 @@ export default function SecretariaLotesPage() {
                                   {(batch.checkedPrescriptionIds ?? []).length}/{batch.items.length} item(ns) conferido(s)
                                 </span>
                               </div>
+                              {batch.laboratoryOkAt ? <p className="mt-2 rounded-xl bg-[#eaf8f3] px-3 py-2 text-xs font-semibold text-[#187157]">✓ OK do laboratório registrado por {batch.laboratoryOkBy} em {formatDate(batch.laboratoryOkAt)}</p> : <p className="mt-2 rounded-xl bg-[#fff8eb] px-3 py-2 text-xs font-semibold text-[#88642c]">Aguardando o OK do laboratório.</p>}
 
                               <label className="mt-4 block text-xs font-semibold text-[#544449]">
                                 Responsável pela conferência
@@ -1144,10 +1144,10 @@ export default function SecretariaLotesPage() {
                               <button
                                 type="button"
                                 onClick={() => approveBatch(batch)}
-                                disabled={(batch.checkedPrescriptionIds ?? []).length !== batch.items.length}
+                                disabled={!batch.laboratoryOkAt || (batch.checkedPrescriptionIds ?? []).length !== batch.items.length}
                                 className="mt-4 w-full rounded-xl bg-[#187157] px-4 py-3 text-sm font-semibold text-white hover:bg-[#115842] disabled:cursor-not-allowed disabled:opacity-45"
                               >
-                                Aprovar conferência e lançar no estoque
+                                {batch.laboratoryOkAt ? "Aprovar conferência e lançar no estoque" : "Aguardando OK do laboratório"}
                               </button>
                             </div>
                           )}

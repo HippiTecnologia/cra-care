@@ -159,10 +159,12 @@ function createInstallments(
       const receivedValue = payment?.amount ?? 0;
       const bottleCount = bottleCountForSale(sale);
       const commissionPerBottle = sale.commissionPerBottleSnapshot ?? COMMISSION_PER_BOTTLE;
-      const totalCommissionCents = Math.round(bottleCount * commissionPerBottle * 100);
-      const baseCommissionCents = Math.floor(totalCommissionCents / count);
-      const commissionRemainder = totalCommissionCents - baseCommissionCents * count;
-      const installmentCommission = (baseCommissionCents + (index < commissionRemainder ? 1 : 0)) / 100;
+      // Distribui frascos inteiros pelas parcelas: o honorário de cada frasco
+      // nasce na primeira parcela correspondente, sem dividir R$ 68 em frações.
+      const baseBottlesPerInstallment = Math.floor(bottleCount / count);
+      const bottleRemainder = bottleCount % count;
+      const installmentBottleCount = baseBottlesPerInstallment + (index < bottleRemainder ? 1 : 0);
+      const installmentCommission = installmentBottleCount * commissionPerBottle;
       return {
         id: installmentId,
         sale,
@@ -174,7 +176,7 @@ function createInstallments(
         commissionValue: installmentCommission,
         bottleCount,
         commissionPerBottle,
-        commissionAt: payment ? commissionDate(payment) : undefined,
+        commissionAt: payment && installmentBottleCount > 0 ? commissionDate(payment) : undefined,
         commissionRecord,
         status,
         invoice: patientInvoices[index] ?? (payment ? patientInvoices.at(-1) : undefined),
@@ -573,7 +575,7 @@ export default function AdminPage() {
               <div className="mt-4 rounded-2xl bg-[#fbf7f5] p-4"><p className="text-xs leading-5 text-[#66595d]">As parcelas recebidas aparecem automaticamente conforme os pagamentos reais registrados pela Secretaria. PIX e débito liberam o honorário no dia; cartão libera após 30 dias.</p></div>
             </Panel>
             <div className="grid gap-4 sm:grid-cols-3"><Kpi label="Honorários disponíveis" value={formatMoney(commissionAvailable)} detail="Prontos para fechar no período" tone="wine" /><Kpi label="Honorários já pagos" value={formatMoney(commissionPaid)} detail="Baixados no período filtrado" tone="green" /><Kpi label="Parcelas no fechamento" value={String(commissionInstallments.length)} detail="Recebimentos sem duplicidade" tone="blue" /></div>
-            <Panel title={selectedCommissionMonth ? `Honorários de ${monthLabel(selectedCommissionMonth)}` : "Honorários por parcela recebida"} subtitle="Cada tratamento gera R$ 68,00 por frasco na primeira parcela recebida; marque como pago ao realizar o repasse ao médico."><InstallmentTable installments={commissionInstallments} showCommission openInvoice={openInvoice} onMarkCommission={markCommissionAsPaid} onReverseCommission={reverseCommissionPayment} /></Panel>
+            <Panel title={selectedCommissionMonth ? `Honorários de ${monthLabel(selectedCommissionMonth)}` : "Honorários por parcela recebida"} subtitle="Cada frasco gera o honorário contratado na primeira parcela correspondente; marque como pago ao realizar o repasse ao médico."><InstallmentTable installments={commissionInstallments} showCommission openInvoice={openInvoice} onMarkCommission={markCommissionAsPaid} onReverseCommission={reverseCommissionPayment} /></Panel>
           </div>}
 
           {section === "parcelas" && <div className="mt-7 space-y-5"><Panel title="Venda → Parcela → Recebimento → Honorário → Nota fiscal" subtitle="Rastreabilidade financeira completa"><InstallmentTable installments={installments} showCommission openInvoice={openInvoice} /></Panel></div>}

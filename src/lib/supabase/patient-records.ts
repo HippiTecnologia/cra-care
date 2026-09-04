@@ -9,6 +9,7 @@ import type {
   PatientBottle,
   PatientPortalState,
   PatientReminderSettings,
+  PatientManualNotification,
 } from "../../app/paciente/patient-portal-store";
 import { createDefaultPortalState } from "../../app/paciente/patient-portal-store";
 import { mapMedicalPatient, type MedicalPatientRow } from "./medical-records";
@@ -43,6 +44,19 @@ function text(value: unknown, fallback = "") {
 function number(value: unknown, fallback = 0) {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function manualNotificationFromValue(value: unknown): PatientManualNotification | null {
+  const record = objectValue(value);
+  if (!text(record.id) || !text(record.title) || !text(record.text)) return null;
+  return {
+    id: text(record.id),
+    icon: text(record.icon, "📣"),
+    title: text(record.title),
+    text: text(record.text),
+    createdAt: text(record.createdAt, new Date().toISOString()),
+    createdBy: text(record.createdBy) || undefined,
+  };
 }
 
 function isUuid(value: string) {
@@ -188,6 +202,9 @@ export async function loadPatientWorkspace(): Promise<PatientWorkspace> {
     portal.readNotificationIds = Array.isArray(settings.read_notification_ids)
       ? settings.read_notification_ids.map(String)
       : [];
+    portal.manualNotifications = Array.isArray(settings.manual_notifications)
+      ? settings.manual_notifications.map(manualNotificationFromValue).filter((item): item is PatientManualNotification => Boolean(item))
+      : [];
   }
   const contract = (contractResult.data ?? null) as Record<string, unknown> | null;
   if (contract) {
@@ -217,6 +234,7 @@ async function savePortalSettings(context: PatientContext, state: PatientPortalS
     reminders: state.reminders,
     day_overrides: state.dayOverrides ?? {},
     read_notification_ids: state.readNotificationIds ?? [],
+    manual_notifications: state.manualNotifications ?? [],
     updated_at: new Date().toISOString(),
   }, { onConflict: "patient_id" });
   if (error) throw error;

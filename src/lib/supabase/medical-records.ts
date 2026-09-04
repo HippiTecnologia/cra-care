@@ -1,6 +1,7 @@
 import type {
   DemoPatientRecord,
   DemoPrescription,
+  MedicalRecord,
 } from "../../app/medico/patient-store";
 import type {
   PatientAssessment,
@@ -157,6 +158,18 @@ export function mapMedicalPatient(
     paymentStatus: validPaymentStatus(stringValue(financial, "paymentStatus")),
     asaasReference: stringValue(financial, "asaasReference"),
     financialNotes: stringValue(financial, "notes") ?? stringValue(financial, "financialNotes"),
+    medicalRecord: (() => {
+      const record = recordValue(treatment.medicalRecord);
+      return Object.keys(record).length ? {
+        chiefComplaint: stringValue(record, "chiefComplaint"),
+        history: stringValue(record, "history"),
+        allergies: stringValue(record, "allergies"),
+        currentMedications: stringValue(record, "currentMedications"),
+        clinicalNotes: stringValue(record, "clinicalNotes"),
+        updatedAt: stringValue(record, "updatedAt"),
+        updatedBy: stringValue(record, "updatedBy"),
+      } : undefined;
+    })(),
     notes: stringValue(treatment, "notes"),
     abandonmentReason: stringValue(treatment, "abandonmentReason"),
   };
@@ -299,6 +312,9 @@ export async function loadDoctorPortalStates(
       time: typeof reminders.time === "string" ? reminders.time : "09:00",
     };
     result[patientId].dayOverrides = recordValue(row.day_overrides) as PatientPortalState["dayOverrides"];
+    result[patientId].manualNotifications = Array.isArray(row.manual_notifications)
+      ? row.manual_notifications.filter((item) => item && typeof item === "object") as PatientPortalState["manualNotifications"]
+      : [];
   }
   for (const row of (useResult.data ?? []) as unknown as Record<string, unknown>[]) {
     const patientId = String(row.patient_id ?? "");
@@ -344,6 +360,38 @@ export async function createDoctorPatient(
   if (error || !data) throw error ?? new Error("Paciente não retornado.");
 
   return mapMedicalPatient(data as unknown as MedicalPatientRow, doctor.fullName);
+}
+
+export async function saveMedicalPatientRecord(
+  doctor: MedicalDoctorProfile,
+  patientId: string,
+  record: MedicalRecord,
+) {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from("patients")
+    .select("treatment")
+    .eq("id", patientId)
+    .eq("clinic_id", doctor.clinicId)
+    .eq("doctor_profile_id", doctor.id)
+    .single();
+  if (error || !data) throw error ?? new Error("Paciente não encontrado.");
+
+  const medicalRecord = {
+    ...record,
+    updatedAt: new Date().toISOString(),
+    updatedBy: doctor.fullName,
+  };
+  const treatment = {
+    ...recordValue(data.treatment),
+    medicalRecord,
+  };
+  const { error: updateError } = await supabase.from("patients")
+    .update({ treatment: treatment as unknown as Record<string, string | number>, updated_at: new Date().toISOString() })
+    .eq("id", patientId)
+    .eq("clinic_id", doctor.clinicId)
+    .eq("doctor_profile_id", doctor.id);
+  if (updateError) throw updateError;
+  return medicalRecord;
 }
 
 export async function loadMedicalPatientWorkspace(patientId: string) {

@@ -10,6 +10,7 @@ import type {
 } from "../../app/medico/patient-store";
 import type {
   PatientAssessment,
+  PatientManualNotification,
   PatientBottle,
   PatientPortalState,
 } from "../../app/paciente/patient-portal-store";
@@ -57,6 +58,19 @@ function text(value: unknown, fallback = "") {
 function number(value: unknown, fallback = 0) {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function manualNotificationFromValue(value: unknown): PatientManualNotification | null {
+  const record = objectValue(value);
+  if (!text(record.id) || !text(record.title) || !text(record.text)) return null;
+  return {
+    id: text(record.id),
+    icon: text(record.icon, "📣"),
+    title: text(record.title),
+    text: text(record.text),
+    createdAt: text(record.createdAt, new Date().toISOString()),
+    createdBy: text(record.createdBy) || undefined,
+  };
 }
 
 function isUuid(value: string) {
@@ -434,6 +448,9 @@ export async function loadSecretaryPortals(patientIds: string[]) {
     };
     result[patientId].dayOverrides = objectValue(row.day_overrides) as PatientPortalState["dayOverrides"];
     result[patientId].readNotificationIds = Array.isArray(row.read_notification_ids) ? row.read_notification_ids.map(String) : [];
+    result[patientId].manualNotifications = Array.isArray(row.manual_notifications)
+      ? row.manual_notifications.map(manualNotificationFromValue).filter((item): item is PatientManualNotification => Boolean(item))
+      : [];
   }
   for (const row of (useResult.data ?? []) as unknown as Record<string, unknown>[]) {
     const patientId = text(row.patient_id);
@@ -447,6 +464,66 @@ export async function loadSecretaryPortals(patientIds: string[]) {
     });
   }
   return result;
+}
+
+export async function loadSecretaryNotifications(patientIds: string[]) {
+  if (!patientIds.length) return {} as Record<string, PatientManualNotification[]>;
+  const { data, error } = await getSupabaseClient()
+    .from("patient_portal_settings")
+    .select("patient_id, manual_notifications")
+    .in("patient_id", patientIds);
+  if (error) throw error;
+  return Object.fromEntries(patientIds.map((patientId) => {
+    const row = (data ?? []).find((item) => text(item.patient_id) === patientId) as Record<string, unknown> | undefined;
+    const values = Array.isArray(row?.manual_notifications)
+      ? row.manual_notifications.map(manualNotificationFromValue).filter((item): item is PatientManualNotification => Boolean(item))
+      : [];
+    return [patientId, values];
+  })) as Record<string, PatientManualNotification[]>;
+}
+
+export async function createSecretaryNotification(
+  context: SecretaryContext,
+  patientIds: string[],
+  input: { icon: string; title: string; text: string },
+) {
+  const uniquePatientIds = Array.from(new Set(patientIds.filter(Boolean)));
+  if (!uniquePatientIds.length) throw new Error("Selecione pelo menos um paciente.");
+  if (!input.title.trim() || !input.text.trim()) throw new Error("Informe o título e o texto da notificação.");
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from("patient_portal_settings")
+    .select("patient_id, reminders, day_overrides, read_notification_ids, manual_notifications")
+    .in("patient_id", uniquePatientIds)
+    .eq("clinic_id", context.clinicId);
+  if (error) throw error;
+  const rows = (data ?? []) as unknown as Record<string, unknown>[];
+  const now = new Date().toISOString();
+  const notificationBase = {
+    icon: input.icon.trim() || "📣",
+    title: input.title.trim(),
+    text: input.text.trim(),
+    createdAt: now,
+    createdBy: context.fullName,
+  };
+  for (const patientId of uniquePatientIds) {
+    const current = rows.find((row) => text(row.patient_id) === patientId);
+    const notifications = Array.isArray(current?.manual_notifications)
+      ? current.manual_notifications.map(manualNotificationFromValue).filter((item): item is PatientManualNotification => Boolean(item))
+      : [];
+    const notification = { id: crypto.randomUUID(), ...notificationBase };
+    const { error: saveError } = await supabase.from("patient_portal_settings").upsert({
+      patient_id: patientId,
+      clinic_id: context.clinicId,
+      reminders: objectValue(current?.reminders).enabled !== undefined ? objectValue(current?.reminders) : { enabled: false, weekdays: [1, 3, 5], time: "09:00" },
+      day_overrides: objectValue(current?.day_overrides),
+      read_notification_ids: Array.isArray(current?.read_notification_ids) ? current?.read_notification_ids : [],
+      manual_notifications: [...notifications, notification],
+      updated_at: now,
+    }, { onConflict: "patient_id" });
+    if (saveError) throw saveError;
+    void audit(context, "create", "patient_notification", patientId, { title: notification.title });
+  }
+  return notificationBase;
 }
 
 export async function saveSecretaryAssessment(
@@ -554,6 +631,8 @@ export async function saveSecretaryBatch(context: SecretaryContext, batch: DemoB
     checkedAt: savedBatch.checkedAt,
     checkedBy: savedBatch.checkedBy,
     conferenceNotes: savedBatch.conferenceNotes,
+    laboratoryOkAt: savedBatch.laboratoryOkAt,
+    laboratoryOkBy: savedBatch.laboratoryOkBy,
     orderType: savedBatch.orderType,
   };
   const { error } = await supabase.from("batches").upsert({
@@ -657,6 +736,9 @@ export async function confirmSecretaryBatch(
   patients: DemoPatientRecord[],
 ) {
   if (batch.status !== "pronto") throw new Error("Este lote já foi conferido ou ainda não está pronto.");
+  if (!batch.laboratoryOkAt || !batch.laboratoryOkBy) {
+    throw new Error("Aguarde o OK do laboratório antes de liberar o lote para estoque.");
+  }
   const checkedIds = new Set(batch.checkedPrescriptionIds ?? []);
   if (!batch.items.length || batch.items.some((item) => !checkedIds.has(item.prescriptionId))) {
     throw new Error("Confira todos os itens antes de liberar o lote para estoque.");

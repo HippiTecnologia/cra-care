@@ -38,6 +38,15 @@ export type PatientReminderSettings = {
   time: string;
 };
 
+export type PatientManualNotification = {
+  id: string;
+  icon: string;
+  title: string;
+  text: string;
+  createdAt: string;
+  createdBy?: string;
+};
+
 export type PatientPortalState = {
   patientId: string;
   signedAt?: string;
@@ -49,6 +58,7 @@ export type PatientPortalState = {
   assessments: PatientAssessment[];
   reminders: PatientReminderSettings;
   readNotificationIds?: string[];
+  manualNotifications?: PatientManualNotification[];
   /** Correções administrativas no histórico, sempre acompanhadas do motivo. */
   bottleHistoryAdjustments?: Record<number, {
     receivedAt?: string;
@@ -73,6 +83,7 @@ export function createDefaultPortalState(patientId: string): PatientPortalState 
     dayOverrides: {},
     assessments: [],
     readNotificationIds: [],
+    manualNotifications: [],
     bottleHistoryAdjustments: {},
     reminders: {
       enabled: false,

@@ -141,6 +141,8 @@ export async function saveLaboratoryBatch(context: LaboratoryContext, batch: Dem
     checkedAt: batch.checkedAt,
     checkedBy: batch.checkedBy,
     conferenceNotes: batch.conferenceNotes,
+    laboratoryOkAt: batch.laboratoryOkAt,
+    laboratoryOkBy: batch.laboratoryOkBy,
     orderType: batch.orderType,
   };
   const { error } = await getSupabaseClient().from("batches").update({
@@ -151,4 +153,20 @@ export async function saveLaboratoryBatch(context: LaboratoryContext, batch: Dem
   }).eq("id", batch.id).eq("clinic_id", context.clinicId);
   if (error) throw error;
   return batch;
+}
+
+export async function markLaboratoryBatchOk(
+  context: LaboratoryContext,
+  batch: DemoBatch,
+) {
+  if (batch.status !== "pronto") throw new Error("O lote precisa estar finalizado antes de receber o OK do laboratório.");
+  if (!batch.items.length || (batch.preparedPrescriptionIds ?? []).length !== batch.items.length) {
+    throw new Error("Confira todas as fórmulas antes de dar OK no lote.");
+  }
+  const approved = {
+    ...batch,
+    laboratoryOkAt: new Date().toISOString(),
+    laboratoryOkBy: context.fullName,
+  };
+  return saveLaboratoryBatch(context, approved);
 }

@@ -51,9 +51,20 @@ export type DemoPatientRecord = {
   paymentStatus?: "A definir" | "Pendente" | "Em dia" | "Vencido" | "Cancelado";
   asaasReference?: string;
   financialNotes?: string;
+  medicalRecord?: MedicalRecord;
   payments?: PatientPaymentRecord[];
   notes?: string;
   abandonmentReason?: string;
+};
+
+export type MedicalRecord = {
+  chiefComplaint?: string;
+  history?: string;
+  allergies?: string;
+  currentMedications?: string;
+  clinicalNotes?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 };
 
 export type PatientPaymentRecord = {
@@ -149,6 +160,8 @@ export type DemoBatch = {
   checkedAt?: string;
   checkedBy?: string;
   conferenceNotes?: string;
+  laboratoryOkAt?: string;
+  laboratoryOkBy?: string;
   orderType?: "pedido-paciente" | "pronta-entrega";
   status: DemoBatchStatus;
   laboratory: string;

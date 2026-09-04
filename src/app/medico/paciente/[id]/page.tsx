@@ -11,6 +11,7 @@ import {
 import type {
   DemoPatientRecord,
   DemoPrescription,
+  MedicalRecord,
   PrescriptionFormula,
 } from "../../patient-store";
 import type { PatientPortalState } from "../../../paciente/patient-portal-store";
@@ -18,10 +19,11 @@ import {
   createMedicalPrescription,
   loadMedicalPatientWorkspace,
   prepareMedicalPrescriptionSignature,
+  saveMedicalPatientRecord,
   type MedicalDoctorProfile,
 } from "../../../../lib/supabase/medical-records";
 
-type Tab = "receitas" | "resumo" | "historico" | "avaliacoes";
+type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes";
 
 function formatDate(value?: string) {
   if (!value) return "Não informado";
@@ -94,6 +96,8 @@ export default function MedicalPatientPage() {
     string | null
   >(null);
   const [portal, setPortal] = useState<PatientPortalState | null>(null);
+  const [medicalRecordDraft, setMedicalRecordDraft] = useState<MedicalRecord>({});
+  const [recordSaving, setRecordSaving] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -107,6 +111,7 @@ export default function MedicalPatientPage() {
         setPrescriptions(workspace.prescriptions);
         setPortal(workspace.portal);
         if (workspace.patient) {
+          setMedicalRecordDraft(workspace.patient.medicalRecord ?? {});
           setPhase(workspace.patient.phase ?? treatmentPhases[0]);
           setDrops(workspace.patient.drops ?? 6);
         }
@@ -268,6 +273,22 @@ export default function MedicalPatientPage() {
       setError("");
     } catch {
       setError("Não foi possível preparar a receita para assinatura agora.");
+    }
+  }
+
+  async function saveMedicalRecord() {
+    if (!patient || !doctor) return;
+    setRecordSaving(true);
+    try {
+      const saved = await saveMedicalPatientRecord(doctor, patient.id, medicalRecordDraft);
+      setMedicalRecordDraft(saved);
+      setPatient((current) => current ? { ...current, medicalRecord: saved } : current);
+      setError("");
+      setMessage("Prontuário clínico salvo com sucesso.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível salvar o prontuário.");
+    } finally {
+      setRecordSaving(false);
     }
   }
 
@@ -435,6 +456,7 @@ export default function MedicalPatientPage() {
           {[
             { id: "receitas", label: "Receitas" },
             { id: "resumo", label: "Resumo clínico" },
+            { id: "prontuario", label: "Prontuário" },
             { id: "historico", label: "Histórico de receitas" },
             { id: "avaliacoes", label: "Avaliações" },
           ].map((tab) => (
@@ -673,6 +695,52 @@ export default function MedicalPatientPage() {
             </article>
             <article className="rounded-3xl border border-[#eee5e0] bg-white p-7 shadow-sm"><h2 className="text-xl font-bold text-[#433438]">Última avaliação do paciente</h2>{!portal?.assessments[0] ? <p className="mt-4 text-sm text-[#817578]">Aguardando autoavaliação do paciente.</p> : <div className="mt-4 grid gap-3 text-sm text-[#635559] sm:grid-cols-3"><p><strong>Frequência:</strong> {portal.assessments[0].symptomFrequency ?? "Avaliação anterior"}</p><p><strong>Severidade:</strong> {portal.assessments[0].symptomSeverity ?? portal.assessments[0].feeling ?? "Não informada"}</p><p><strong>Medicamentos:</strong> {portal.assessments[0].medicationFrequency ?? "Não informado"}</p>{portal.assessments[0].notes && <p className="sm:col-span-3"><strong>Comentário:</strong> {portal.assessments[0].notes}</p>}</div>}</article>
             <article className="rounded-3xl border border-[#eee5e0] bg-white p-7 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-bold text-[#433438]">Adesão ao tratamento</h2><p className="mt-1 text-sm text-[#817578]">Histórico de dias registrados pelo paciente.</p></div><span className="rounded-full bg-[#edf8f3] px-3 py-2 text-sm font-bold text-[#187157]">{portal?.useRecords.length ?? 0} dias corretos</span></div>{!portal?.bottles.length ? <p className="mt-5 text-sm text-[#817578]">O paciente ainda não iniciou um frasco no portal.</p> : <div className="mt-5 grid gap-3 sm:grid-cols-2"><div className="rounded-2xl bg-[#edf8f3] p-4"><p className="text-xs text-[#187157]">Uso registrado</p><p className="mt-2 text-2xl font-bold text-[#187157]">{portal?.useRecords.length ?? 0} dias</p></div><div className="rounded-2xl bg-[#fff2f3] p-4"><p className="text-xs text-[#a3113a]">Dias marcados como não registrados</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{Object.values(portal?.dayOverrides ?? {}).filter((value) => value === "nao-registrado").length} dias</p></div></div>}<div className="mt-5 rounded-2xl bg-[#fbf7f5] p-4 text-sm"><strong>Últimos dias de uso:</strong><p className="mt-2 text-[#66595d]">{portal?.useRecords.slice(0, 12).map((record) => formatDate(record.date)).join(" · ") || "Nenhum dia registrado."}</p></div></article>
+          </section>
+        )}
+
+        {activeTab === "prontuario" && (
+          <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Área clínica</p>
+                <h2 className="mt-2 text-2xl font-bold text-[#433438]">Prontuário do paciente</h2>
+                <p className="mt-2 text-sm text-[#817578]">Registre informações clínicas relevantes para o acompanhamento médico.</p>
+              </div>
+              {medicalRecordDraft.updatedAt && <p className="text-xs text-[#817578]">Atualizado em {formatDate(medicalRecordDraft.updatedAt)}</p>}
+            </div>
+            <div className="mt-7 grid gap-5 md:grid-cols-2">
+              {([
+                ["chiefComplaint", "Queixa principal", "Motivo da consulta e sintomas atuais."],
+                ["history", "Histórico clínico", "Antecedentes, exames e evolução."],
+                ["allergies", "Alergias e reações", "Alergias conhecidas e reações relevantes."],
+                ["currentMedications", "Medicamentos em uso", "Medicamentos, doses e frequência."],
+              ] as const).map(([field, label, placeholder]) => (
+                <label key={field} className="text-sm font-semibold text-[#544449]">
+                  {label}
+                  <textarea
+                    value={medicalRecordDraft[field] ?? ""}
+                    onChange={(event) => setMedicalRecordDraft((current) => ({ ...current, [field]: event.target.value }))}
+                    rows={4}
+                    placeholder={placeholder}
+                    className="mt-2 w-full rounded-xl border border-[#e9dfda] px-4 py-3 font-normal outline-none focus:border-[#b91142]"
+                  />
+                </label>
+              ))}
+              <label className="text-sm font-semibold text-[#544449] md:col-span-2">
+                Observações clínicas
+                <textarea
+                  value={medicalRecordDraft.clinicalNotes ?? ""}
+                  onChange={(event) => setMedicalRecordDraft((current) => ({ ...current, clinicalNotes: event.target.value }))}
+                  rows={5}
+                  placeholder="Condutas, orientações e observações para o próximo atendimento."
+                  className="mt-2 w-full rounded-xl border border-[#e9dfda] px-4 py-3 font-normal outline-none focus:border-[#b91142]"
+                />
+              </label>
+            </div>
+            {error && <p role="alert" className="mt-5 rounded-xl bg-[#fff1f3] px-4 py-3 text-sm text-[#a3113a]">{error}</p>}
+            <button type="button" onClick={() => void saveMedicalRecord()} disabled={recordSaving} className="mt-6 rounded-xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+              {recordSaving ? "Salvando prontuário..." : "Salvar prontuário"}
+            </button>
           </section>
         )}
 

@@ -754,6 +754,10 @@ export default function SecretariaPage() {
               {pendingAssessments > 0 && <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-[#a3113a]">{pendingAssessments}</span>}
             </Link>
 
+            <Link href="/secretaria/notificacoes" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
+              Notificações aos pacientes
+            </Link>
+
             <Link href="/secretaria/estoque" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
               Vacinas em estoque
             </Link>
@@ -1116,12 +1120,12 @@ export default function SecretariaPage() {
       </div>
 
       {showPatientForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#29151b]/65 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#29151b]/65 p-4 backdrop-blur-sm lg:left-[285px] lg:justify-end">
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="new-patient-title"
-            className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-[30px] bg-white shadow-2xl"
+            className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-[30px] bg-white shadow-2xl lg:max-w-[min(900px,calc(100vw-285px))] lg:rounded-r-none"
           >
             <div className="flex items-start justify-between gap-4 border-b border-[#eee4e0] px-6 py-5 sm:px-8">
               <div>
