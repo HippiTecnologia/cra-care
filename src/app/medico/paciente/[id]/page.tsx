@@ -708,39 +708,17 @@ export default function MedicalPatientPage() {
               </div>
               {medicalRecordDraft.updatedAt && <p className="text-xs text-[#817578]">Atualizado em {formatDate(medicalRecordDraft.updatedAt)}</p>}
             </div>
-            <div className="mt-7 grid gap-5 md:grid-cols-2">
-              {([
-                ["chiefComplaint", "Queixa principal", "Motivo da consulta e sintomas atuais."],
-                ["history", "Histórico clínico", "Antecedentes, exames e evolução."],
-                ["allergies", "Alergias e reações", "Alergias conhecidas e reações relevantes."],
-                ["currentMedications", "Medicamentos em uso", "Medicamentos, doses e frequência."],
-              ] as const).map(([field, label, placeholder]) => (
-                <label key={field} className="text-sm font-semibold text-[#544449]">
-                  {label}
-                  <textarea
-                    value={medicalRecordDraft[field] ?? ""}
-                    onChange={(event) => setMedicalRecordDraft((current) => ({ ...current, [field]: event.target.value }))}
-                    rows={4}
-                    placeholder={placeholder}
-                    className="mt-2 w-full rounded-xl border border-[#e9dfda] px-4 py-3 font-normal outline-none focus:border-[#b91142]"
-                  />
-                </label>
-              ))}
-              <label className="text-sm font-semibold text-[#544449] md:col-span-2">
-                Observações clínicas
-                <textarea
-                  value={medicalRecordDraft.clinicalNotes ?? ""}
-                  onChange={(event) => setMedicalRecordDraft((current) => ({ ...current, clinicalNotes: event.target.value }))}
-                  rows={5}
-                  placeholder="Condutas, orientações e observações para o próximo atendimento."
-                  className="mt-2 w-full rounded-xl border border-[#e9dfda] px-4 py-3 font-normal outline-none focus:border-[#b91142]"
-                />
+            <div className="mt-7">
+              <label className="text-sm font-semibold text-[#544449]">
+                Histórico clínico
+                <textarea value={medicalRecordDraft.history ?? ""} onChange={(event) => setMedicalRecordDraft({ history: event.target.value })} rows={10} placeholder="Antecedentes, exames e evolução clínica." className="mt-2 w-full rounded-xl border border-[#e9dfda] px-4 py-3 font-normal outline-none focus:border-[#b91142]" />
               </label>
             </div>
             {error && <p role="alert" className="mt-5 rounded-xl bg-[#fff1f3] px-4 py-3 text-sm text-[#a3113a]">{error}</p>}
-            <button type="button" onClick={() => void saveMedicalRecord()} disabled={recordSaving} className="mt-6 rounded-xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
-              {recordSaving ? "Salvando prontuário..." : "Salvar prontuário"}
-            </button>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button type="button" onClick={() => void saveMedicalRecord()} disabled={recordSaving} className="rounded-xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{recordSaving ? "Salvando..." : "Salvar histórico"}</button>
+              <button type="button" onClick={() => { if (window.confirm("Excluir o histórico clínico?")) { setMedicalRecordDraft({}); void saveMedicalRecord(); } }} disabled={recordSaving || !medicalRecordDraft.history} className="rounded-xl border border-[#e5cbd1] px-5 py-3 text-sm font-semibold text-[#a3113a] disabled:opacity-40">Excluir histórico</button>
+            </div>
           </section>
         )}
 
