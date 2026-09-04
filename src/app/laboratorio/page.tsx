@@ -1,18 +1,20 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   DemoBatch,
   DemoBatchItem,
   DemoBatchStatus,
   DemoPrescription,
-  readDemoBatches,
-  readDemoPrescriptions,
-  saveDemoBatch,
-  subscribeDemoPatients,
 } from "../medico/patient-store";
+import { getSupabaseClient } from "../../lib/supabase/client";
+import {
+  loadLaboratoryWorkspace,
+  saveLaboratoryBatch,
+  type LaboratoryContext,
+} from "../../lib/supabase/laboratory-records";
 
 type LaboratoryFilter = "todos" | "enviado" | "em-producao" | "pronto";
 
@@ -67,8 +69,10 @@ function normalizeSearch(value: string) {
 }
 
 export default function LaboratorioPage() {
+  const router = useRouter();
   const [batches, setBatches] = useState<DemoBatch[]>([]);
   const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
+  const [context, setContext] = useState<LaboratoryContext | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [filter, setFilter] = useState<LaboratoryFilter>("todos");
   const [search, setSearch] = useState("");
@@ -76,17 +80,45 @@ export default function LaboratorioPage() {
   const [productionNotes, setProductionNotes] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    const synchronize = () => {
-      setBatches(readDemoBatches().filter((batch) => batch.status !== "rascunho"));
-      setPrescriptions(readDemoPrescriptions());
+    let active = true;
+    const synchronize = async () => {
+      try {
+        const workspace = await loadLaboratoryWorkspace();
+        if (!active) return;
+        setContext(workspace.context);
+        setBatches(workspace.batches.filter((batch) => batch.status !== "rascunho"));
+        setPrescriptions(workspace.prescriptions);
+        setLoaded(true);
+      } catch (cause) {
+        if (!active) return;
+        setError(cause instanceof Error ? cause.message : "Não foi possível carregar os lotes reais.");
+        setLoaded(true);
+      }
     };
-
-    queueMicrotask(synchronize);
-
-    return subscribeDemoPatients(synchronize);
+    void synchronize();
+    const interval = window.setInterval(() => void synchronize(), 15_000);
+    window.addEventListener("focus", synchronize);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", synchronize);
+    };
   }, []);
+
+  async function signOut() {
+    await getSupabaseClient().auth.signOut();
+    router.push("/");
+  }
+
+  async function persistBatch(batch: DemoBatch) {
+    if (!context) throw new Error("Sessão do Laboratório não encontrada.");
+    const saved = await saveLaboratoryBatch(context, batch);
+    setBatches((current) => current.map((item) => item.id === saved.id ? saved : item));
+    return saved;
+  }
 
   const filteredBatches = useMemo(() => {
     const normalized = normalizeSearch(search);
@@ -170,23 +202,27 @@ export default function LaboratorioPage() {
     },
   ];
 
-  function startProduction(batch: DemoBatch) {
+  async function startProduction(batch: DemoBatch) {
     if (!responsible.trim()) {
       setError("Informe o responsável pela manipulação antes de iniciar.");
       return;
     }
 
-    saveDemoBatch({
-      ...batch,
-      status: "em-producao",
-      productionStartedAt: new Date().toISOString(),
-      productionResponsible: responsible.trim(),
-      productionNotes: productionNotes.trim(),
-      preparedPrescriptionIds: [],
-    });
-    setSelectedBatchId(batch.id);
-    setError("");
-    setMessage(`Produção do lote ${batch.code} iniciada com sucesso.`);
+    try {
+      await persistBatch({
+        ...batch,
+        status: "em-producao",
+        productionStartedAt: new Date().toISOString(),
+        productionResponsible: responsible.trim(),
+        productionNotes: productionNotes.trim(),
+        preparedPrescriptionIds: [],
+      });
+      setSelectedBatchId(batch.id);
+      setError("");
+      setMessage(`Produção do lote ${batch.code} iniciada com sucesso.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível iniciar a produção.");
+    }
   }
 
   function togglePreparedItem(batch: DemoBatch, prescriptionId: string) {
@@ -197,28 +233,31 @@ export default function LaboratorioPage() {
       ? current.filter((id) => id !== prescriptionId)
       : [...current, prescriptionId];
 
-    saveDemoBatch({ ...batch, preparedPrescriptionIds });
-    setError("");
+    void persistBatch({ ...batch, preparedPrescriptionIds })
+      .then(() => setError(""))
+      .catch((cause) => setError(cause instanceof Error ? cause.message : "Não foi possível salvar a conferência."));
   }
 
-  function finishProduction(batch: DemoBatch) {
+  async function finishProduction(batch: DemoBatch) {
     if ((batch.preparedPrescriptionIds ?? []).length !== batch.items.length) {
       setError("Confira todas as receitas do lote antes de concluir a produção.");
       return;
     }
 
-    saveDemoBatch({
-      ...batch,
-      status: "pronto",
-      productionFinishedAt: new Date().toISOString(),
-      productionResponsible: responsible.trim() || batch.productionResponsible,
-      productionNotes: productionNotes.trim() || batch.productionNotes,
-    });
-    setError("");
-    setProductionNotes("");
-    setMessage(
-      `Lote ${batch.code} finalizado. A secretaria já pode realizar a conferência.`,
-    );
+    try {
+      await persistBatch({
+        ...batch,
+        status: "pronto",
+        productionFinishedAt: new Date().toISOString(),
+        productionResponsible: responsible.trim() || batch.productionResponsible,
+        productionNotes: productionNotes.trim() || batch.productionNotes,
+      });
+      setError("");
+      setProductionNotes("");
+      setMessage(`Lote ${batch.code} finalizado. A secretaria já pode realizar a conferência.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível concluir a produção.");
+    }
   }
 
   function selectBatch(batch: DemoBatch) {
@@ -226,6 +265,14 @@ export default function LaboratorioPage() {
     setResponsible(batch.productionResponsible ?? "Equipe de manipulação CRA");
     setProductionNotes(batch.productionNotes ?? "");
     setError("");
+  }
+
+  if (!loaded) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f8f5f2] text-[#a3113a]">
+        Carregando produção do laboratório...
+      </main>
+    );
   }
 
   function downloadPrescription(item: DemoBatchItem, batch: DemoBatch) {
@@ -348,12 +395,13 @@ export default function LaboratorioPage() {
             </p>
           </div>
 
-          <Link
-            href="/"
+          <button
+            type="button"
+            onClick={() => void signOut()}
             className="mt-8 inline-flex text-sm font-semibold text-white/85 hover:text-white"
           >
             ← Sair do laboratório
-          </Link>
+          </button>
         </aside>
 
         <section className="min-w-0 px-5 py-8 sm:px-8 lg:px-10">
@@ -375,12 +423,12 @@ export default function LaboratorioPage() {
                 L
               </div>
               <div>
-                <p className="text-sm font-semibold text-[#433438]">Laboratório CRA</p>
+                <p className="text-sm font-semibold text-[#433438]">{context?.fullName ?? "Laboratório CRA"}</p>
                 <p className="text-xs text-[#817578]">Produção e manipulação</p>
               </div>
-              <Link href="/" className="ml-2 rounded-xl border border-[#eadfd9] px-3 py-2 text-xs font-semibold text-[#a3113a] hover:bg-[#fff5f7]">
+              <button type="button" onClick={() => void signOut()} className="ml-2 rounded-xl border border-[#eadfd9] px-3 py-2 text-xs font-semibold text-[#a3113a] hover:bg-[#fff5f7]">
                 Sair
-              </Link>
+              </button>
             </div>
           </header>
 
@@ -703,7 +751,7 @@ export default function LaboratorioPage() {
                     {selectedBatch.status === "enviado" && (
                       <button
                         type="button"
-                        onClick={() => startProduction(selectedBatch)}
+                        onClick={() => void startProduction(selectedBatch)}
                         className="mt-5 w-full rounded-xl bg-[#a3113a] px-4 py-3.5 text-sm font-semibold text-white hover:bg-[#870e31]"
                       >
                         Iniciar produção do lote
@@ -713,7 +761,7 @@ export default function LaboratorioPage() {
                     {selectedBatch.status === "em-producao" && (
                       <button
                         type="button"
-                        onClick={() => finishProduction(selectedBatch)}
+                        onClick={() => void finishProduction(selectedBatch)}
                         disabled={!allItemsPrepared}
                         className="mt-5 w-full rounded-xl bg-[#187157] px-4 py-3.5 text-sm font-semibold text-white hover:bg-[#115842] disabled:cursor-not-allowed disabled:opacity-45"
                       >
