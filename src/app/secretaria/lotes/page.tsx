@@ -967,7 +967,7 @@ export default function SecretariaLotesPage() {
                             {batch.code} · Criado em {formatDate(batch.createdAt)} · {batch.laboratory}
                           </p>
                           <p className="mt-1 text-xs text-[#776b6e]">
-                            {batch.items.length} {batch.orderType === "pronta-entrega" ? "fórmula(s)" : "paciente(s)"} · {bottleCount} frasco(s) · {status.description}
+                            {batch.items.length} {batch.orderType === "pronta-entrega" ? "fórmula(s)" : "paciente(s)"} · {bottleCount} frasco(s) · {(status ?? { description: "Status não informado" }).description}
                           </p>
                         </div>
 

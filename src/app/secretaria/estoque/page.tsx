@@ -687,7 +687,7 @@ export default function SecretariaEstoquePage() {
                   )}
 
                   <p className="mt-4 text-center text-xs text-[#817578]">
-                    {selectedItem.patientId ? stockStatuses[selectedItem.status].description : "Disponível para vinculação a um paciente"}.
+                    {selectedItem.patientId ? (stockStatuses[selectedItem.status] ?? { description: "Status não informado" }).description : "Disponível para vinculação a um paciente"}.
                   </p>
                 </>
               )}
