@@ -9,17 +9,19 @@ import {
   treatmentPhases,
 } from "../../patient-store";
 import type {
+  ClinicalRecord,
   DemoPatientRecord,
   DemoPrescription,
-  MedicalRecord,
   PrescriptionFormula,
 } from "../../patient-store";
 import type { PatientPortalState } from "../../../paciente/patient-portal-store";
 import {
   createMedicalPrescription,
+  createClinicalRecord,
+  deleteClinicalRecord,
   loadMedicalPatientWorkspace,
   prepareMedicalPrescriptionSignature,
-  saveMedicalPatientRecord,
+  updateClinicalRecord,
   type MedicalDoctorProfile,
 } from "../../../../lib/supabase/medical-records";
 
@@ -96,7 +98,9 @@ export default function MedicalPatientPage() {
     string | null
   >(null);
   const [portal, setPortal] = useState<PatientPortalState | null>(null);
-  const [medicalRecordDraft, setMedicalRecordDraft] = useState<MedicalRecord>({});
+  const [clinicalRecords, setClinicalRecords] = useState<ClinicalRecord[]>([]);
+  const [clinicalRecordDraft, setClinicalRecordDraft] = useState("");
+  const [editingClinicalRecordId, setEditingClinicalRecordId] = useState<string | null>(null);
   const [recordSaving, setRecordSaving] = useState(false);
 
   useEffect(() => {
@@ -109,9 +113,9 @@ export default function MedicalPatientPage() {
         setDoctor(workspace.doctor);
         setPatient(workspace.patient);
         setPrescriptions(workspace.prescriptions);
+        setClinicalRecords(workspace.clinicalRecords);
         setPortal(workspace.portal);
         if (workspace.patient) {
-          setMedicalRecordDraft(workspace.patient.medicalRecord ?? {});
           setPhase(workspace.patient.phase ?? treatmentPhases[0]);
           setDrops(workspace.patient.drops ?? 6);
         }
@@ -276,17 +280,45 @@ export default function MedicalPatientPage() {
     }
   }
 
-  async function saveMedicalRecord() {
+  async function saveClinicalRecord() {
     if (!patient || !doctor) return;
+    if (!clinicalRecordDraft.trim()) {
+      setError("Informe o histórico clínico antes de salvar.");
+      return;
+    }
     setRecordSaving(true);
     try {
-      const saved = await saveMedicalPatientRecord(doctor, patient.id, medicalRecordDraft);
-      setMedicalRecordDraft(saved);
-      setPatient((current) => current ? { ...current, medicalRecord: saved } : current);
+      const saved = editingClinicalRecordId
+        ? await updateClinicalRecord(doctor, editingClinicalRecordId, clinicalRecordDraft)
+        : await createClinicalRecord(doctor, patient.id, clinicalRecordDraft);
+      setClinicalRecords((current) => editingClinicalRecordId
+        ? current.map((record) => record.id === saved.id ? saved : record)
+        : [saved, ...current]);
+      setClinicalRecordDraft("");
+      setEditingClinicalRecordId(null);
       setError("");
-      setMessage("Prontuário clínico salvo com sucesso.");
+      setMessage(editingClinicalRecordId ? "Histórico clínico atualizado com sucesso." : "Histórico clínico salvo com sucesso.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível salvar o prontuário.");
+    } finally {
+      setRecordSaving(false);
+    }
+  }
+
+  async function removeClinicalRecord(recordId: string) {
+    if (!doctor || !window.confirm("Excluir este registro clínico?")) return;
+    setRecordSaving(true);
+    try {
+      await deleteClinicalRecord(doctor, recordId);
+      setClinicalRecords((current) => current.filter((record) => record.id !== recordId));
+      if (editingClinicalRecordId === recordId) {
+        setClinicalRecordDraft("");
+        setEditingClinicalRecordId(null);
+      }
+      setError("");
+      setMessage("Registro clínico excluído com sucesso.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível excluir o registro.");
     } finally {
       setRecordSaving(false);
     }
@@ -704,27 +736,40 @@ export default function MedicalPatientPage() {
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Área clínica</p>
                 <h2 className="mt-2 text-2xl font-bold text-[#433438]">Prontuário do paciente</h2>
-                <p className="mt-2 text-sm text-[#817578]">Registre informações clínicas relevantes para o acompanhamento médico.</p>
+                <p className="mt-2 text-sm text-[#817578]">Registre e acompanhe cada evolução clínica do paciente.</p>
               </div>
-              {medicalRecordDraft.updatedAt && <p className="text-xs text-[#817578]">Atualizado em {formatDate(medicalRecordDraft.updatedAt)}</p>}
             </div>
             <div className="mt-7">
               <label className="text-sm font-semibold text-[#544449]">
-                Histórico clínico
-                <textarea value={medicalRecordDraft.history ?? ""} onChange={(event) => setMedicalRecordDraft({ history: event.target.value })} rows={10} placeholder="Antecedentes, exames e evolução clínica." className="mt-2 w-full rounded-xl border border-[#e9dfda] px-4 py-3 font-normal outline-none focus:border-[#b91142]" />
+                {editingClinicalRecordId ? "Editar histórico clínico" : "Novo histórico clínico"}
+                <textarea value={clinicalRecordDraft} onChange={(event) => { setClinicalRecordDraft(event.target.value); setError(""); }} rows={7} placeholder="Antecedentes, exames e evolução clínica." className="mt-2 w-full rounded-xl border border-[#e9dfda] px-4 py-3 font-normal outline-none focus:border-[#b91142]" />
               </label>
-              {medicalRecordDraft.history && (
-                <div className="mt-5 rounded-2xl border border-[#eadfe0] bg-[#fcf8f8] p-4">
-                  <p className="text-xs font-bold uppercase tracking-wide text-[#a3113a]">Histórico salvo</p>
-                  <p className="mt-2 whitespace-pre-wrap text-sm font-normal text-[#53454a]">{medicalRecordDraft.history}</p>
-                  {medicalRecordDraft.updatedAt && <p className="mt-3 text-xs font-normal text-[#817578]">Atualizado em {formatDate(medicalRecordDraft.updatedAt)}</p>}
-                </div>
-              )}
             </div>
             {error && <p role="alert" className="mt-5 rounded-xl bg-[#fff1f3] px-4 py-3 text-sm text-[#a3113a]">{error}</p>}
             <div className="mt-6 flex flex-wrap gap-3">
-              <button type="button" onClick={() => void saveMedicalRecord()} disabled={recordSaving} className="rounded-xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{recordSaving ? "Salvando..." : "Salvar histórico"}</button>
-              <button type="button" onClick={() => { if (window.confirm("Excluir o histórico clínico?")) { setMedicalRecordDraft({}); void saveMedicalRecord(); } }} disabled={recordSaving || !medicalRecordDraft.history} className="rounded-xl border border-[#e5cbd1] px-5 py-3 text-sm font-semibold text-[#a3113a] disabled:opacity-40">Excluir histórico</button>
+              <button type="button" onClick={() => void saveClinicalRecord()} disabled={recordSaving || !clinicalRecordDraft.trim()} className="rounded-xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{recordSaving ? "Salvando..." : editingClinicalRecordId ? "Salvar alteração" : "Salvar histórico"}</button>
+              {editingClinicalRecordId && <button type="button" onClick={() => { setClinicalRecordDraft(""); setEditingClinicalRecordId(null); }} disabled={recordSaving} className="rounded-xl border border-[#e6dbd6] px-5 py-3 text-sm font-semibold text-[#76686c]">Cancelar edição</button>}
+            </div>
+            <div className="mt-8 border-t border-[#f0e8e4] pt-7">
+              <h3 className="text-base font-bold text-[#a3113a]">Históricos salvos</h3>
+              <div className="mt-4 space-y-4">
+                {clinicalRecords.length === 0 && <p className="rounded-2xl border border-dashed border-[#e6dbd6] p-6 text-center text-sm text-[#817578]">Nenhum histórico clínico registrado.</p>}
+                {clinicalRecords.map((record, index) => (
+                  <article key={record.id} className="rounded-2xl border border-[#eadfe0] bg-[#fcf8f8] p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-bold text-[#433438]">Registro {String(clinicalRecords.length - index).padStart(2, "0")}</h4>
+                        <p className="mt-1 text-xs text-[#817578]">Registrado em {formatDate(record.createdAt)}{record.updatedAt !== record.createdAt ? ` · Atualizado em ${formatDate(record.updatedAt)}` : ""}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => { setEditingClinicalRecordId(record.id); setClinicalRecordDraft(record.content); setError(""); }} className="rounded-lg border border-[#e6dbd6] bg-white px-3 py-2 text-xs font-semibold text-[#a3113a]">Editar</button>
+                        <button type="button" onClick={() => void removeClinicalRecord(record.id)} disabled={recordSaving} className="rounded-lg border border-[#e5cbd1] bg-white px-3 py-2 text-xs font-semibold text-[#a3113a] disabled:opacity-40">Excluir</button>
+                      </div>
+                    </div>
+                    <p className="mt-4 whitespace-pre-wrap text-sm font-normal text-[#53454a]">{record.content}</p>
+                  </article>
+                ))}
+              </div>
             </div>
           </section>
         )}

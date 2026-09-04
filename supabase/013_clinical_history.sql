@@ -7,8 +7,12 @@ create table if not exists public.clinical_records (
   doctor_profile_id uuid not null references public.profiles(id) on delete cascade,
   content text not null check (length(trim(content)) > 0),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  updated_by text
 );
+
+alter table public.clinical_records
+  add column if not exists updated_by text;
 
 create index if not exists clinical_records_patient_idx
   on public.clinical_records(patient_id, created_at desc);

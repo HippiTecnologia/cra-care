@@ -1,6 +1,7 @@
 import type {
   DemoPatientRecord,
   DemoPrescription,
+  ClinicalRecord,
   MedicalRecord,
 } from "../../app/medico/patient-store";
 import type {
@@ -43,6 +44,15 @@ type PrescriptionRow = {
   content: Record<string, unknown> | null;
   signature_status: string;
   created_at: string;
+};
+
+type ClinicalRecordRow = {
+  id: string;
+  patient_id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  updated_by?: string | null;
 };
 
 function stringValue(record: Record<string, unknown>, key: string) {
@@ -207,6 +217,17 @@ function mapPrescription(
   };
 }
 
+function mapClinicalRecord(row: ClinicalRecordRow): ClinicalRecord {
+  return {
+    id: row.id,
+    patientId: row.patient_id,
+    content: row.content,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    updatedBy: row.updated_by ?? undefined,
+  };
+}
+
 export async function loadCurrentDoctorProfile(): Promise<MedicalDoctorProfile> {
   const supabase = getSupabaseClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -362,6 +383,64 @@ export async function createDoctorPatient(
   return mapMedicalPatient(data as unknown as MedicalPatientRow, doctor.fullName);
 }
 
+export async function createClinicalRecord(
+  doctor: MedicalDoctorProfile,
+  patientId: string,
+  content: string,
+) {
+  const trimmedContent = content.trim();
+  if (!trimmedContent) throw new Error("Informe o histórico clínico antes de salvar.");
+
+  const { data, error } = await getSupabaseClient().from("clinical_records").insert({
+    clinic_id: doctor.clinicId,
+    patient_id: patientId,
+    doctor_profile_id: doctor.id,
+    content: trimmedContent,
+    updated_by: doctor.fullName,
+  }).select("id, patient_id, content, created_at, updated_at, updated_by").single();
+  if (error || !data) throw error ?? new Error("Histórico clínico não retornado.");
+  return mapClinicalRecord(data as unknown as ClinicalRecordRow);
+}
+
+export async function updateClinicalRecord(
+  doctor: MedicalDoctorProfile,
+  recordId: string,
+  content: string,
+) {
+  const trimmedContent = content.trim();
+  if (!trimmedContent) throw new Error("O histórico clínico não pode ficar vazio.");
+
+  const { data, error } = await getSupabaseClient().from("clinical_records").update({
+    content: trimmedContent,
+    updated_at: new Date().toISOString(),
+    updated_by: doctor.fullName,
+  }).eq("id", recordId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id)
+    .select("id, patient_id, content, created_at, updated_at, updated_by").single();
+  if (error || !data) throw error ?? new Error("Histórico clínico não retornado.");
+  return mapClinicalRecord(data as unknown as ClinicalRecordRow);
+}
+
+export async function deleteClinicalRecord(
+  doctor: MedicalDoctorProfile,
+  recordId: string,
+) {
+  const { error } = await getSupabaseClient().from("clinical_records")
+    .delete().eq("id", recordId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id);
+  if (error) throw error;
+}
+
+export async function loadClinicalRecords(
+  doctor: MedicalDoctorProfile,
+  patientId: string,
+) {
+  const { data, error } = await getSupabaseClient().from("clinical_records")
+    .select("id, patient_id, content, created_at, updated_at, updated_by")
+    .eq("patient_id", patientId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as unknown as ClinicalRecordRow[]).map(mapClinicalRecord);
+}
+
 export async function saveMedicalPatientRecord(
   doctor: MedicalDoctorProfile,
   patientId: string,
@@ -397,9 +476,10 @@ export async function saveMedicalPatientRecord(
 export async function loadMedicalPatientWorkspace(patientId: string) {
   const doctor = await loadCurrentDoctorProfile();
   const supabase = getSupabaseClient();
-  const [patientResult, prescriptionResult, assessmentResult, bottleResult, settingsResult, useResult] = await Promise.all([
+  const [patientResult, prescriptionResult, clinicalRecordResult, assessmentResult, bottleResult, settingsResult, useResult] = await Promise.all([
     supabase.from("patients").select("*").eq("id", patientId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id).maybeSingle(),
     supabase.from("prescriptions").select("id, patient_id, content, signature_status, created_at").eq("patient_id", patientId).eq("doctor_profile_id", doctor.id).order("created_at", { ascending: false }),
+    supabase.from("clinical_records").select("id, patient_id, content, created_at, updated_at, updated_by").eq("patient_id", patientId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id).order("created_at", { ascending: false }),
     supabase.from("patient_assessments").select("*").eq("patient_id", patientId).order("created_at", { ascending: false }),
     supabase.from("bottles").select("*").eq("patient_id", patientId).order("bottle_number", { ascending: false }),
     supabase.from("patient_portal_settings").select("*").eq("patient_id", patientId).maybeSingle(),
@@ -408,11 +488,12 @@ export async function loadMedicalPatientWorkspace(patientId: string) {
 
   if (patientResult.error) throw patientResult.error;
   if (prescriptionResult.error) throw prescriptionResult.error;
+  if (clinicalRecordResult.error) throw clinicalRecordResult.error;
   if (assessmentResult.error) throw assessmentResult.error;
   if (bottleResult.error) throw bottleResult.error;
   if (settingsResult.error) throw settingsResult.error;
   if (useResult.error) throw useResult.error;
-  if (!patientResult.data) return { doctor, patient: null, prescriptions: [], portal: createDefaultPortalState(patientId) };
+  if (!patientResult.data) return { doctor, patient: null, prescriptions: [], clinicalRecords: [], portal: createDefaultPortalState(patientId) };
 
   const assessments = ((assessmentResult.data ?? []) as unknown as Record<string, unknown>[]).map((row): PatientAssessment => ({
     id: String(row.id),
@@ -471,6 +552,7 @@ export async function loadMedicalPatientWorkspace(patientId: string) {
     doctor,
     patient: mapMedicalPatient(patientResult.data as unknown as MedicalPatientRow, doctor.fullName),
     prescriptions: ((prescriptionResult.data ?? []) as unknown as PrescriptionRow[]).map((row) => mapPrescription(row, doctor)),
+    clinicalRecords: ((clinicalRecordResult.data ?? []) as unknown as ClinicalRecordRow[]).map(mapClinicalRecord),
     portal,
   };
 }
