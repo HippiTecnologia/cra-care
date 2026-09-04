@@ -35,10 +35,28 @@ export default function Home() {
     setMessage("");
     try {
       const supabase = getSupabaseClient();
-      const { data, error } = await supabase.auth.signInWithPassword({
+      let { data, error } = await supabase.auth.signInWithPassword({
         email: selectedRole === "Paciente" ? authEmailForPatientCpf(identifier) : authEmailForUsername(identifier),
         password,
       });
+
+      // Pacientes criados antes da troca para CPF ainda usam o endereço interno
+      // baseado no nome. A tela permanece em CPF e faz essa compatibilidade automaticamente.
+      if ((error || !data.user) && selectedRole === "Paciente") {
+        const legacyResponse = await fetch("/api/patient-login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ cpf: identifier }),
+        });
+        const legacy = await legacyResponse.json() as { email?: string | null };
+        if (legacy.email) {
+          ({ data, error } = await supabase.auth.signInWithPassword({
+            email: legacy.email,
+            password,
+          }));
+        }
+      }
+
       if (error || !data.user) {
         setMessage("Usuário ou senha inválidos. Se precisar, solicite ajuda à secretaria.");
         return;
