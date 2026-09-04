@@ -713,6 +713,13 @@ export default function MedicalPatientPage() {
                 Histórico clínico
                 <textarea value={medicalRecordDraft.history ?? ""} onChange={(event) => setMedicalRecordDraft({ history: event.target.value })} rows={10} placeholder="Antecedentes, exames e evolução clínica." className="mt-2 w-full rounded-xl border border-[#e9dfda] px-4 py-3 font-normal outline-none focus:border-[#b91142]" />
               </label>
+              {medicalRecordDraft.history && (
+                <div className="mt-5 rounded-2xl border border-[#eadfe0] bg-[#fcf8f8] p-4">
+                  <p className="text-xs font-bold uppercase tracking-wide text-[#a3113a]">Histórico salvo</p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm font-normal text-[#53454a]">{medicalRecordDraft.history}</p>
+                  {medicalRecordDraft.updatedAt && <p className="mt-3 text-xs font-normal text-[#817578]">Atualizado em {formatDate(medicalRecordDraft.updatedAt)}</p>}
+                </div>
+              )}
             </div>
             {error && <p role="alert" className="mt-5 rounded-xl bg-[#fff1f3] px-4 py-3 text-sm text-[#a3113a]">{error}</p>}
             <div className="mt-6 flex flex-wrap gap-3">
