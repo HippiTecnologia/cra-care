@@ -189,6 +189,8 @@ function downloadCsv(fileName: string, rows: ReportRow[]) {
 export default function AdminPage() {
   const router = useRouter();
   const [authorized, setAuthorized] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [section, setSection] = useState<Section>("dashboard");
   const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
   const [methods, setMethods] = useState<AdminTreatmentMethod[]>([]);
@@ -228,11 +230,24 @@ export default function AdminPage() {
     setAudit(workspace.audit);
     setInvoices(workspace.invoices);
     setAuthorized(true);
+    setIsLoading(false);
   }, []);
 
   useEffect(() => {
-    queueMicrotask(() => void reloadAdmin().catch(() => router.replace("/")));
-  }, [reloadAdmin, router]);
+    let mounted = true;
+    queueMicrotask(() => {
+      if (!mounted) return;
+      void reloadAdmin().catch((cause) => {
+        if (!mounted) return;
+        setIsLoading(false);
+        setAuthorized(false);
+        setLoadError(cause instanceof Error ? cause.message : "Não foi possível validar o acesso administrativo.");
+      });
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [reloadAdmin]);
 
   const installments = useMemo(() => createInstallments(sales, patients, invoices, commissions), [commissions, invoices, patients, sales]);
   const activeSales = sales.filter((sale) => sale.status !== "cancelada");
@@ -487,7 +502,24 @@ export default function AdminPage() {
   const maxMonthly = Math.max(1, ...monthly.map((item) => Math.max(item.expected, item.received)));
 
   if (!authorized) {
-    return <main className="flex min-h-screen items-center justify-center bg-[#f6f3f0] text-sm font-semibold text-[#86203b]">Validando acesso administrativo…</main>;
+    if (isLoading) {
+      return <main className="flex min-h-screen items-center justify-center bg-[#f6f3f0] text-sm font-semibold text-[#86203b]">Validando acesso administrativo…</main>;
+    }
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#f6f3f0] px-5 text-[#34292d]">
+        <section className="w-full max-w-xl rounded-3xl border border-[#eadfd9] bg-white p-7 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-[.18em] text-[#a3113a]">Painel administrativo</p>
+          <h1 className="mt-3 text-2xl font-bold">Não foi possível abrir o ADM</h1>
+          <p className="mt-3 text-sm leading-6 text-[#66595d]">O acesso foi interrompido antes de carregar os dados. Confira a mensagem abaixo para identificar o ajuste necessário.</p>
+          <div className="mt-5 rounded-2xl border border-[#f1cdd6] bg-[#fff4f6] p-4 text-sm font-semibold text-[#a3113a]">{loadError || "Não foi possível validar o acesso administrativo."}</div>
+          {loadError && <details className="mt-4 text-xs text-[#817578]"><summary className="cursor-pointer font-semibold">Ver detalhes técnicos</summary><pre className="mt-2 whitespace-pre-wrap rounded-xl bg-[#fbf7f5] p-3">{loadError}</pre></details>}
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button type="button" onClick={() => router.replace("/")} className="rounded-xl border border-[#e5d9d4] px-4 py-3 text-sm font-bold text-[#716569]">Voltar para o login</button>
+            <button type="button" onClick={() => { setIsLoading(true); setLoadError(""); void reloadAdmin().catch((cause) => { setIsLoading(false); setLoadError(cause instanceof Error ? cause.message : "Não foi possível validar o acesso administrativo."); }); }} className="rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-bold text-white">Tentar novamente</button>
+          </div>
+        </section>
+      </main>
+    );
   }
 
   return (
