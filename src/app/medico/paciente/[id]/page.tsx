@@ -18,9 +18,11 @@ import type { PatientPortalState } from "../../../paciente/patient-portal-store"
 import {
   createMedicalPrescription,
   createClinicalRecord,
+  completeMedicalPatientTreatment,
   deleteClinicalRecord,
   loadMedicalPatientWorkspace,
   prepareMedicalPrescriptionSignature,
+  updateMedicalPatientBasics,
   updateClinicalRecord,
   type MedicalDoctorProfile,
 } from "../../../../lib/supabase/medical-records";
@@ -102,6 +104,9 @@ export default function MedicalPatientPage() {
   const [clinicalRecordDraft, setClinicalRecordDraft] = useState("");
   const [editingClinicalRecordId, setEditingClinicalRecordId] = useState<string | null>(null);
   const [recordSaving, setRecordSaving] = useState(false);
+  const [editingPatientData, setEditingPatientData] = useState(false);
+  const [patientDataDraft, setPatientDataDraft] = useState({ name: "", cpf: "", birthDate: "" });
+  const [patientSaving, setPatientSaving] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -112,6 +117,7 @@ export default function MedicalPatientPage() {
         if (!active) return;
         setDoctor(workspace.doctor);
         setPatient(workspace.patient);
+        setPatientDataDraft(workspace.patient ? { name: workspace.patient.name, cpf: workspace.patient.cpf, birthDate: workspace.patient.birthDate } : { name: "", cpf: "", birthDate: "" });
         setPrescriptions(workspace.prescriptions);
         setClinicalRecords(workspace.clinicalRecords);
         setPortal(workspace.portal);
@@ -324,6 +330,43 @@ export default function MedicalPatientPage() {
     }
   }
 
+  async function savePatientBasics() {
+    if (!patient || !doctor) return;
+    if (!patientDataDraft.name.trim() || !patientDataDraft.cpf.trim() || !patientDataDraft.birthDate) {
+      setError("Nome, CPF e data de nascimento são obrigatórios.");
+      return;
+    }
+    setPatientSaving(true);
+    try {
+      const saved = await updateMedicalPatientBasics(doctor, patient.id, patientDataDraft);
+      setPatient(saved);
+      setPatientDataDraft({ name: saved.name, cpf: saved.cpf, birthDate: saved.birthDate });
+      setEditingPatientData(false);
+      setError("");
+      setMessage("Dados do paciente atualizados com sucesso.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível atualizar os dados do paciente.");
+    } finally {
+      setPatientSaving(false);
+    }
+  }
+
+  async function completeTreatment() {
+    if (!patient || !doctor || patient.status === "concluido") return;
+    if (!window.confirm("Confirmar que o paciente concluiu o tratamento?")) return;
+    setPatientSaving(true);
+    try {
+      const saved = await completeMedicalPatientTreatment(doctor, patient.id);
+      setPatient(saved);
+      setError("");
+      setMessage("Tratamento concluído. O paciente foi movido para a coluna Paciente concluído.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível concluir o tratamento.");
+    } finally {
+      setPatientSaving(false);
+    }
+  }
+
   if (!loaded) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#f8f5f2] text-[#a3113a]">
@@ -479,10 +522,32 @@ export default function MedicalPatientPage() {
               Início do tratamento: {formatDate(patient.startDate)}
             </p>
           </div>
-          <span className="self-start rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-semibold sm:self-center">
-            {statusLabel(patient)}
-          </span>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:justify-end sm:self-center">
+            <button type="button" onClick={() => setEditingPatientData((current) => !current)} className="rounded-full border border-white/35 bg-white/10 px-4 py-2 text-xs font-semibold hover:bg-white/20">
+              {editingPatientData ? "Cancelar edição" : "Editar dados"}
+            </button>
+            {patient.status !== "concluido" && (
+              <button type="button" onClick={() => void completeTreatment()} disabled={patientSaving} className="rounded-full bg-white px-4 py-2 text-xs font-bold text-[#a3113a] disabled:opacity-50">
+                Paciente concluiu
+              </button>
+            )}
+            <span className="rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-semibold">
+              {statusLabel(patient)}
+            </span>
+          </div>
         </section>
+
+        {editingPatientData && (
+          <section className="mt-5 rounded-[26px] border border-[#eee5e0] bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-bold text-[#433438]">Editar dados do paciente</h2>
+            <div className="mt-5 grid gap-4 md:grid-cols-3">
+              <label className="text-sm font-semibold text-[#544449]">Nome completo<input value={patientDataDraft.name} onChange={(event) => setPatientDataDraft((current) => ({ ...current, name: event.target.value }))} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /></label>
+              <label className="text-sm font-semibold text-[#544449]">CPF<input value={patientDataDraft.cpf} onChange={(event) => setPatientDataDraft((current) => ({ ...current, cpf: event.target.value }))} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /></label>
+              <label className="text-sm font-semibold text-[#544449]">Data de nascimento<input type="date" value={patientDataDraft.birthDate} onChange={(event) => setPatientDataDraft((current) => ({ ...current, birthDate: event.target.value }))} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /></label>
+            </div>
+            <button type="button" onClick={() => void savePatientBasics()} disabled={patientSaving} className="mt-5 rounded-xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{patientSaving ? "Salvando..." : "Salvar dados"}</button>
+          </section>
+        )}
 
         <nav className="mt-6 flex flex-wrap gap-3">
           {[

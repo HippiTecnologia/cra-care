@@ -476,6 +476,31 @@ export async function saveMedicalPatientRecord(
   return medicalRecord;
 }
 
+export async function updateMedicalPatientBasics(
+  doctor: MedicalDoctorProfile,
+  patientId: string,
+  input: Pick<DemoPatientRecord, "name" | "cpf" | "birthDate">,
+) {
+  const { data, error } = await getSupabaseClient().from("patients")
+    .update({ full_name: input.name.trim(), cpf: input.cpf.trim(), birth_date: input.birthDate, updated_at: new Date().toISOString() })
+    .eq("id", patientId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id)
+    .select("*").single();
+  if (error || !data) throw error ?? new Error("Não foi possível atualizar os dados do paciente.");
+  return mapMedicalPatient(data as unknown as MedicalPatientRow, doctor.fullName);
+}
+
+export async function completeMedicalPatientTreatment(
+  doctor: MedicalDoctorProfile,
+  patientId: string,
+) {
+  const { data, error } = await getSupabaseClient().from("patients")
+    .update({ status: "concluido", updated_at: new Date().toISOString() })
+    .eq("id", patientId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id)
+    .select("*").single();
+  if (error || !data) throw error ?? new Error("Não foi possível concluir o tratamento.");
+  return mapMedicalPatient(data as unknown as MedicalPatientRow, doctor.fullName);
+}
+
 export async function loadMedicalPatientWorkspace(patientId: string) {
   const doctor = await loadCurrentDoctorProfile();
   const supabase = getSupabaseClient();
