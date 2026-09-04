@@ -545,7 +545,7 @@ export default function AdminPage() {
         </aside>
 
         <div className="min-w-0 p-4 sm:p-7 lg:ml-[280px] xl:p-9">
-          <header className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#a3113a]">Gestão executiva</p><h1 className="mt-2 text-3xl font-bold">Olá, Administrador</h1><p className="mt-2 text-sm text-[#817578]">Acompanhe vendas, caixa, custos e desempenho da clínica.</p></div><div className="rounded-2xl border border-[#e8ddd8] bg-white px-4 py-3 shadow-sm"><p className="text-sm font-bold">{context?.fullName ?? "ADM CRA"}</p><p className="text-xs text-[#817578]">Acesso total às configurações</p></div></header>
+          <header className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#a3113a]">Gestão executiva</p><h1 className="mt-2 text-3xl font-bold">Olá, {context?.fullName ?? "Administrador"}</h1><p className="mt-2 text-sm text-[#817578]">Acompanhe vendas, caixa, custos e desempenho da clínica.</p></div><div className="rounded-2xl border border-[#e8ddd8] bg-white px-4 py-3 shadow-sm"><p className="text-sm font-bold">{context?.fullName ?? "ADM CRA"}</p><p className="text-xs text-[#817578]">Acesso total às configurações</p></div></header>
           {message && <div className="mt-5 flex items-center justify-between rounded-2xl border border-[#d7e9df] bg-[#edf8f3] px-4 py-3 text-sm font-semibold text-[#187157]"><span>{displayHonorarios(message)}</span><button type="button" onClick={() => setMessage("")} aria-label="Fechar">×</button></div>}
 
           {section === "dashboard" && <div className="mt-7 space-y-6">
