@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   treatmentPhases,
@@ -309,6 +310,7 @@ function requiresNewOrder(patient: Patient) {
 }
 
 export default function SecretariaPage() {
+  const router = useRouter();
   const cardWasDragged = useRef(false);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [context, setContext] = useState<SecretaryContext | null>(null);
@@ -998,13 +1000,13 @@ export default function SecretariaPage() {
                             onClick={() => {
                               if (cardWasDragged.current) return;
                               setKanbanMenuOpen(false);
-                              openPatient(patient);
+                              router.push(`/secretaria/cadastros#${patient.id}`);
                             }}
                             onKeyDown={(event) => {
                               if (event.key !== "Enter" && event.key !== " ") return;
                               event.preventDefault();
                               setKanbanMenuOpen(false);
-                              openPatient(patient);
+                              router.push(`/secretaria/cadastros#${patient.id}`);
                             }}
                             onDragStart={(event) => {
                               cardWasDragged.current = true;
