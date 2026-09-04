@@ -197,7 +197,9 @@ export default function SecretariaLotesPage() {
       const patient = patientById.get(prescription.patientId);
 
       return (
-        Boolean(patient) && !includedPrescriptionIds.has(prescription.id)
+        Boolean(patient) &&
+        ["ativo", "em-conversa"].includes(patient.status ?? "") &&
+        !includedPrescriptionIds.has(prescription.id)
       );
     });
   }, [includedPrescriptionIds, patientById, prescriptions]);
