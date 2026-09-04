@@ -744,7 +744,11 @@ export default function PatientPortalPage() {
     ...(pendingAssessmentBottle
       ? [{ id: `assessment-${pendingAssessmentBottle.id}`, icon: "📝", title: "Autoavaliação disponível", text: `Conte como você se sentiu durante o uso do frasco ${pendingAssessmentBottle.number}.` }]
       : []),
-  ];
+  ].sort((first, second) => {
+    const firstDate = portal.manualNotifications?.find((item) => item.id === first.id)?.createdAt ?? "";
+    const secondDate = portal.manualNotifications?.find((item) => item.id === second.id)?.createdAt ?? "";
+    return secondDate.localeCompare(firstDate);
+  });
   const readNotificationIds = portal.readNotificationIds ?? [];
   const unreadCount = notifications.filter((notification) => !readNotificationIds.includes(notification.id)).length;
 

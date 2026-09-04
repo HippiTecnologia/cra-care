@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authEmailForUsername, doctorInitialPassword, patientInitialPassword, requiresPasswordChange } from "../../../lib/auth/credentials";
+import { authEmailForPatientCpf, authEmailForUsername, doctorInitialPassword, patientInitialPassword, requiresPasswordChange } from "../../../lib/auth/credentials";
 import { getSupabaseAdminClient } from "../../../lib/supabase/admin";
 
 type StaffRole = "admin" | "secretaria" | "medico" | "laboratorio";
@@ -29,16 +29,17 @@ export async function POST(request: NextRequest) {
     const admin = getSupabaseAdminClient();
 
     if (body.kind === "patient") {
-      if (!body.patientId || !body.username || !body.birthDate) return NextResponse.json({ error: "Dados do paciente incompletos." }, { status: 400 });
+      if (!body.patientId || !body.cpf || !body.birthDate) return NextResponse.json({ error: "Dados do paciente incompletos." }, { status: 400 });
       const initialPassword = patientInitialPassword(body.birthDate);
-      const { data: created, error } = await admin.auth.admin.createUser({ email: authEmailForUsername(body.username), password: initialPassword, email_confirm: true, user_metadata: { username: body.username, role: "paciente" } });
+      const cpf = String(body.cpf).replace(/\D/g, "");
+      const { data: created, error } = await admin.auth.admin.createUser({ email: authEmailForPatientCpf(cpf), password: initialPassword, email_confirm: true, user_metadata: { username: cpf, role: "paciente" } });
       if (error || !created.user) return NextResponse.json({ error: error?.message ?? "Não foi possível criar o acesso." }, { status: 400 });
-      const { error: patientError } = await admin.from("patients").update({ auth_user_id: created.user.id, username: body.username, must_change_password: false }).eq("id", body.patientId).eq("clinic_id", clinicId);
+      const { error: patientError } = await admin.from("patients").update({ auth_user_id: created.user.id, username: cpf, must_change_password: false }).eq("id", body.patientId).eq("clinic_id", clinicId);
       if (patientError) {
         await admin.auth.admin.deleteUser(created.user.id);
         return NextResponse.json({ error: patientError.message }, { status: 400 });
       }
-      return NextResponse.json({ username: body.username, initialPassword });
+      return NextResponse.json({ username: cpf, initialPassword });
     }
 
     const role = body.role as StaffRole;
@@ -89,15 +90,17 @@ export async function PUT(request: NextRequest) {
     }
 
     const { data: patient } = await admin.from("patients")
-      .select("id, auth_user_id, username, birth_date")
+      .select("id, auth_user_id, username, cpf, birth_date")
       .eq("auth_user_id", body.userId)
       .eq("clinic_id", clinicId)
       .maybeSingle();
     if (!patient?.auth_user_id) return NextResponse.json({ error: "Acesso não encontrado nesta clínica." }, { status: 404 });
     const temporaryPassword = patientInitialPassword(patient.birth_date);
-    const { error } = await admin.auth.admin.updateUserById(patient.auth_user_id, { password: temporaryPassword });
+    const cpf = String(patient.cpf).replace(/\D/g, "");
+    const { error } = await admin.auth.admin.updateUserById(patient.auth_user_id, { email: authEmailForPatientCpf(cpf), password: temporaryPassword, user_metadata: { username: cpf, role: "paciente" } });
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    return NextResponse.json({ username: patient.username, temporaryPassword, mustChangePassword: false });
+    await admin.from("patients").update({ username: cpf }).eq("id", patient.id).eq("clinic_id", clinicId);
+    return NextResponse.json({ username: cpf, temporaryPassword, mustChangePassword: false });
   } catch {
     return NextResponse.json({ error: "Não foi possível redefinir a senha agora." }, { status: 500 });
   }

@@ -19,6 +19,12 @@ export function authEmailForUsername(username: string) {
   return `${normalizeUsername(username)}@login.cra-care.local`;
 }
 
+export function authEmailForPatientCpf(cpf: string) {
+  const digits = cpf.replace(/\D/g, "");
+  if (digits.length !== 11) throw new Error("CPF inválido.");
+  return `paciente.${digits}@login.cra-care.local`;
+}
+
 export function patientUsername(fullName: string) {
   const parts = normalizePart(fullName);
   return parts.length > 1 ? `${parts[0]}.${parts[1]}` : parts[0] ?? "paciente";

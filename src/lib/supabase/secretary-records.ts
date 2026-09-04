@@ -341,7 +341,7 @@ export async function createSecretaryPatientAccess(patient: DemoPatientRecord) {
     body: JSON.stringify({
       kind: "patient",
       patientId: patient.id,
-      username: patient.username,
+      cpf: patient.cpf,
       birthDate: patient.birthDate,
     }),
   });

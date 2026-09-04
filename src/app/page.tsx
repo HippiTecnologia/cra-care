@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { authEmailForUsername, requiresPasswordChange, type AccountRole } from "../lib/auth/credentials";
+import { authEmailForPatientCpf, authEmailForUsername, requiresPasswordChange, type AccountRole } from "../lib/auth/credentials";
 import { getSupabaseClient } from "../lib/supabase/client";
 
 type UserRole = "Paciente" | "Médico" | "Secretaria" | "Laboratório" | "Administrador";
@@ -28,7 +28,7 @@ export default function Home() {
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!identifier.trim() || !password.trim()) {
-      setMessage("Informe usuário e senha para continuar.");
+      setMessage(selectedRole === "Paciente" ? "Informe CPF e senha para continuar." : "Informe usuário e senha para continuar.");
       return;
     }
     setLoading(true);
@@ -36,7 +36,7 @@ export default function Home() {
     try {
       const supabase = getSupabaseClient();
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: authEmailForUsername(identifier),
+        email: selectedRole === "Paciente" ? authEmailForPatientCpf(identifier) : authEmailForUsername(identifier),
         password,
       });
       if (error || !data.user) {
@@ -185,7 +185,7 @@ export default function Home() {
                   htmlFor="identifier"
                   className="mb-2 block text-sm font-semibold text-[#45373b]"
                 >
-                  Usuário
+                  {selectedRole === "Paciente" ? "CPF" : "Usuário"}
                 </label>
 
                 <input
@@ -193,8 +193,8 @@ export default function Home() {
                   type="text"
                   value={identifier}
                   onChange={(event) => setIdentifier(event.target.value)}
-                  placeholder="Digite seu usuário de acesso"
-                  autoComplete="username"
+                  placeholder={selectedRole === "Paciente" ? "Digite seu CPF" : "Digite seu usuário de acesso"}
+                  autoComplete={selectedRole === "Paciente" ? "off" : "username"}
                   className="h-14 w-full rounded-2xl border border-[#e9ded9] bg-white px-4 text-sm outline-none transition placeholder:text-[#aaa0a2] focus:border-[#b91142] focus:ring-4 focus:ring-[#b91142]/10"
                 />
               </div>
