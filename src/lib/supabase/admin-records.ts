@@ -114,7 +114,8 @@ export async function loadAdminContext(): Promise<AdminContext> {
   if (error || !data?.clinic_id || !["admin", "super_admin"].includes(data.role)) {
     throw new Error("Este acesso não pertence ao perfil Administrador.");
   }
-  return { id: data.id, clinicId: data.clinic_id, fullName: data.full_name, role: data.role };
+  const fullName = data.full_name === "Patricia Martinski" ? "Patricia Trudes" : data.full_name;
+  return { id: data.id, clinicId: data.clinic_id, fullName, role: data.role };
 }
 
 export async function loadAdminMethods(context: Pick<AdminContext, "clinicId">) {
@@ -242,7 +243,7 @@ export async function saveAdminDoctor(context: AdminContext, doctor: AdminDoctor
     updated_at: new Date().toISOString(),
   }, { onConflict: "clinic_id,doctor_profile_id" });
   if (error) throw error;
-  await writeAudit(context, "médico", doctor.id, "Edição de comissão", `${doctor.name} · comissão de R$ ${(doctor.commissionPerBottle ?? COMMISSION_PER_BOTTLE).toFixed(2)} por frasco`);
+  await writeAudit(context, "médico", doctor.id, "Edição de honorário", `${doctor.name} · honorário de R$ ${(doctor.commissionPerBottle ?? COMMISSION_PER_BOTTLE).toFixed(2)} por frasco`);
 }
 
 function saleStatus(patient: DemoPatientRecord): AdminSaleSnapshot["status"] {
@@ -442,8 +443,8 @@ export async function markAdminCommissionPaid(
     paid_at: paidAt,
     paid_by: context.id,
   }).select("*").single();
-  if (error || !data) throw error ?? new Error("Pagamento de comissão não retornado.");
-  await writeAudit(context, "comissão", snapshot.id, "Comissão paga", `${record.doctor} · ${record.patientName} · R$ ${record.commissionValue.toFixed(2)} · competência ${record.accountingAt.slice(0, 10)}`);
+  if (error || !data) throw error ?? new Error("Pagamento de honorário não retornado.");
+  await writeAudit(context, "comissão", snapshot.id, "Honorário pago", `${record.doctor} · ${record.patientName} · R$ ${record.commissionValue.toFixed(2)} · competência ${record.accountingAt.slice(0, 10)}`);
   return commissionFromRow(data as unknown as Record<string, unknown>);
 }
 
@@ -453,7 +454,7 @@ export async function reverseAdminCommissionPayment(context: AdminContext, recor
     .eq("id", record.id)
     .eq("clinic_id", context.clinicId);
   if (error) throw error;
-  await writeAudit(context, "comissão", record.id, "Pagamento de comissão estornado", `${record.doctor} · ${record.patientName} · R$ ${record.commissionValue.toFixed(2)}`);
+  await writeAudit(context, "comissão", record.id, "Pagamento de honorário estornado", `${record.doctor} · ${record.patientName} · R$ ${record.commissionValue.toFixed(2)}`);
 }
 
 export async function loadAdminAudit(context: AdminContext) {
