@@ -9,6 +9,7 @@ import {
   DemoBatchStatus,
   DemoPatientRecord,
   DemoPrescription,
+  PrescriptionFormula,
   availableFormulas,
   treatmentPhases,
 } from "../../medico/patient-store";
@@ -112,9 +113,16 @@ export default function SecretariaLotesPage() {
   const [paymentConfirmations, setPaymentConfirmations] = useState<Record<string, { payment: boolean; asaas: boolean }>>({});
   const [readyItems, setReadyItems] = useState<DemoBatchItem[]>([]);
   const [readyFormula, setReadyFormula] = useState(availableFormulas[0]);
+  const [readyFormulaPercentage, setReadyFormulaPercentage] = useState("");
+  const [readyFormulas, setReadyFormulas] = useState<PrescriptionFormula[]>([]);
   const [readyPhase, setReadyPhase] = useState(treatmentPhases[0]);
   const [readyBottles, setReadyBottles] = useState(1);
   const [context, setContext] = useState<SecretaryContext | null>(null);
+
+  const readyFormulaTotal = useMemo(
+    () => readyFormulas.reduce((total, formula) => total + formula.percentage, 0),
+    [readyFormulas],
+  );
 
   useEffect(() => {
     let active = true;
@@ -399,9 +407,31 @@ export default function SecretariaLotesPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function addReadyFormula() {
+    const percentage = Number(readyFormulaPercentage);
+    const remaining = 100 - readyFormulaTotal;
+
+    if (!Number.isFinite(percentage) || percentage <= 0 || percentage > remaining) {
+      setError(`Informe uma porcentagem entre 1 e ${remaining}%.`);
+      return;
+    }
+
+    setReadyFormulas((current) => [
+      ...current,
+      { id: crypto.randomUUID(), name: readyFormula, percentage },
+    ]);
+    setReadyFormulaPercentage("");
+    setError("");
+  }
+
   function addReadyItem() {
     if (readyBottles < 1) {
       setError("Informe pelo menos um frasco para pronta entrega.");
+      return;
+    }
+
+    if (readyFormulas.length === 0 || readyFormulaTotal !== 100) {
+      setError("A composição da pronta entrega precisa totalizar 100% antes de adicionar ao lote.");
       return;
     }
 
@@ -421,11 +451,13 @@ export default function SecretariaLotesPage() {
         treatment: "Imunoterapia para pronta entrega",
         phase: readyPhase,
         bottles: readyBottles,
-        formulas: [{ id: `formula-${identifier}`, name: readyFormula, percentage: 100 }],
+        formulas: readyFormulas.map((formula) => ({ ...formula, id: `formula-${identifier}-${formula.id}` })),
       },
     ]);
     setError("");
     setReadyBottles(1);
+    setReadyFormulas([]);
+    setReadyFormulaPercentage("");
   }
 
   async function sendBatch(batch: DemoBatch) {
@@ -771,11 +803,21 @@ export default function SecretariaLotesPage() {
                       <input value={`${technicalDoctor.name} · CRM ${technicalDoctor.crm}`} readOnly className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-[#f7f4f2] px-3 text-sm font-normal text-[#786c70] outline-none" />
                       <span className="mt-2 block text-xs font-normal leading-5 text-[#817578]">Pedidos de pronta entrega saem com o nome final e a assinatura técnica do Dr. Sérgio.</span>
                     </label>
-                    <label className="text-sm font-semibold text-[#544449]">Fórmula
+                    <label className="text-sm font-semibold text-[#544449]">Composição
                       <select value={readyFormula} onChange={(event) => setReadyFormula(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
                         {availableFormulas.map((formula) => <option key={formula} value={formula}>{formula}</option>)}
                       </select>
                     </label>
+                    <label className="text-sm font-semibold text-[#544449]">Porcentagem
+                      <input type="number" min={1} max={100 - readyFormulaTotal} value={readyFormulaPercentage} onChange={(event) => setReadyFormulaPercentage(event.target.value)} placeholder={`${100 - readyFormulaTotal}% disponível`} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]" />
+                    </label>
+                    <div className="sm:col-span-2">
+                      <button type="button" onClick={addReadyFormula} disabled={readyFormulaTotal >= 100} className="h-11 rounded-xl border border-[#b91142] px-4 text-sm font-semibold text-[#a3113a] disabled:cursor-not-allowed disabled:opacity-50">+ Adicionar composição</button>
+                      <div className="mt-3 rounded-xl bg-[#f7f4f2] px-4 py-3">
+                        {readyFormulas.length === 0 ? <p className="text-sm text-[#817578]">Adicione as composições que formarão a receita de pronta entrega.</p> : <div className="space-y-2">{readyFormulas.map((formula) => <div key={formula.id} className="flex items-center justify-between gap-3 text-sm"><span className="font-medium text-[#433438]">{formula.name}</span><span className="flex items-center gap-3"><strong>{formula.percentage}%</strong><button type="button" onClick={() => setReadyFormulas((current) => current.filter((item) => item.id !== formula.id))} className="text-[#a3113a]" aria-label={`Remover ${formula.name}`}>Remover</button></span></div>)}</div>}
+                        <p className={`mt-3 border-t border-[#e7ddd8] pt-3 text-sm font-bold ${readyFormulaTotal === 100 ? "text-[#187157]" : "text-[#a3113a]"}`}>Total da composição: {readyFormulaTotal}%</p>
+                      </div>
+                    </div>
                     <label className="text-sm font-semibold text-[#544449]">Fase
                       <select value={readyPhase} onChange={(event) => setReadyPhase(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
                         {treatmentPhases.map((phase) => <option key={phase} value={phase}>{phase}</option>)}
@@ -784,14 +826,14 @@ export default function SecretariaLotesPage() {
                     <label className="text-sm font-semibold text-[#544449]">Quantidade de frascos
                       <input type="number" min={1} value={readyBottles} onChange={(event) => setReadyBottles(Number(event.target.value))} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]" />
                     </label>
-                    <div className="flex items-end"><button type="button" onClick={addReadyItem} className="h-12 w-full rounded-xl bg-[#a3113a] px-4 text-sm font-semibold text-white">Adicionar ao lote</button></div>
+                    <div className="flex items-end"><button type="button" onClick={addReadyItem} disabled={readyFormulaTotal !== 100} className="h-12 w-full rounded-xl bg-[#a3113a] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Adicionar ao lote</button></div>
                   </div>
 
                   <div className="mt-6 space-y-3">
                     {readyItems.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-10 text-center"><p className="text-sm font-semibold text-[#53454a]">Nenhum frasco adicionado</p><p className="mt-2 text-xs text-[#817578]">Escolha a fórmula, a fase e a quantidade para criar o estoque de pronta entrega.</p></div>
                     ) : readyItems.map((item) => (
-                      <article key={item.prescriptionId} className="rounded-2xl border border-[#eee6e2] bg-[#fdfbf9] p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-bold text-[#433438]">{item.formulas[0]?.name}</p><p className="mt-2 text-xs text-[#776b6e]">{item.phase} · {item.bottles} frasco(s) · {item.doctor}</p><span className="mt-3 inline-flex rounded-full bg-[#fff4e4] px-2.5 py-1 text-[11px] font-semibold text-[#966419]">Receita preparada · aguardando aprovação médica</span></div><button type="button" onClick={() => setReadyItems((current) => current.filter((saved) => saved.prescriptionId !== item.prescriptionId))} className="rounded-lg px-2 py-1 text-[#a3113a]" aria-label="Remover item">×</button></div></article>
+                      <article key={item.prescriptionId} className="rounded-2xl border border-[#eee6e2] bg-[#fdfbf9] p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-bold text-[#433438]">{item.formulas.map((formula) => `${formula.name} (${formula.percentage}%)`).join(" · ")}</p><p className="mt-2 text-xs text-[#776b6e]">{item.phase} · {item.bottles} frasco(s) · {item.doctor}</p><span className="mt-3 inline-flex rounded-full bg-[#fff4e4] px-2.5 py-1 text-[11px] font-semibold text-[#966419]">Receita preparada · aguardando aprovação médica</span></div><button type="button" onClick={() => setReadyItems((current) => current.filter((saved) => saved.prescriptionId !== item.prescriptionId))} className="rounded-lg px-2 py-1 text-[#a3113a]" aria-label="Remover item">×</button></div></article>
                     ))}
                   </div>
                 </div>
