@@ -67,6 +67,15 @@ export type MedicalRecord = {
   updatedBy?: string;
 };
 
+export type ClinicalRecord = {
+  id: string;
+  patientId: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy?: string;
+};
+
 export type PatientPaymentRecord = {
   id: string;
   amount: number;

@@ -4,4 +4,3 @@
 
 alter table public.patient_portal_settings
   add column if not exists manual_notifications jsonb not null default '[]'::jsonb;
-
