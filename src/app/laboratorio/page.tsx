@@ -92,6 +92,11 @@ export default function LaboratorioPage() {
     let active = true;
     const synchronize = async () => {
       try {
+        const { data: { user } } = await getSupabaseClient().auth.getUser();
+        if (!user || user.user_metadata?.role !== "laboratorio") {
+          if (active) { setError("Acesso restrito ao perfil do Laboratório."); setLoaded(true); }
+          return;
+        }
         const workspace = await loadLaboratoryWorkspace();
         if (!active) return;
         setContext(workspace.context);
