@@ -45,6 +45,13 @@ function number(value: unknown, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function dateText(value: unknown, fallback: string) {
+  const candidate = text(value);
+  if (!candidate) return fallback;
+  const parsed = new Date(candidate.includes("T") ? candidate : `${candidate}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? fallback : candidate;
+}
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -275,11 +282,34 @@ function methodForPatient(patient: DemoPatientRecord, methods: AdminTreatmentMet
 
 function saleFromRow(row: Record<string, unknown>): AdminSaleSnapshot {
   const snapshot = objectValue(row.snapshot) as unknown as AdminSaleSnapshot;
+  const condition = text(snapshot.condition, "Parcelado") === "À vista" ? "À vista" : "Parcelado";
   return {
     ...snapshot,
-    id: text(row.id),
-    patientId: text(row.patient_id, snapshot.patientId),
-    status: text(row.status, snapshot.status) as AdminSaleSnapshot["status"],
+    id: text(row.id, text(snapshot.id)),
+    patientId: text(row.patient_id, text(snapshot.patientId)),
+    patientName: text(snapshot.patientName, "Paciente sem nome"),
+    patientCpf: text(snapshot.patientCpf),
+    doctor: text(snapshot.doctor, "Médico não informado"),
+    treatment: text(snapshot.treatment, "Tratamento não informado"),
+    contractedAt: dateText(snapshot.contractedAt, dateText(row.created_at, new Date(0).toISOString())),
+    methodId: text(snapshot.methodId),
+    methodName: text(snapshot.methodName, "Método não informado"),
+    methodVersion: number(snapshot.methodVersion, 1),
+    listValue: number(snapshot.listValue),
+    discountAmount: number(snapshot.discountAmount),
+    contractedValue: number(snapshot.contractedValue),
+    condition,
+    installments: Math.max(1, number(snapshot.installments, 1)),
+    paymentMethod: text(snapshot.paymentMethod, "A definir"),
+    firstPaymentDueAt: snapshot.firstPaymentDueAt ? dateText(snapshot.firstPaymentDueAt, "") || undefined : undefined,
+    commissionRateSnapshot: number(snapshot.commissionRateSnapshot),
+    bottleCount: number(snapshot.bottleCount) || undefined,
+    commissionPerBottleSnapshot: snapshot.commissionPerBottleSnapshot === undefined || snapshot.commissionPerBottleSnapshot === null
+      ? undefined
+      : number(snapshot.commissionPerBottleSnapshot, COMMISSION_PER_BOTTLE),
+    status: ["ativa", "concluida", "cancelada"].includes(text(row.status, text(snapshot.status)))
+      ? text(row.status, text(snapshot.status)) as AdminSaleSnapshot["status"]
+      : "ativa",
   };
 }
 

@@ -91,6 +91,7 @@ function monthLabel(value: string) {
 
 function addMonths(value: string, months: number) {
   const base = value.includes("T") ? new Date(value) : new Date(`${value}T12:00:00`);
+  if (Number.isNaN(base.getTime())) return new Date(0).toISOString().slice(0, 10);
   const originalDay = base.getDate();
   base.setDate(1);
   base.setMonth(base.getMonth() + months);
@@ -101,6 +102,7 @@ function addMonths(value: string, months: number) {
 
 function addDays(value: string, days: number) {
   const base = value.includes("T") ? new Date(value) : new Date(`${value}T12:00:00`);
+  if (Number.isNaN(base.getTime())) return new Date(0).toISOString().slice(0, 10);
   base.setDate(base.getDate() + days);
   return base.toISOString().slice(0, 10);
 }
@@ -129,8 +131,8 @@ function createInstallments(
 ): InstallmentView[] {
   const today = new Date().toISOString().slice(0, 10);
   return sales.flatMap((sale) => {
-    const count = Math.max(1, sale.installments);
-    const totalCents = Math.round(sale.contractedValue * 100);
+    const count = Math.max(1, Number.isFinite(sale.installments) ? Math.floor(sale.installments) : 1);
+    const totalCents = Math.max(0, Math.round((Number.isFinite(sale.contractedValue) ? sale.contractedValue : 0) * 100));
     const baseCents = Math.floor(totalCents / count);
     const remainder = totalCents - baseCents * count;
     const patient = patients.find((item) => item.id === sale.patientId);
@@ -141,7 +143,8 @@ function createInstallments(
     return Array.from({ length: count }, (_, index) => {
       const scheduledValue = (baseCents + (index < remainder ? 1 : 0)) / 100;
       const payment = payments.find((item) => item.installmentNumber === index + 1) ?? withoutNumber[index];
-      const dueAt = addMonths(sale.firstPaymentDueAt ?? addMonths(sale.contractedAt, 1), index);
+      const contractedAt = sale.contractedAt || new Date(0).toISOString();
+      const dueAt = addMonths(sale.firstPaymentDueAt ?? addMonths(contractedAt, 1), index);
       const installmentId = `${sale.id}-${index + 1}`;
       const commissionRecord = commissions.find((item) => item.installmentId === installmentId);
       const status: InstallmentView["status"] = sale.status === "cancelada" ? "Cancelada" : payment ? "Recebida" : dueAt < today ? "Vencida" : "Pendente";
