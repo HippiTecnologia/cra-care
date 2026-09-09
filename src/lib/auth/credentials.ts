@@ -12,7 +12,16 @@ function normalizePart(value: string) {
 }
 
 export function normalizeUsername(value: string) {
-  return normalizePart(value).join(".") || "usuario";
+  // Mantém pontos enquanto o usuário digita (ex.: enfermagem.diene).
+  // O campo pode ficar vazio durante a edição; a tela valida antes de salvar.
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9.\s]/g, "")
+    .replace(/\s+/g, ".")
+    .replace(/\.{2,}/g, ".")
+    .replace(/^\./, "");
 }
 
 export function authEmailForUsername(username: string) {
