@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authEmailForPatientCpf, authEmailForUsername, doctorInitialPassword, patientInitialPassword, requiresPasswordChange } from "../../../lib/auth/credentials";
 import { getSupabaseAdminClient } from "../../../lib/supabase/admin";
 
-type StaffRole = "admin" | "secretaria" | "medico" | "laboratorio";
+type StaffRole = "admin" | "secretaria" | "medico" | "laboratorio" | "enfermagem";
 
 function unauthorized(message = "Acesso não autorizado.") {
   return NextResponse.json({ error: message }, { status: 401 });
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     }
 
     const role = body.role as StaffRole;
-    if (!body.fullName || !body.username || !["admin", "secretaria", "medico", "laboratorio"].includes(role)) return NextResponse.json({ error: "Dados do usuário incompletos." }, { status: 400 });
+    if (!body.fullName || !body.username || !["admin", "secretaria", "medico", "laboratorio", "enfermagem"].includes(role)) return NextResponse.json({ error: "Dados do usuário incompletos." }, { status: 400 });
     if (role === "admin" && !["admin", "super_admin"].includes(currentActor.role)) return unauthorized("Somente o ADM pode criar outro acesso administrativo.");
     const initialPassword = role === "medico" ? doctorInitialPassword(body.crm ?? "") : body.initialPassword;
     if (!initialPassword) return NextResponse.json({ error: "Senha inicial não informada." }, { status: 400 });

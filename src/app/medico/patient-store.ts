@@ -36,7 +36,8 @@ export type DemoPatientRecord = {
     | "tentar-novamente"
     | "perdido"
     | "concluido"
-    | "desistente";
+    | "desistente"
+    | "laudo";
   acquisitionMethod?: string;
   agreedCondition?: "À vista" | "Parcelado";
   methodSnapshotId?: string;

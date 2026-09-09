@@ -30,6 +30,12 @@ export type PatientAssessment = {
   response?: string;
   respondedAt?: string;
   respondedBy?: string;
+  assessmentType?: "inicial" | "acompanhamento";
+  nuisanceScore?: number;
+  symptomScores?: Record<string, number>;
+  symptomTotal?: number;
+  missedImmunotherapy?: "nenhuma" | "1-3" | "4-7" | "mais-7";
+  rescueMedication?: "nenhuma" | "1-5" | "6-15" | "mais-15";
 };
 
 export type PatientReminderSettings = {

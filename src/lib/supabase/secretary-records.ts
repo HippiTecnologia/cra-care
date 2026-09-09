@@ -173,7 +173,7 @@ export async function loadSecretaryPatients(context?: SecretaryContext) {
   const supabase = getSupabaseClient();
   const [doctors, patientResult, paymentResult] = await Promise.all([
     loadSecretaryDoctors(current),
-    supabase.from("patients").select("*").eq("clinic_id", current.clinicId).order("created_at", { ascending: false }),
+    supabase.from("patients").select("*").eq("clinic_id", current.clinicId).neq("status", "laudo").order("created_at", { ascending: false }),
     supabase.from("payments").select("*").eq("clinic_id", current.clinicId).order("paid_at", { ascending: false }),
   ]);
   if (patientResult.error) throw patientResult.error;

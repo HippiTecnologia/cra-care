@@ -53,6 +53,7 @@ type ClinicalRecordRow = {
   created_at: string;
   updated_at: string;
 };
+export type NursingReport = { id: string; patientId: string; reportType: "prick_test" | "patch_test"; content: Record<string, unknown>; createdAt: string };
 
 function normalizePatientId(value: string) {
   const patientId = decodeURIComponent(value).trim();
@@ -91,6 +92,7 @@ function validStatus(value: string): DemoPatientRecord["status"] {
     "perdido",
     "concluido",
     "desistente",
+    "laudo",
   ];
 
   return statuses.includes(value as DemoPatientRecord["status"])
@@ -307,6 +309,12 @@ export async function loadDoctorPortalStates(
       response: typeof row.response === "string" ? row.response : undefined,
       respondedAt: typeof row.responded_at === "string" ? row.responded_at : undefined,
       respondedBy: typeof row.responded_by === "string" ? row.responded_by : undefined,
+      assessmentType: row.assessment_type === "inicial" || row.assessment_type === "acompanhamento" ? row.assessment_type : undefined,
+      nuisanceScore: numberValue(row, "nuisance_score"),
+      symptomScores: recordValue(row.symptom_scores) as Record<string, number>,
+      symptomTotal: numberValue(row, "symptom_total"),
+      missedImmunotherapy: row.missed_immunotherapy as PatientAssessment["missedImmunotherapy"],
+      rescueMedication: row.rescue_medication as PatientAssessment["rescueMedication"],
     });
   }
   for (const row of (bottleResult.data ?? []) as unknown as Record<string, unknown>[]) {
@@ -511,12 +519,15 @@ export async function loadMedicalPatientWorkspace(patientId: string) {
     .from("patients").select("*").eq("id", normalizedPatientId)
     .eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id).maybeSingle();
   if (patientError) throw patientError;
-  if (!patientData) return { doctor, patient: null, prescriptions: [], clinicalRecords: [], portal: createDefaultPortalState(normalizedPatientId) };
+  if (!patientData) return { doctor, patient: null, prescriptions: [], clinicalRecords: [], nursingReports: [] as NursingReport[], portal: createDefaultPortalState(normalizedPatientId) };
 
   const realPatientId = patientData.id;
-  const [prescriptionResult, clinicalRecordResult, assessmentResult, bottleResult, settingsResult, useResult] = await Promise.all([
+  const [prescriptionResult, clinicalRecordResult, nursingReportResult, assessmentResult, bottleResult, settingsResult, useResult] = await Promise.all([
     supabase.from("prescriptions").select("id, patient_id, content, signature_status, created_at").eq("patient_id", realPatientId).eq("doctor_profile_id", doctor.id).order("created_at", { ascending: false }),
     supabase.from("clinical_records").select("id, patient_id, content, created_at, updated_at").eq("patient_id", realPatientId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id).order("created_at", { ascending: false }),
+    // A tipagem gerada será atualizada após aplicar a migration 014 no Supabase.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase.from("nursing_reports") as any).select("id, patient_id, report_type, content, created_at").eq("patient_id", realPatientId).eq("doctor_profile_id", doctor.id).order("created_at", { ascending: false }),
     supabase.from("patient_assessments").select("*").eq("patient_id", realPatientId).order("created_at", { ascending: false }),
     supabase.from("bottles").select("*").eq("patient_id", realPatientId).order("bottle_number", { ascending: false }),
     supabase.from("patient_portal_settings").select("*").eq("patient_id", realPatientId).maybeSingle(),
@@ -524,6 +535,7 @@ export async function loadMedicalPatientWorkspace(patientId: string) {
   ]);
   if (prescriptionResult.error) throw prescriptionResult.error;
   if (clinicalRecordResult.error) throw clinicalRecordResult.error;
+  if (nursingReportResult.error) throw nursingReportResult.error;
   if (assessmentResult.error) throw assessmentResult.error;
   if (bottleResult.error) throw bottleResult.error;
   if (settingsResult.error) throw settingsResult.error;
@@ -537,6 +549,12 @@ export async function loadMedicalPatientWorkspace(patientId: string) {
     medicationFrequency: row.medication_frequency as PatientAssessment["medicationFrequency"],
     notes: typeof row.comment === "string" ? row.comment : "",
     createdAt: String(row.created_at),
+    assessmentType: row.assessment_type === "inicial" || row.assessment_type === "acompanhamento" ? row.assessment_type : undefined,
+    nuisanceScore: numberValue(row, "nuisance_score"),
+    symptomScores: recordValue(row.symptom_scores) as Record<string, number>,
+    symptomTotal: numberValue(row, "symptom_total"),
+    missedImmunotherapy: row.missed_immunotherapy as PatientAssessment["missedImmunotherapy"],
+    rescueMedication: row.rescue_medication as PatientAssessment["rescueMedication"],
   }));
   const bottles = ((bottleResult.data ?? []) as unknown as Record<string, unknown>[]).map((row): PatientBottle => {
     const rawStatus = String(row.status ?? "").toLowerCase();
@@ -586,6 +604,7 @@ export async function loadMedicalPatientWorkspace(patientId: string) {
     patient: mapMedicalPatient(patientData as unknown as MedicalPatientRow, doctor.fullName),
     prescriptions: ((prescriptionResult.data ?? []) as unknown as PrescriptionRow[]).map((row) => mapPrescription(row, doctor)),
     clinicalRecords: ((clinicalRecordResult.data ?? []) as unknown as ClinicalRecordRow[]).map(mapClinicalRecord),
+    nursingReports: ((nursingReportResult.data ?? []) as Record<string, unknown>[]).map((row): NursingReport => ({ id: String(row.id), patientId: String(row.patient_id), reportType: row.report_type === "patch_test" ? "patch_test" : "prick_test", content: recordValue(row.content), createdAt: String(row.created_at) })),
     portal,
   };
 }

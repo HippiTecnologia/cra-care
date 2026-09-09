@@ -62,13 +62,6 @@ const assessmentOptions: {
   { value: "nao-bem", emoji: "😟", label: "Não me senti bem" },
 ];
 
-const symptomFrequencyOptions = [
-  ["raramente", "Raramente (menos de 1 dia por semana)"], ["as-vezes", "Às vezes (1–3 dias por semana)"], ["frequentemente", "Frequentemente (4–6 dias por semana)"], ["quase-diariamente", "Quase diariamente"],
-] as const;
-const symptomSeverityOptions = [
-  ["leves", "Leves (não afetam as atividades diárias)"], ["moderados", "Moderados (algumas limitações nas atividades diárias)"], ["severos", "Severos (limitações significativas nas atividades diárias)"], ["muito-severos", "Muito severos (incapacidade)"],
-] as const;
-const medicationFrequencyOptions = [["nunca", "Nunca"], ["1-2", "1–2 vezes"], ["3-5", "3–5 vezes"], ["todos-os-dias", "Todos os dias"]] as const;
 
 function dateKey(date: Date) {
   const year = date.getFullYear();
@@ -243,9 +236,10 @@ export default function PatientPortalPage() {
   const [selectedDate, setSelectedDate] = useState(() => dateKey(new Date()));
   const [finishDate, setFinishDate] = useState(() => dateKey(new Date()));
   const [showFinishForm, setShowFinishForm] = useState(false);
-  const [assessmentSymptomFrequency, setAssessmentSymptomFrequency] = useState<NonNullable<PatientAssessment["symptomFrequency"]> | "">("");
-  const [assessmentSymptomSeverity, setAssessmentSymptomSeverity] = useState<NonNullable<PatientAssessment["symptomSeverity"]> | "">("");
-  const [assessmentMedicationFrequency, setAssessmentMedicationFrequency] = useState<NonNullable<PatientAssessment["medicationFrequency"]> | "">("");
+  const [assessmentNuisance, setAssessmentNuisance] = useState<number | null>(null);
+  const [assessmentSymptoms, setAssessmentSymptoms] = useState<Record<string, number>>({});
+  const [assessmentMissed, setAssessmentMissed] = useState<NonNullable<PatientAssessment["missedImmunotherapy"]> | "">("");
+  const [assessmentRescue, setAssessmentRescue] = useState<NonNullable<PatientAssessment["rescueMedication"]> | "">("");
   const [assessmentNotes, setAssessmentNotes] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -283,11 +277,9 @@ export default function PatientPortalPage() {
   const startedBottleCount = safePortal.bottles.filter((bottle) => bottle.status !== "recebido").length;
   const receivedBottleCount = Math.max(patient?.bottlesReceived ?? 0, safePortal.bottles.length);
   const waitingBottleCount = Math.max(0, receivedBottleCount - startedBottleCount);
-  const pendingAssessmentBottle = safePortal.bottles.find(
-    (bottle) =>
-      bottle.status === "finalizado" &&
-      !safePortal.assessments.some((assessment) => assessment.bottleId === bottle.id),
-  );
+  const latestAssessment = safePortal.assessments[0];
+  const nextAssessmentAt = latestAssessment ? new Date(new Date(latestAssessment.createdAt).setMonth(new Date(latestAssessment.createdAt).getMonth() + 2)) : null;
+  const pendingAssessmentBottle = patient && (prescriptions[0] || safePortal.bottles.length > 0) && (!nextAssessmentAt || nextAssessmentAt <= new Date()) ? { id: "periodic", number: 0 } : null;
   const latestPrescription = prescriptions[0];
   const currentBottleRecords = safePortal.useRecords.filter(
     (record) => record.bottleId === currentBottle?.id,
@@ -535,29 +527,30 @@ export default function PatientPortalPage() {
   }
 
   function saveAssessment() {
-    if (!portal || !pendingAssessmentBottle || !assessmentSymptomFrequency || !assessmentSymptomSeverity || !assessmentMedicationFrequency) return;
+    if (!portal || !pendingAssessmentBottle || assessmentNuisance === null || !assessmentMissed || !assessmentRescue) return;
 
     updatePortal({
       ...portal,
       assessments: [
         {
           id: crypto.randomUUID(),
-          bottleId: pendingAssessmentBottle.id,
-          bottleNumber: pendingAssessmentBottle.number,
-          symptomFrequency: assessmentSymptomFrequency,
-          symptomSeverity: assessmentSymptomSeverity,
-          medicationFrequency: assessmentMedicationFrequency,
+          bottleId: "",
+          bottleNumber: 0,
+          assessmentType: latestAssessment ? "acompanhamento" : "inicial",
+          nuisanceScore: assessmentNuisance,
+          symptomScores: assessmentSymptoms,
+          symptomTotal: Object.values(assessmentSymptoms).reduce((total, score) => total + score, 0),
+          missedImmunotherapy: assessmentMissed,
+          rescueMedication: assessmentRescue,
           notes: assessmentNotes.trim(),
           createdAt: new Date().toISOString(),
         },
         ...portal.assessments,
       ],
     });
-    setAssessmentSymptomFrequency("");
-    setAssessmentSymptomSeverity("");
-    setAssessmentMedicationFrequency("");
+    setAssessmentNuisance(null); setAssessmentSymptoms({}); setAssessmentMissed(""); setAssessmentRescue("");
     setAssessmentNotes("");
-    setMessage("Autoavaliação registrada! Quando estiver pronto, adicione o próximo frasco.");
+    setMessage("Avaliação da imunoterapia registrada no seu histórico.");
   }
 
   async function saveReminders() {
@@ -998,14 +991,16 @@ export default function PatientPortalPage() {
       {pendingAssessmentBottle && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#2c1b20]/55 p-3 sm:items-center sm:p-5">
           <section className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-[30px] bg-white p-6 shadow-2xl sm:p-8">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Autoavaliação · frasco {pendingAssessmentBottle.number}</p>
-            <h2 className="mt-3 text-xl font-bold text-[#433438] sm:text-2xl">Avaliação dos sintomas durante este frasco</h2>
-            <p className="mt-2 text-sm text-[#817578]">Sua resposta ajuda a equipe a acompanhar a sua evolução.</p>
-            <AssessmentQuestion title="Com que frequência você apresenta sintomas de rinite alérgica durante a semana? *" options={symptomFrequencyOptions} value={assessmentSymptomFrequency} onChange={setAssessmentSymptomFrequency} />
-            <AssessmentQuestion title="Quão severos são os sintomas de rinite alérgica? *" options={symptomSeverityOptions} value={assessmentSymptomSeverity} onChange={setAssessmentSymptomSeverity} />
-            <AssessmentQuestion title="Quantas vezes por semana você usa medicamentos para controlar os sintomas? *" options={medicationFrequencyOptions} value={assessmentMedicationFrequency} onChange={setAssessmentMedicationFrequency} />
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Avaliação da imunoterapia · {latestAssessment ? "Acompanhamento" : "Inicial"}</p>
+            <h2 className="mt-3 text-xl font-bold text-[#433438] sm:text-2xl">Como foram seus últimos 60 dias?</h2>
+            <p className="mt-2 text-sm text-[#817578]">Data da avaliação: {formatDate(new Date().toISOString())}</p>
+            <div className="mt-5"><p className="text-sm font-semibold">De 0 a 10, quanto os sintomas alérgicos incomodaram você no último mês? *</p><div className="mt-3 flex flex-wrap gap-2">{Array.from({length:11},(_,score)=><button key={score} type="button" onClick={()=>setAssessmentNuisance(score)} className={`h-10 w-10 rounded-full border font-semibold ${assessmentNuisance===score?"border-[#a3113a] bg-[#a3113a] text-white":"border-[#eadfd9]"}`}>{score}</button>)}</div></div>
+            <div className="mt-6 space-y-4"><p className="text-sm font-semibold">Na última semana, com que frequência você apresentou:</p>{[["nariz","Nariz entupido ou congestionado"],["espirros","Espirros, coriza ou coceira no nariz"],["olhos","Olhos coçando, lacrimejando ou vermelhos"],["sono","Sintomas que atrapalharam seu sono"],["rotina","Sintomas que atrapalharam trabalho, escola ou lazer"]].map(([id,label])=><label key={id} className="block text-sm"><span>{label}</span><select value={assessmentSymptoms[id]??""} onChange={e=>setAssessmentSymptoms({...assessmentSymptoms,[id]:Number(e.target.value)})} className="mt-2 w-full rounded-xl border p-2"><option value="">Selecione</option><option value="0">Nunca (0)</option><option value="1">1 a 2 vezes (1)</option><option value="2">Mais de 2 vezes (2)</option><option value="5">Quase todos os dias (5)</option></select></label>)}</div>
+            <p className="mt-3 text-sm font-bold">Total: {Object.values(assessmentSymptoms).reduce((a,b)=>a+b,0)} / 15</p>
+            <AssessmentQuestion title="Nos últimos 60 dias, quantas vezes esqueceu de tomar a imunoterapia? *" options={[["nenhuma","Nenhuma"],["1-3","1 a 3 vezes"],["4-7","4 a 7 vezes"],["mais-7","Mais de 7 vezes"]] as const} value={assessmentMissed} onChange={setAssessmentMissed} />
+            <AssessmentQuestion title="Nos últimos 60 dias, quantas vezes precisou de medicação de resgate? *" options={[["nenhuma","Nenhuma"],["1-5","1 a 5 vezes"],["6-15","6 a 15 vezes"],["mais-15","Mais de 15 vezes"]] as const} value={assessmentRescue} onChange={setAssessmentRescue} />
             <label className="mt-6 block text-sm font-semibold text-[#544449]">Gostaria de compartilhar sua experiência?<textarea value={assessmentNotes} onChange={(event) => setAssessmentNotes(event.target.value)} rows={3} placeholder="Escreva aqui, se quiser compartilhar algo com sua equipe." className="mt-2 w-full rounded-xl border border-[#e9dfda] px-3 py-3 text-sm font-normal outline-none focus:border-[#b91142]" /></label>
-            <button type="button" onClick={saveAssessment} disabled={!assessmentSymptomFrequency || !assessmentSymptomSeverity || !assessmentMedicationFrequency} className="mt-5 w-full rounded-2xl bg-[#a3113a] px-4 py-3.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">Enviar avaliação para a equipe</button>
+            <button type="button" onClick={saveAssessment} disabled={assessmentNuisance===null || !assessmentMissed || !assessmentRescue} className="mt-5 w-full rounded-2xl bg-[#a3113a] px-4 py-3.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">Salvar avaliação</button>
           </section>
         </div>
       )}

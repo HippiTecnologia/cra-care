@@ -27,7 +27,8 @@ type PatientStatus =
   | "tentar-novamente"
   | "perdido"
   | "concluido"
-  | "desistente";
+  | "desistente"
+  | "laudo";
 
 type DeliveryMethod = "Motoboy" | "Retirada" | "Sedex" | "Aéreo";
 type AcquisitionMethod = string;

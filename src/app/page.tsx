@@ -6,13 +6,14 @@ import { FormEvent, useState } from "react";
 import { authEmailForPatientCpf, authEmailForUsername, requiresPasswordChange, type AccountRole } from "../lib/auth/credentials";
 import { getSupabaseClient } from "../lib/supabase/client";
 
-type UserRole = "Paciente" | "Médico" | "Secretaria" | "Laboratório" | "Administrador";
+type UserRole = "Paciente" | "Médico" | "Secretaria" | "Laboratório" | "Enfermagem" | "Administrador";
 
 const roles: UserRole[] = [
   "Paciente",
   "Médico",
   "Secretaria",
   "Laboratório",
+  "Enfermagem",
   "Administrador",
 ];
 
@@ -67,7 +68,7 @@ export default function Home() {
           router.push("/alterar-senha");
           return;
         }
-        const destination = profile.role === "admin" || profile.role === "super_admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : "/medico";
+        const destination = profile.role === "admin" || profile.role === "super_admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : profile.role === "enfermagem" ? "/enfermagem" : "/medico";
         if (profile.role === "admin" || profile.role === "super_admin") window.sessionStorage.setItem("cra-care-demo-admin-session", JSON.stringify({ signedInAt: new Date().toISOString() }));
         router.push(destination);
         return;

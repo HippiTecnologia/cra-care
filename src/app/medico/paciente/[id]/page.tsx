@@ -27,7 +27,7 @@ import {
   type MedicalDoctorProfile,
 } from "../../../../lib/supabase/medical-records";
 
-type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes";
+type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes" | "laudos";
 
 function formatDate(value?: string) {
   if (!value) return "Não informado";
@@ -101,6 +101,7 @@ export default function MedicalPatientPage() {
   >(null);
   const [portal, setPortal] = useState<PatientPortalState | null>(null);
   const [clinicalRecords, setClinicalRecords] = useState<ClinicalRecord[]>([]);
+  const [nursingReports, setNursingReports] = useState<{ id: string; reportType: "prick_test" | "patch_test"; content: Record<string, unknown>; createdAt: string }[]>([]);
   const [clinicalRecordDraft, setClinicalRecordDraft] = useState("");
   const [editingClinicalRecordId, setEditingClinicalRecordId] = useState<string | null>(null);
   const [recordSaving, setRecordSaving] = useState(false);
@@ -120,6 +121,7 @@ export default function MedicalPatientPage() {
         setPatientDataDraft(workspace.patient ? { name: workspace.patient.name, cpf: workspace.patient.cpf, birthDate: workspace.patient.birthDate } : { name: "", cpf: "", birthDate: "" });
         setPrescriptions(workspace.prescriptions);
         setClinicalRecords(workspace.clinicalRecords);
+        setNursingReports(workspace.nursingReports);
         setPortal(workspace.portal);
         if (workspace.patient) {
           setPhase(workspace.patient.phase ?? treatmentPhases[0]);
@@ -556,6 +558,7 @@ export default function MedicalPatientPage() {
             { id: "prontuario", label: "Prontuário" },
             { id: "historico", label: "Histórico de receitas" },
             { id: "avaliacoes", label: "Avaliações" },
+            { id: "laudos", label: "Laudos" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -880,6 +883,14 @@ export default function MedicalPatientPage() {
                 </article>
               ))}
             </div>
+          </section>
+        )}
+
+        {activeTab === "laudos" && (
+          <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
+            <h2 className="text-2xl font-bold text-[#433438]">Laudos da enfermagem</h2>
+            <p className="mt-2 text-sm text-[#817578]">Resultados preenchidos pela enfermagem e vinculados a esta paciente.</p>
+            <div className="mt-6 space-y-4">{nursingReports.length === 0 ? <p className="rounded-2xl border border-dashed border-[#e6dbd6] p-6 text-center text-sm text-[#817578]">Nenhum laudo registrado.</p> : nursingReports.map((report) => <article key={report.id} className="rounded-2xl border border-[#e6dbd6] bg-[#fdfbf9] p-5"><div className="flex justify-between gap-3"><h3 className="font-bold">{report.reportType === "prick_test" ? "Prick Test" : "Patch Test"}</h3><span className="text-xs text-[#817578]">{formatDate(report.createdAt)}</span></div><div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">{Object.entries((report.content.results ?? {}) as Record<string, unknown>).map(([name, result]) => <p key={name} className="rounded-lg bg-white p-2"><strong>{name}:</strong> {String(result)}</p>)}</div>{typeof report.content.notes === "string" && report.content.notes && <p className="mt-4 text-sm"><strong>Observações:</strong> {report.content.notes}</p>}</article>)}</div>
           </section>
         )}
 

@@ -138,6 +138,12 @@ function assessmentFromRow(row: Record<string, unknown>): PatientAssessment {
     response: text(row.response) || undefined,
     respondedAt: text(row.responded_at) || undefined,
     respondedBy: text(row.responded_by) || undefined,
+    assessmentType: text(row.assessment_type) === "inicial" || text(row.assessment_type) === "acompanhamento" ? text(row.assessment_type) as PatientAssessment["assessmentType"] : undefined,
+    nuisanceScore: number(row.nuisance_score, 0) || undefined,
+    symptomScores: objectValue(row.symptom_scores) as Record<string, number>,
+    symptomTotal: number(row.symptom_total, 0) || undefined,
+    missedImmunotherapy: text(row.missed_immunotherapy) as PatientAssessment["missedImmunotherapy"],
+    rescueMedication: text(row.rescue_medication) as PatientAssessment["rescueMedication"],
   };
 }
 
@@ -305,6 +311,12 @@ async function savePortalAssessments(context: PatientContext, state: PatientPort
       response: assessment.response ?? null,
       responded_at: assessment.respondedAt ?? null,
       responded_by: assessment.respondedBy ?? null,
+      assessment_type: assessment.assessmentType ?? null,
+      nuisance_score: assessment.nuisanceScore ?? null,
+      symptom_scores: assessment.symptomScores ?? {},
+      symptom_total: assessment.symptomTotal ?? null,
+      missed_immunotherapy: assessment.missedImmunotherapy ?? null,
+      rescue_medication: assessment.rescueMedication ?? null,
       created_at: assessment.createdAt || new Date().toISOString(),
     };
     const { error } = await supabase.from("patient_assessments").upsert(payload);

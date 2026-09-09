@@ -112,9 +112,10 @@ export default function MedicoPage() {
     const portal = portalStates[patient.id] ?? createDefaultPortalState(patient.id);
     const scheduled = portal.bottles.length ? Math.max(1, portal.useRecords.length + Object.values(portal.dayOverrides ?? {}).filter((value) => value === "nao-registrado").length) : 0;
     const regularity = scheduled ? Math.round((portal.useRecords.length / scheduled) * 100) : 0;
-    const positive = portal.assessments.filter((assessment) => ["muito-bem", "bem"].includes(assessment.feeling ?? "") || ["leves", "moderados"].includes(assessment.symptomSeverity ?? "")).length;
-    const discomfort = portal.assessments.filter((assessment) => ["desconfortos", "nao-bem"].includes(assessment.feeling ?? "") || ["severos", "muito-severos"].includes(assessment.symptomSeverity ?? "")).length;
-    return { patient, regularity, positive, discomfort };
+    const latest = portal.assessments[0];
+    const positive = portal.assessments.filter((assessment) => (assessment.nuisanceScore ?? 10) <= 4).length;
+    const discomfort = portal.assessments.filter((assessment) => (assessment.nuisanceScore ?? 0) >= 7).length;
+    return { patient, regularity, positive, discomfort, latest };
   });
   const averageRegularity = evolution.length ? Math.round(evolution.reduce((total, item) => total + item.regularity, 0) / evolution.length) : 0;
 
@@ -233,6 +234,7 @@ export default function MedicoPage() {
             <article className="rounded-3xl border border-[#efe6e1] bg-white p-6 shadow-sm"><h2 className="text-xl font-bold text-[#433438]">Distribuição dos pacientes</h2><p className="mt-1 text-sm text-[#817578]">Total: {totalPatients} pacientes vinculados ao seu perfil.</p><div className="mt-7 space-y-4">{statusMetrics.map((metric) => <div key={metric.id}><div className="flex justify-between text-xs"><strong>{metric.label}</strong><span>{metric.percentage}%</span></div><div className="mt-2 h-3 overflow-hidden rounded-full bg-[#f0e9e6]"><div className="h-full rounded-full" style={{ width: `${metric.percentage}%`, backgroundColor: metric.color }} /></div></div>)}</div></article>
             <article className="rounded-3xl border border-[#efe6e1] bg-white p-6 shadow-sm"><div className="flex items-center justify-between"><div><h2 className="text-xl font-bold text-[#433438]">Últimos pacientes cadastrados</h2><p className="mt-1 text-sm text-[#817578]">Cadastros mais recentes deste médico.</p></div><button type="button" onClick={() => setSection("pacientes")} className="rounded-xl border border-[#eadfd9] px-4 py-2 text-xs font-semibold text-[#a3113a]">Ver todos</button></div><div className="mt-5 space-y-3">{recentPatients.map((patient) => <div key={patient.id} className="flex items-center justify-between gap-3 rounded-2xl bg-[#fbf7f5] p-4"><div><p className="text-sm font-bold">{patient.name}</p><p className="mt-1 text-xs text-[#817578]">CPF {patient.cpf} · {formatDate(patient.birthDate)}</p></div><Link href={`/medico/paciente/${patient.id}`} className="text-xs font-semibold text-[#a3113a]">Abrir →</Link></div>)}</div></article>
           </section>
+          <section className="mt-8 rounded-3xl border border-[#efe6e1] bg-white p-6 shadow-sm"><h2 className="text-xl font-bold text-[#433438]">Evolução pela avaliação da imunoterapia</h2><p className="mt-1 text-sm text-[#817578]">Dados reais do histórico de cada paciente.</p><div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{evolution.filter(item=>item.latest).map(({patient,latest})=><Link key={patient.id} href={`/medico/paciente/${patient.id}`} className="rounded-2xl bg-[#fbf7f5] p-4 hover:bg-[#fff0f3]"><p className="font-bold">{patient.name}</p><p className="mt-2 text-sm">Incômodo: <strong>{latest?.nuisanceScore ?? "—"}/10</strong></p><p className="text-sm">Sintomas: <strong>{latest?.symptomTotal ?? "—"}/15</strong></p><p className="mt-2 text-xs text-[#817578]">{latest?.assessmentType === "inicial" ? "Avaliação inicial" : "Acompanhamento"} · {formatDate(latest?.createdAt ?? "")}</p></Link>)}{!evolution.some(item=>item.latest)&&<p className="text-sm text-[#817578]">As avaliações preenchidas pelos pacientes aparecerão aqui.</p>}</div></section>
           </>}
 
           {section === "pacientes" && <section className="mt-8 rounded-3xl border border-[#efe6e1] bg-white p-6 shadow-[0_12px_35px_rgba(80,30,45,0.04)]">

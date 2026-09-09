@@ -1,4 +1,4 @@
-export type AccountRole = "paciente" | "medico" | "secretaria" | "laboratorio" | "admin";
+export type AccountRole = "paciente" | "medico" | "secretaria" | "laboratorio" | "enfermagem" | "admin";
 
 function normalizePart(value: string) {
   return value
