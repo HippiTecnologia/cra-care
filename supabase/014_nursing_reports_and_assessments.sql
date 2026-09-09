@@ -1,5 +1,5 @@
 -- Enfermagem, laudos e avaliação bimestral da imunoterapia.
-alter type public.app_role add value if not exists 'enfermagem';
+-- Execute antes o arquivo 014a_add_enfermagem_role.sql, em uma consulta separada.
 
 alter table public.patients add column if not exists nursing_profile_id uuid references public.profiles(id) on delete set null;
 alter table public.patient_assessments add column if not exists assessment_type text check (assessment_type in ('inicial', 'acompanhamento'));
