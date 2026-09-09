@@ -39,8 +39,10 @@ export async function createNursingReport(profile: NursingProfile, input: { pati
 }
 
 export async function findNursingPatientByCpf(profile: NursingProfile, cpf: string): Promise<NursingPatient | null> {
-  const { data, error } = await (getSupabaseClient().from("patients") as any).select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)").eq("clinic_id", profile.clinicId).eq("cpf", cpf.replace(/\D/g, "")).maybeSingle();
+  const wantedCpf = cpf.replace(/\D/g, "");
+  const { data: rows, error } = await (getSupabaseClient().from("patients") as any).select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)").eq("clinic_id", profile.clinicId);
   if (error) throw error;
+  const data = (rows ?? []).find((item: { cpf?: unknown }) => String(item.cpf ?? "").replace(/\D/g, "") === wantedCpf);
   if (!data) return null;
   return { id: data.id, name: data.full_name, cpf: data.cpf, birthDate: data.birth_date, phone: data.phone ?? undefined, doctorId: data.doctor_profile_id ?? undefined, doctorName: data.profiles?.full_name ?? "Não vinculado", createdAt: data.created_at };
 }
