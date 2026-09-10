@@ -31,7 +31,7 @@ const navigation: { id: PatientSection; icon: string; label: string; short: stri
   { id: "alertas", icon: "◷", label: "Alertas", short: "Alertas" },
   { id: "calendario", icon: "▦", label: "Calendário geral", short: "Dias" },
   { id: "receitas", icon: "▤", label: "Receitas", short: "Receitas" },
-  { id: "notas", icon: "☰", label: "Notas", short: "Notas" },
+  { id: "notas", icon: "☰", label: "Orientações", short: "Orientações" },
   { id: "notas-fiscais", icon: "▧", label: "Notas fiscais", short: "NFs" },
   { id: "termo", icon: "▤", label: "Termo", short: "Termo" },
 ];
@@ -312,7 +312,14 @@ export default function PatientPortalPage() {
     });
 
   const patientNotes = useMemo(() => {
-    const notes = prescriptions.flatMap((prescription) => {
+    const guidanceNote = {
+      id: "immunotherapy-guidance",
+      title: "Orientações de uso",
+      text: "Ao escolher esta terapia você está tratando a sua doença alérgica e não só os seus sintomas, fazendo com que eles sejam abrandados e as crises espaçadas.\n\nA alergia é uma doença do sistema imunológico que produz defesas de forma errada para substâncias normalmente inofensivas.\n\n“A imunoterapia é o único tratamento para a alergia que é potencialmente curador.” – Organização Mundial da Saúde (OMS).\n\nINSTRUÇÕES SOBRE USO DA VACINA:\n• Faça uma refeição antes da aplicação, escove os dentes e aguarde 20 minutos.\n• Siga o número correto de gotas conforme a orientação do médico e da enfermagem.\n• Aplique a vacina embaixo da língua, de frente ao espelho.\n• Mantenha as gotas por aproximadamente 2 minutos e depois engula.\n• Formigamento ou amortecimento leve na língua pode acontecer e é normal.\n• Permaneça 45 minutos em jejum após a vacina, sem alimentos, água ou líquidos.\n• A vacina pode ser aplicada pela manhã ou à noite.\n• Mantenha a vacina sempre na geladeira. Fora dela, no máximo 4 dias.\n\nMudanças de clima, cheiros fortes, ar-condicionado e perfumes podem gerar crises e não são controlados pela imunoterapia. Reações leves podem ocorrer no início. Os benefícios aparecem com o uso contínuo; a primeira avaliação costuma ocorrer entre 6 e 8 meses. O tratamento geralmente dura de 3 a 5 anos, conforme a resposta clínica.",
+      date: new Date().toISOString(),
+      author: "Equipe CRA",
+    };
+    const notes = [guidanceNote, ...prescriptions.flatMap((prescription) => {
       const entries = [
         {
           id: `${prescription.id}-posology`,
@@ -334,7 +341,7 @@ export default function PatientPortalPage() {
       }
 
       return entries;
-    });
+    })];
 
     if (patient?.notes?.trim()) {
       notes.unshift({
@@ -425,6 +432,13 @@ export default function PatientPortalPage() {
 
   function startBottle() {
     if (!portal || currentBottle || pendingAssessmentBottle) return;
+
+    const prescribedBottleCount = latestPrescription?.bottles ?? patient?.bottlesReceived ?? 0;
+    const startedPrescribedBottles = portal.bottles.filter((candidate) => candidate.status !== "recebido").length;
+    if (prescribedBottleCount > 0 && startedPrescribedBottles >= prescribedBottleCount) {
+      setMessage(`Você já iniciou os ${prescribedBottleCount} frascos prescritos pelo médico.`);
+      return;
+    }
 
     const receivedBottle = portal.bottles.find((candidate) => candidate.status === "recebido");
     const nextNumber = Math.max(0, ...portal.bottles.map((candidate) => candidate.number)) + 1;
@@ -863,7 +877,7 @@ export default function PatientPortalPage() {
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Acompanhamento do tratamento</p>
                   <h2 className="mt-2 text-2xl font-bold text-[#433438]">Meu frasco</h2>
                   <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{[{ label: "Recebidos", value: receivedBottleCount }, { label: "Iniciados", value: startedBottleCount }, { label: "Concluídos", value: safePortal.bottles.filter((bottle) => bottle.status === "finalizado").length }, { label: "Aguardando início", value: waitingBottleCount }].map((item) => <div key={item.label} className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">{item.label}</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{item.value}</p></div>)}</div>
-                  {currentBottle ? <><div className="mt-6 rounded-[24px] bg-gradient-to-br from-[#fff3f5] to-[#faf5f1] p-5"><div className="flex items-center justify-between gap-3"><span className="text-3xl">💊</span><span className="rounded-full bg-[#eaf8f3] px-3 py-1 text-xs font-semibold text-[#187157]">Em uso</span></div><h3 className="mt-4 text-xl font-bold text-[#86203b]">Frasco {currentBottle.number}</h3><p className="mt-2 text-sm text-[#66595d]">Iniciado em {formatDate(currentBottle.startedAt)}</p><p className="mt-1 text-sm text-[#66595d]">Fase: {latestPrescription?.phase ?? patient.phase ?? "A definir"}</p><p className="mt-1 text-sm text-[#66595d]">{latestPrescription?.posology ?? `${patient.drops ?? 6} gotas, conforme orientação médica.`}</p></div><div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Dias registrados</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{currentBottleRecords.length}</p></div><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Regularidade</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{regularity}%</p></div></div><button type="button" onClick={() => toggleUse(today)} className={`mt-5 w-full rounded-2xl px-4 py-3.5 text-sm font-semibold ${todayRecord ? "bg-[#edf8f3] text-[#187157]" : "bg-[#a3113a] text-white"}`}>{todayRecord ? "✓ Uso de hoje registrado" : "Registrar uso de hoje"}</button><button type="button" onClick={() => setShowFinishForm(!showFinishForm)} className="mt-3 w-full rounded-2xl border border-[#eadfd9] px-4 py-3.5 text-sm font-semibold text-[#a3113a]">Finalizar frasco</button>{showFinishForm && <div className="mt-4 rounded-2xl border border-[#eee5e0] bg-[#fcfaf8] p-4"><label className="block text-sm font-semibold text-[#544449]">Data de finalização<input type="date" min={currentBottle.startedAt} max={today} value={finishDate} onChange={(event) => setFinishDate(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal" /></label><button type="button" onClick={finishBottle} className="mt-4 w-full rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">Confirmar finalização</button></div>}</> : <div className="mt-6 rounded-[24px] border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-10 text-center"><p className="text-3xl">💊</p><h3 className="mt-4 text-lg font-bold text-[#433438]">{lastBottle ? "Tudo pronto para a próxima etapa" : "Vamos começar o seu acompanhamento?"}</h3><p className="mt-2 text-sm leading-6 text-[#817578]">{lastBottle ? "Adicione o próximo frasco para continuar registrando seu tratamento." : "Inicie seu frasco e acompanhe seus dias de uso de um jeito simples."}</p><button type="button" onClick={startBottle} disabled={Boolean(pendingAssessmentBottle)} className="mt-5 rounded-2xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-45">{lastBottle ? "Adicionar próximo frasco" : "Iniciar frasco"}</button></div>}
+                  {currentBottle ? <><div className="mt-6 rounded-[24px] bg-gradient-to-br from-[#fff3f5] to-[#faf5f1] p-5"><div className="flex items-center justify-between gap-3"><span className="text-3xl">💊</span><span className="rounded-full bg-[#eaf8f3] px-3 py-1 text-xs font-semibold text-[#187157]">Em uso</span></div><h3 className="mt-4 text-xl font-bold text-[#86203b]">Frasco {currentBottle.number}</h3><p className="mt-2 text-sm text-[#66595d]">Iniciado em {formatDate(currentBottle.startedAt)}</p><p className="mt-1 text-sm text-[#66595d]">Fase: {latestPrescription?.phase ?? patient.phase ?? "A definir"}</p><p className="mt-1 text-sm text-[#66595d]">{latestPrescription?.posology ?? `${patient.drops ?? 6} gotas, conforme orientação médica.`}</p></div><div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Dias registrados</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{currentBottleRecords.length}</p></div><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Regularidade</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{regularity}%</p></div></div><button type="button" onClick={() => toggleUse(today)} className={`mt-5 w-full rounded-2xl px-4 py-3.5 text-sm font-semibold ${todayRecord ? "bg-[#edf8f3] text-[#187157]" : "bg-[#a3113a] text-white"}`}>{todayRecord ? "✓ Uso de hoje registrado" : "Registrar uso de hoje"}</button><button type="button" onClick={() => setShowFinishForm(!showFinishForm)} className="mt-3 w-full rounded-2xl border border-[#eadfd9] px-4 py-3.5 text-sm font-semibold text-[#a3113a]">Finalizar frasco</button>{showFinishForm && <div className="mt-4 rounded-2xl border border-[#eee5e0] bg-[#fcfaf8] p-4"><label className="block text-sm font-semibold text-[#544449]">Data de finalização<input type="date" min={currentBottle.startedAt} max={today} value={finishDate} onChange={(event) => setFinishDate(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal" /></label><button type="button" onClick={finishBottle} className="mt-4 w-full rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">Confirmar finalização</button></div>}</> : <div className="mt-6 rounded-[24px] border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-10 text-center"><p className="text-3xl">💊</p><h3 className="mt-4 text-lg font-bold text-[#433438]">{lastBottle ? "Tudo pronto para a próxima etapa" : "Vamos começar o seu acompanhamento?"}</h3><p className="mt-2 text-sm leading-6 text-[#817578]">{lastBottle ? "Adicione o próximo frasco para continuar registrando seu tratamento." : "Inicie seu frasco e acompanhe seus dias de uso de um jeito simples."}</p><button type="button" onClick={startBottle} disabled={Boolean(pendingAssessmentBottle) || (latestPrescription?.bottles !== undefined && startedBottleCount >= latestPrescription.bottles)} className="mt-5 rounded-2xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-45">{lastBottle ? "Adicionar próximo frasco" : "Iniciar frasco"}</button></div>}
                 </article>
 
                 {bottleHistory.length > 0 && (
@@ -933,7 +947,7 @@ export default function PatientPortalPage() {
 
             {section === "notas" && (
               <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Orientações da equipe</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">Minhas notas</h2></div><button type="button" onClick={downloadNotes} className="self-start rounded-xl border border-[#eadfd9] px-4 py-3 text-xs font-semibold text-[#a3113a]">Baixar notas em PDF</button></div>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Orientações da equipe</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">Orientações</h2></div><button type="button" onClick={downloadNotes} className="self-start rounded-xl border border-[#eadfd9] px-4 py-3 text-xs font-semibold text-[#a3113a]">Baixar orientações em PDF</button></div>
                 {patientNotes.length === 0 ? <div className="mt-6 rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-10 text-center"><p className="text-sm font-semibold text-[#53454a]">Nenhuma nota disponível por enquanto.</p><p className="mt-2 text-xs text-[#817578]">As orientações médicas aparecerão aqui quando forem registradas.</p></div> : <div className="mt-6 space-y-4">{patientNotes.map((note) => <article key={note.id} className="rounded-2xl border border-[#eee6e2] bg-[#fdfbf9] p-4"><p className="text-sm font-bold text-[#433438]">{note.title}</p><p className="mt-2 text-sm leading-7 text-[#65585c]">{note.text}</p><p className="mt-3 text-xs text-[#817578]">{note.author} · {formatDate(note.date)}</p></article>)}</div>}
               </article>
             )}
