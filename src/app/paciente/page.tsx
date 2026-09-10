@@ -323,7 +323,7 @@ export default function PatientPortalPage() {
       const entries = [
         {
           id: `${prescription.id}-posology`,
-          title: "Orientação de uso",
+          title: `Posologia atual · ${prescription.bottles} frasco(s)`,
           text: prescription.posology,
           date: prescription.createdAt,
           author: prescription.doctor,
@@ -948,7 +948,7 @@ export default function PatientPortalPage() {
             {section === "notas" && (
               <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Orientações da equipe</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">Orientações</h2></div><button type="button" onClick={downloadNotes} className="self-start rounded-xl border border-[#eadfd9] px-4 py-3 text-xs font-semibold text-[#a3113a]">Baixar orientações em PDF</button></div>
-                {patientNotes.length === 0 ? <div className="mt-6 rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-10 text-center"><p className="text-sm font-semibold text-[#53454a]">Nenhuma nota disponível por enquanto.</p><p className="mt-2 text-xs text-[#817578]">As orientações médicas aparecerão aqui quando forem registradas.</p></div> : <div className="mt-6 space-y-4">{patientNotes.map((note) => <article key={note.id} className="rounded-2xl border border-[#eee6e2] bg-[#fdfbf9] p-4"><p className="text-sm font-bold text-[#433438]">{note.title}</p><p className="mt-2 text-sm leading-7 text-[#65585c]">{note.text}</p><p className="mt-3 text-xs text-[#817578]">{note.author} · {formatDate(note.date)}</p></article>)}</div>}
+                {patientNotes.length === 0 ? <div className="mt-6 rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-10 text-center"><p className="text-sm font-semibold text-[#53454a]">Nenhuma orientação disponível por enquanto.</p><p className="mt-2 text-xs text-[#817578]">As orientações médicas aparecerão aqui quando forem registradas.</p></div> : <div className="mt-6 grid gap-4 lg:grid-cols-2">{patientNotes.map((note) => <article key={note.id} className={`rounded-2xl border border-[#eee6e2] bg-[#fdfbf9] p-5 ${note.id === "immunotherapy-guidance" ? "lg:col-span-2" : ""}`}><p className="text-sm font-bold text-[#a3113a]">{note.title}</p><div className="mt-3 space-y-3 text-sm leading-7 text-[#65585c]">{note.text.split("\n\n").map((paragraph, index) => <p key={`${note.id}-${index}`} className={paragraph.startsWith("INSTRUÇÕES") ? "font-bold text-[#a3113a]" : "whitespace-pre-line"}>{paragraph}</p>)}</div><p className="mt-4 text-xs text-[#817578]">{note.author} · {formatDate(note.date)}</p></article>)}</div>}
               </article>
             )}
 
