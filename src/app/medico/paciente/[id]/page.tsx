@@ -514,11 +514,18 @@ export default function MedicalPatientPage() {
     if (!patient) return;
     const printWindow = window.open("", "_blank");
     if (!printWindow) { setError("Permita a abertura de janelas no navegador para imprimir o laudo."); return; }
-    const results = Object.entries((report.content.results ?? {}) as Record<string, unknown>)
-      .map(([name, result]) => `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(String(result))}</td></tr>`).join("");
+    const reportResults = (report.content.prickResults ?? report.content.results ?? {}) as Record<string, unknown>;
+    const isPrick = report.reportType === "prick_test";
+    const results = Object.entries(reportResults).map(([name, result]) => {
+      if (isPrick && result && typeof result === "object") {
+        const value = result as Record<string, unknown>;
+        return `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(String(value.mm ?? 0))} mm</td><td>${value.pseudopod ? "Sim" : "Não"}</td><td>${escapeHtml(String(value.reaction ?? "-"))}</td><td>${value.dermatographism ? "Sim" : "Não"}</td></tr>`;
+      }
+      return `<tr><td>${escapeHtml(name)}</td><td colspan="4">${escapeHtml(String(result))}</td></tr>`;
+    }).join("");
     const title = report.reportType === "prick_test" ? "Laudo Prick Test" : "Laudo Patch Test";
     const notes = typeof report.content.notes === "string" ? report.content.notes : "";
-    printWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${title}</title><style>@page{size:A4;margin:16mm}body{font-family:Arial,sans-serif;color:#34292d;font-size:13px}header{border-bottom:3px solid #a3113a;padding-bottom:15px;margin-bottom:20px}h1{margin:0;color:#8f1539}table{width:100%;border-collapse:collapse;margin-top:18px}th,td{padding:9px;border:1px solid #ddd;text-align:left}th{background:#f7eeee}.actions{margin-bottom:18px}button{padding:10px 14px;border:0;border-radius:8px;background:#a3113a;color:#fff;font-weight:bold}@media print{.actions{display:none}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header><h1>${title}</h1><p>CRA Care · Centro de Rinite e Alergia</p></header><p><strong>Paciente:</strong> ${escapeHtml(patient.name)}<br><strong>CPF:</strong> ${escapeHtml(patient.cpf)}<br><strong>Data:</strong> ${escapeHtml(formatDate(report.createdAt))}</p><table><thead><tr><th>Item</th><th>Resultado</th></tr></thead><tbody>${results || "<tr><td colspan=\"2\">Sem resultados detalhados.</td></tr>"}</tbody></table>${notes ? `<p><strong>Observações:</strong> ${escapeHtml(notes)}</p>` : ""}</body></html>`);
+    printWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${title}</title><style>@page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#34292d;font-size:10px}header{border-bottom:3px solid #a3113a;padding-bottom:12px;margin-bottom:16px}h1{margin:0;color:#8f1539;font-size:20px}table{width:100%;border-collapse:collapse;margin-top:16px;table-layout:fixed}th,td{padding:6px 5px;border:1px solid #ddd;text-align:left;word-break:break-word}th{background:#d3d6da;font-size:9px}.actions{margin-bottom:14px}button{padding:10px 14px;border:0;border-radius:8px;background:#a3113a;color:#fff;font-weight:bold}@media print{.actions{display:none}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header><h1>${title}</h1><p>CRA Care · Centro de Rinite e Alergia</p></header><p><strong>Paciente:</strong> ${escapeHtml(patient.name)}<br><strong>CPF:</strong> ${escapeHtml(patient.cpf)}<br><strong>Data:</strong> ${escapeHtml(formatDate(report.createdAt))}</p><table><thead><tr>${isPrick ? "<th>Extrato</th><th>MM</th><th>Pseudópode</th><th>Resposta alérgica</th><th>Dermatografismo</th>" : "<th>Item</th><th>Resultado</th>"}</tr></thead><tbody>${results || `<tr><td colspan="${isPrick ? 5 : 2}">Sem resultados detalhados.</td></tr>`}</tbody></table>${notes ? `<p><strong>Observações:</strong> ${escapeHtml(notes)}</p>` : ""}</body></html>`);
     printWindow.document.close();
     printWindow.focus();
   }
