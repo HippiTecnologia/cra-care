@@ -47,6 +47,22 @@ export async function findNursingPatientByCpf(profile: NursingProfile, cpf: stri
   return { id: data.id, name: data.full_name, cpf: data.cpf, birthDate: data.birth_date, phone: data.phone ?? undefined, doctorId: data.doctor_profile_id ?? undefined, doctorName: data.profiles?.full_name ?? "Não vinculado", createdAt: data.created_at };
 }
 
+export async function findNursingPatient(profile: NursingProfile, query: string): Promise<NursingPatient | null> {
+  const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
+  const digits = query.replace(/\D/g, "");
+  const { data: rows, error } = await (getSupabaseClient().from("patients") as any)
+    .select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)")
+    .eq("clinic_id", profile.clinicId);
+  if (error) throw error;
+  const item = (rows ?? []).find((candidate: { cpf?: unknown; full_name?: unknown }) => {
+    const candidateCpf = String(candidate.cpf ?? "").replace(/\D/g, "");
+    const candidateName = String(candidate.full_name ?? "").toLocaleLowerCase("pt-BR");
+    return digits.length === 11 ? candidateCpf === digits : candidateName.includes(normalizedQuery);
+  });
+  if (!item) return null;
+  return { id: item.id, name: item.full_name, cpf: item.cpf, birthDate: item.birth_date, phone: item.phone ?? undefined, doctorId: item.doctor_profile_id ?? undefined, doctorName: item.profiles?.full_name ?? "Não vinculado", createdAt: item.created_at };
+}
+
 export async function loadNursingReportsForPatient(patientId: string) {
   const { data, error } = await (getSupabaseClient().from("nursing_reports") as any).select("id, patient_id, report_type, content, created_at").eq("patient_id", patientId).order("created_at", { ascending: false });
   if (error) throw error;

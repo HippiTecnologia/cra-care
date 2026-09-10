@@ -527,7 +527,7 @@ export async function loadMedicalPatientWorkspace(patientId: string) {
     supabase.from("clinical_records").select("id, patient_id, content, created_at, updated_at").eq("patient_id", realPatientId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id).order("created_at", { ascending: false }),
     // A tipagem gerada será atualizada após aplicar a migration 014 no Supabase.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (supabase.from("nursing_reports") as any).select("id, patient_id, report_type, content, created_at").eq("patient_id", realPatientId).eq("doctor_profile_id", doctor.id).order("created_at", { ascending: false }),
+    (supabase.from("nursing_reports") as any).select("id, patient_id, report_type, content, created_at").eq("patient_id", realPatientId).order("created_at", { ascending: false }),
     supabase.from("patient_assessments").select("*").eq("patient_id", realPatientId).order("created_at", { ascending: false }),
     supabase.from("bottles").select("*").eq("patient_id", realPatientId).order("bottle_number", { ascending: false }),
     supabase.from("patient_portal_settings").select("*").eq("patient_id", realPatientId).maybeSingle(),

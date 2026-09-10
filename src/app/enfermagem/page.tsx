@@ -6,7 +6,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   createNursingPatient,
   createNursingReport,
-  findNursingPatientByCpf,
+  findNursingPatient,
   loadNursingReportsForPatient,
   loadNursingWorkspace,
   type NursingPatient,
@@ -46,7 +46,9 @@ export default function NursingPage() {
   const [allReports, setAllReports] = useState<SavedReport[]>([]);
   const [reportPatientFilter, setReportPatientFilter] = useState("");
   const [modal, setModal] = useState<Modal>(null);
-  const [searchCpf, setSearchCpf] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchCpf = searchQuery;
+  const setSearchCpf = setSearchQuery;
   const [message, setMessage] = useState("");
   const [name, setName] = useState("");
   const [cpf, setCpf] = useState("");
@@ -78,8 +80,8 @@ export default function NursingPage() {
   }
 
   async function searchPatient() {
-    if (!profile || searchCpf.replace(/\D/g, "").length !== 11) return setMessage("Informe o CPF completo.");
-    const patient = await findNursingPatientByCpf(profile, searchCpf);
+    if (!profile || !searchQuery.trim()) return setMessage("Informe o nome ou CPF da paciente.");
+    const patient = await findNursingPatient(profile, searchQuery);
     if (!patient) return setMessage("Paciente não encontrada.");
     setPatients((current) => current.some((item) => item.id === patient.id) ? current : [patient, ...current]);
     await openPatient(patient, "patients");
@@ -156,6 +158,7 @@ export default function NursingPage() {
     const printable = window.open("", "_blank");
     if (!printable) { setMessage("Permita a abertura de janelas para gerar o PDF."); return; }
     printable.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"/><title>Laudo Prick - ${escapeHtml(patientName)}</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}.logo{display:inline-block;border-left:6px solid #a71437;padding-left:8px;font-weight:800;font-size:18px;line-height:15px;color:#7d2435}.logo small{display:block;font-size:7px;letter-spacing:1px;color:#333}.patient{margin:9px 0 13px;font-size:11px;line-height:17px}.head{background:#aeb5be;font-weight:700}table{width:100%;border-collapse:collapse}th{background:#aeb5be;border:1px solid #8e959d;padding:6px;text-align:center;font-size:10px}td{border-bottom:1px solid #e3e5e8;padding:4px 6px;text-align:center}td:nth-child(2){text-align:left}.number{width:34px}.category td{background:#d3d6da;text-align:left;font-weight:700;padding:4px 8px}.battery{margin-top:12px;border:1px solid #bac0c7;border-radius:3px;overflow:hidden}.battery h2{font-size:12px;margin:0;padding:5px 18px;background:#d3d6da;border-top:2px solid #687380}.battery .category:first-child td{background:#d3d6da}.legend{margin-top:16px;font-size:10px;line-height:15px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:90px;margin-top:72px;text-align:center;font-size:10px}.line{border-top:1px solid #111;padding-top:4px;margin:auto;width:220px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="logo">HOSPITAL<br/>IPO<small>INSTITUTO PARANAENSE DE OTORRINOLARINGOLOGIA</small></div><div class="patient">Paciente: <strong>${escapeHtml(patientName)}</strong><br/>Data: <strong>${formattedDate}</strong></div>${batteries}<div class="legend"><strong>Legenda:</strong><br/>- = Sem reação<br/>+ = Reação fraca<br/>++ = Reação moderada<br/>+++ = Reação forte<br/>++++ = Reação muito forte<br/>XXXX = Teste inválido por dermatografismo/impossibilidade técnica.</div><div class="signatures"><div><div class="line">${nurse}<br/>Enfermagem</div></div><div><div class="line">Dr. Sérgio Maniglia<br/>CRM 20.762</div></div></div>${openPrintDialog ? "<script>window.onload=()=>window.print()<\\/script>" : ""}</body></html>`);
+    printable.document.head.insertAdjacentHTML("beforeend", "<style>@page{size:A4 portrait;margin:9mm}body{font-size:8px}.battery{margin-top:8px}.signatures{margin-top:38px}</style>");
     printable.document.close();
   }
 
@@ -163,6 +166,7 @@ export default function NursingPage() {
     <aside className="bg-gradient-to-b from-[#b31340] to-[#790b2a] p-7 text-white"><Image src="/logo-cra-branca.png" alt="CRA" width={160} height={100} priority/><p className="mt-4 text-sm text-white/70">Painel de Enfermagem</p><nav className="mt-8 space-y-2"><button onClick={() => setSection("patients")} className={`w-full rounded-xl p-3 text-left ${section === "patients" ? "bg-white/20 font-bold" : ""}`}>Pacientes</button><button onClick={() => setSection("reports")} className={`w-full rounded-xl p-3 text-left ${section === "reports" ? "bg-white/20 font-bold" : ""}`}>Laudos</button><Link href="/" className="block rounded-xl p-3">Sair</Link></nav></aside>
     <section className="p-6 lg:p-10"><header className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-[#a3113a]">Área clínica</p><h1 className="mt-2 text-3xl font-bold">{section === "patients" ? "Pacientes" : "Laudos"}</h1></div><button onClick={() => section === "patients" ? setModal("patient") : openReport()} className="rounded-xl bg-[#a3113a] px-5 py-3 font-bold text-white">{section === "patients" ? "+ Cadastrar paciente" : "+ Novo laudo"}</button></header>
       {message && <p className="mt-5 rounded-xl bg-[#edf8f3] p-4 text-sm">{message}</p>}
+      {section === "patients" && <p className="mt-4 text-sm text-[#817578]">Você pode localizar a paciente pelo nome ou pelo CPF.</p>}
       {section === "patients" ? <><div className="mt-7 flex gap-2 rounded-2xl bg-white p-4"><input value={searchCpf} onChange={(e) => setSearchCpf(e.target.value)} placeholder="Pesquisar paciente pelo CPF" className="flex-1 rounded-xl border p-3"/><button onClick={() => void searchPatient()} className="rounded-xl border px-5 font-bold text-[#a3113a]">Buscar</button></div>{selected && <article className="mt-5 rounded-3xl border border-[#eadfd9] bg-white p-6"><h2 className="text-xl font-bold">{selected.name}</h2><p className="mt-1 text-sm text-[#817578]">CPF {selected.cpf} · Nascimento {selected.birthDate}</p><div className="mt-5 flex items-center justify-between"><strong>Histórico de laudos ({reportCount})</strong><button onClick={openReport} className="rounded-xl bg-[#a3113a] px-4 py-2 text-sm font-bold text-white">+ Novo laudo</button></div>{reports.map((report) => <article key={report.id} className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#fbf5f2] p-4 text-sm"><span><strong>{report.report_type === "prick_test" ? "Prick Test" : "Patch Test"}</strong> · {new Date(report.created_at).toLocaleDateString("pt-BR")}</span>{report.report_type === "prick_test" && <button type="button" onClick={() => printPrickReport(report)} className="rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-bold text-white">Gerar PDF / Imprimir</button>}</article>)}</article>}<div className="mt-5 space-y-3">{patients.map((patient) => <button key={patient.id} onClick={() => void openPatient(patient)} className="block w-full rounded-2xl bg-white p-5 text-left shadow-sm"><strong>{patient.name}</strong><span className="ml-3 text-sm text-[#817578]">CPF {patient.cpf}</span></button>)}</div></> : <><select value={reportPatientFilter} onChange={(event) => setReportPatientFilter(event.target.value)} className="mt-7 rounded-xl border p-3"><option value="">Todos os pacientes</option>{[...new Set(allReports.map((report) => String(report.content.patientName ?? "Paciente")))].sort().map((patientName) => <option key={patientName} value={patientName}>{patientName}</option>)}</select><div className="mt-5"><h2 className="text-xl font-bold">Histórico de laudos</h2><p className="mt-1 text-sm text-[#817578]">Todos os laudos já preenchidos por você permanecem disponíveis aqui.</p><div className="mt-4 space-y-3">{allReports.filter((report) => !reportPatientFilter || String(report.content.patientName ?? "Paciente") === reportPatientFilter).map((report) => <article key={report.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-5"><div><strong>{report.report_type === "prick_test" ? "Laudo Prick" : "Laudo Patch"}</strong><p className="mt-1 text-sm font-medium text-[#544449]">{String(report.content.patientName ?? "Paciente")}</p><p className="text-sm text-[#817578]">{new Date(report.created_at).toLocaleDateString("pt-BR")}</p></div>{report.report_type === "prick_test" && <span className="flex gap-2"><button type="button" onClick={() => printPrickReport(report, false)} className="rounded-lg border border-[#d8cbc7] bg-white px-3 py-2 text-xs font-bold text-[#a3113a]">Visualizar</button><button type="button" onClick={() => printPrickReport(report)} className="rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-bold text-white">Gerar PDF / Imprimir</button></span>}</article>)}</div></div></>}
     </section>
   </div>
