@@ -531,7 +531,8 @@ export default function MedicalPatientPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f8f5f2] px-4 py-6 text-[#34292d] sm:px-7 lg:px-10">
+    <main className="min-h-screen bg-[#f8f5f2] px-4 py-6 text-[#34292d] sm:px-7 lg:px-10 lg:pl-72">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-gradient-to-b from-[#b31340] to-[#790b2a] p-7 text-white lg:flex"><Image src="/logo-cra-branca.png" alt="CRA Care" width={160} height={100} priority/><p className="mt-4 text-sm text-white/70">Painel do Médico</p><nav className="mt-8 space-y-2"><Link href="/medico" className="block rounded-xl p-3 hover:bg-white/15">Pacientes</Link><button type="button" onClick={() => setActiveTab("dashboard")} className="w-full rounded-xl p-3 text-left hover:bg-white/15">Dashboard</button><button type="button" onClick={() => setActiveTab("laudos")} className="w-full rounded-xl p-3 text-left hover:bg-white/15">Laudos</button><Link href="/" className="mt-4 block rounded-xl p-3 hover:bg-white/15">Sair</Link></nav></aside>
       <div className="mx-auto max-w-[1550px]">
         <header className="flex flex-col gap-5 rounded-3xl border border-[#eee4df] bg-white px-6 py-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
