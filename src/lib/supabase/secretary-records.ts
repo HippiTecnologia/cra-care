@@ -307,7 +307,7 @@ export async function saveSecretaryPatient(
     }
   }
   void audit(context, "update", "patient", patient.id, { status: patient.status, source: "secretaria" });
-  return patient;
+  return { patient, hasPatientAccess: Boolean((existing as unknown as MedicalPatientRow).auth_user_id) };
 }
 
 export async function updateSecretaryPatientStatus(

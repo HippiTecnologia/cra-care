@@ -614,9 +614,9 @@ export default function SecretariaPage() {
         username: patient.username ?? patientUsername(patient.name),
         registrationStatus: "completed",
       };
-      await saveSecretaryPatient(context, record);
+      const savedPatient = await saveSecretaryPatient(context, record);
       let accessMessage = "";
-      if (!patient.username) {
+      if (!savedPatient.hasPatientAccess) {
         const access = await createSecretaryPatientAccess(record);
         patient.username = access.username;
         accessMessage = ` Usuário: ${access.username}. Senha inicial: ${access.initialPassword}.`;

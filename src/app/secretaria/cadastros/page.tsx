@@ -29,6 +29,7 @@ import {
   loadSecretaryPortals,
   loadSecretaryPrescriptions,
   loadSecretaryStock,
+  createSecretaryPatientAccess,
   saveSecretaryBottleAdjustment,
   saveSecretaryPatient,
   type SecretaryContext,
@@ -197,10 +198,19 @@ export default function PatientRecordsPage() {
     }
     if (!context) { setMessage("Sessão da Secretaria não identificada."); return; }
     try {
-      await saveSecretaryPatient(context, { ...draft, registrationStatus: "completed" });
-      setPatients((current) => current.map((item) => item.id === draft.id ? draft : item));
+      const completedPatient: DemoPatientRecord = { ...draft, registrationStatus: "completed" };
+      const savedPatient = await saveSecretaryPatient(context, completedPatient);
+      let patientWithAccess = completedPatient;
+      let accessMessage = "";
+      if (!savedPatient.hasPatientAccess) {
+        const access = await createSecretaryPatientAccess(completedPatient);
+        patientWithAccess = { ...completedPatient, username: access.username };
+        accessMessage = " O acesso do paciente foi criado.";
+      }
+      setDraft(patientWithAccess);
+      setPatients((current) => current.map((item) => item.id === draft.id ? patientWithAccess : item));
       setEditing(false);
-      setMessage(`${section} atualizados no Supabase com sucesso.`);
+      setMessage(`${section} atualizados no Supabase com sucesso.${accessMessage}`);
     } catch {
       setMessage(`Não foi possível salvar ${section.toLowerCase()}.`);
     }
