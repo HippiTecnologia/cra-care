@@ -27,7 +27,7 @@ import {
   type MedicalDoctorProfile,
 } from "../../../../lib/supabase/medical-records";
 
-type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes" | "laudos";
+type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes" | "laudos" | "dashboard";
 
 function formatDate(value?: string) {
   if (!value) return "Não informado";
@@ -108,6 +108,37 @@ export default function MedicalPatientPage() {
   const [editingPatientData, setEditingPatientData] = useState(false);
   const [patientDataDraft, setPatientDataDraft] = useState({ name: "", cpf: "", birthDate: "" });
   const [patientSaving, setPatientSaving] = useState(false);
+
+  const assessmentEvolution = useMemo(() => {
+    const severityScore = { leves: 3, moderados: 7, severos: 11, "muito-severos": 15 } as const;
+
+    return [...(portal?.assessments ?? [])]
+      .sort((first, second) => new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime())
+      .map((assessment) => {
+        const rawScore = assessment.symptomTotal
+          ?? (assessment.nuisanceScore !== undefined ? Math.round(assessment.nuisanceScore * 1.5) : undefined)
+          ?? (assessment.symptomSeverity ? severityScore[assessment.symptomSeverity] : 0);
+        const score = Math.max(0, Math.min(15, rawScore));
+        const date = new Date(assessment.createdAt);
+
+        return {
+          id: assessment.id,
+          score,
+          date: assessment.createdAt,
+          label: date.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }),
+          type: assessment.assessmentType === "inicial" ? "Inicial" : "Acompanhamento",
+        };
+      });
+  }, [portal]);
+
+  const latestEvolution = assessmentEvolution.at(-1);
+  const previousEvolution = assessmentEvolution.at(-2);
+  const improvement = latestEvolution && previousEvolution
+    ? previousEvolution.score - latestEvolution.score
+    : undefined;
+  const nextAssessmentDate = latestEvolution
+    ? (() => { const date = new Date(latestEvolution.date); date.setMonth(date.getMonth() + 2); return date; })()
+    : undefined;
 
   useEffect(() => {
     let active = true;
@@ -525,6 +556,9 @@ export default function MedicalPatientPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 self-start sm:justify-end sm:self-center">
+            <button type="button" onClick={() => setActiveTab("dashboard")} className="rounded-full bg-white px-4 py-2 text-xs font-bold text-[#a3113a] shadow-sm hover:bg-[#fff5f7]">
+              Dashboard
+            </button>
             <button type="button" onClick={() => setEditingPatientData((current) => !current)} className="rounded-full border border-white/35 bg-white/10 px-4 py-2 text-xs font-semibold hover:bg-white/20">
               {editingPatientData ? "Cancelar edição" : "Editar dados"}
             </button>
@@ -582,6 +616,32 @@ export default function MedicalPatientPage() {
               ×
             </button>
           </div>
+        )}
+
+        {activeTab === "dashboard" && (
+          <section className="mt-6 space-y-6">
+            <div className="rounded-[28px] bg-gradient-to-r from-[#a3113a] to-[#cf2457] p-7 text-white shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/75">Evolução do tratamento</p>
+              <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
+                <div><h2 className="text-3xl font-bold">Acompanhamento mensal</h2><p className="mt-2 text-sm text-white/80">Indicadores clínicos registrados nas avaliações da paciente.</p></div>
+                <button type="button" onClick={() => setActiveTab("avaliacoes")} className="rounded-xl bg-white px-4 py-3 text-sm font-bold text-[#a3113a]">Ver avaliações</button>
+              </div>
+            </div>
+
+            {!assessmentEvolution.length ? (
+              <div className="rounded-[28px] border border-dashed border-[#dfd3ce] bg-white p-10 text-center shadow-sm"><h3 className="text-xl font-bold text-[#433438]">Ainda não há dados de evolução</h3><p className="mt-2 text-sm text-[#817578]">Assim que a paciente concluir a primeira avaliação, os indicadores aparecerão aqui automaticamente.</p></div>
+            ) : <>
+              <div className="grid gap-4 md:grid-cols-3">
+                <article className="rounded-3xl border border-[#eee5e0] bg-white p-6 shadow-sm"><p className="text-sm text-[#817578]">Último índice de sintomas</p><p className="mt-3 text-4xl font-bold text-[#a3113a]">{latestEvolution?.score}<span className="ml-1 text-base text-[#817578]">/15</span></p><p className="mt-3 text-xs text-[#817578]">Avaliação de {formatDate(latestEvolution?.date)}</p></article>
+                <article className="rounded-3xl border border-[#eee5e0] bg-white p-6 shadow-sm"><p className="text-sm text-[#817578]">Variação desde a anterior</p><p className={`mt-3 text-4xl font-bold ${improvement === undefined ? "text-[#65585b]" : improvement > 0 ? "text-[#187157]" : improvement < 0 ? "text-[#b31340]" : "text-[#65585b]"}`}>{improvement === undefined ? "—" : `${improvement > 0 ? "−" : improvement < 0 ? "+" : ""}${Math.abs(improvement)}`}</p><p className="mt-3 text-xs text-[#817578]">{improvement === undefined ? "Será calculada na próxima avaliação." : improvement > 0 ? "Redução dos sintomas." : improvement < 0 ? "Aumento dos sintomas." : "Sem alteração."}</p></article>
+                <article className="rounded-3xl border border-[#eee5e0] bg-white p-6 shadow-sm"><p className="text-sm text-[#817578]">Próxima avaliação</p><p className="mt-3 text-2xl font-bold text-[#433438]">{nextAssessmentDate ? formatDate(nextAssessmentDate.toISOString()) : "Aguardando"}</p><p className="mt-3 text-xs text-[#817578]">Ciclo automático de acompanhamento a cada 2 meses.</p></article>
+              </div>
+
+              <article className="rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-xl font-bold text-[#433438]">Curva de sintomas</h3><p className="mt-1 text-sm text-[#817578]">Quanto menor o índice, melhor a evolução clínica.</p></div><span className="rounded-full bg-[#fff0f3] px-3 py-2 text-xs font-bold text-[#a3113a]">{assessmentEvolution.length} avaliações</span></div><div className="mt-7 rounded-2xl bg-[#fcf8f8] p-4 sm:p-6"><svg viewBox="0 0 640 240" className="h-60 w-full" role="img" aria-label="Gráfico da evolução dos sintomas"><defs><linearGradient id="evolutionFill" x1="0" x2="0" y1="0" y2="1"><stop stopColor="#c7164b" stopOpacity=".32"/><stop offset="1" stopColor="#c7164b" stopOpacity="0"/></linearGradient></defs>{[0, 1, 2, 3].map((line) => <line key={line} x1="36" x2="620" y1={30 + line * 55} y2={30 + line * 55} stroke="#eadcdd" strokeDasharray="4 6"/>)}<text x="5" y="36" fill="#817578" fontSize="12">15</text><text x="10" y="145" fill="#817578" fontSize="12">8</text><text x="10" y="202" fill="#817578" fontSize="12">0</text>{assessmentEvolution.length > 1 && <><polygon fill="url(#evolutionFill)" points={`${assessmentEvolution.map((item, index) => `${36 + (index / (assessmentEvolution.length - 1)) * 584},${195 - (item.score / 15) * 165}`).join(" ")} 620,195 36,195`}/><polyline fill="none" stroke="#b31340" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" points={assessmentEvolution.map((item, index) => `${36 + (index / (assessmentEvolution.length - 1)) * 584},${195 - (item.score / 15) * 165}`).join(" ")}/></>}{assessmentEvolution.map((item, index) => { const x = assessmentEvolution.length === 1 ? 328 : 36 + (index / (assessmentEvolution.length - 1)) * 584; const y = 195 - (item.score / 15) * 165; return <g key={item.id}><circle cx={x} cy={y} r="7" fill="#b31340" stroke="white" strokeWidth="4"/><text x={x} y="225" textAnchor="middle" fill="#65585b" fontSize="12">{item.label}</text><text x={x} y={y - 14} textAnchor="middle" fill="#a3113a" fontSize="12" fontWeight="700">{item.score}</text></g>; })}</svg></div></article>
+
+              <article className="rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm"><h3 className="text-xl font-bold text-[#433438]">Linha do tempo das avaliações</h3><div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{[...assessmentEvolution].reverse().map((item) => <div key={item.id} className="rounded-2xl bg-[#fcf8f8] p-4"><p className="text-xs font-semibold uppercase tracking-wide text-[#a3113a]">{item.type}</p><p className="mt-2 font-bold text-[#433438]">{formatDate(item.date)}</p><p className="mt-3 text-sm text-[#65585b]">Índice de sintomas: <strong>{item.score}/15</strong></p></div>)}</div></article>
+            </>}
+          </section>
         )}
 
         {activeTab === "receitas" && (
