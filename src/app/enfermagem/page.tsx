@@ -31,6 +31,7 @@ const prickGroups = [
 ];
 const patchItems = ["Níquel", "Sulfato de cobalto", "Dicromato de potássio", "Mistura de fragrâncias", "Bálsamo do Peru", "Parafenilenodiamina", "Lanolina", "Formaldeído", "Parabenos", "Propilenoglicol"];
 const emptyPrick = (): PrickResult => ({ mm: 0, reaction: "-", pseudopod: false, dermatographism: false });
+const reactionForMm = (mm: number): PrickResult["reaction"] => mm === 0 ? "-" : mm <= 3 ? "+" : mm <= 6 ? "++" : mm <= 9 ? "+++" : "++++";
 
 export default function NursingPage() {
   const [section, setSection] = useState<Section>("patients");
@@ -50,6 +51,7 @@ export default function NursingPage() {
   const [prickResults, setPrickResults] = useState<Record<string, PrickResult>>({});
   const [patchResults, setPatchResults] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState("");
+  const [reportDate, setReportDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   async function reload() {
     const workspace = await loadNursingWorkspace();
@@ -89,11 +91,15 @@ export default function NursingPage() {
   }
 
   function updatePrick(item: string, change: Partial<PrickResult>) {
-    setPrickResults((current) => ({ ...current, [item]: { ...(current[item] ?? emptyPrick()), ...change } }));
+    setPrickResults((current) => {
+      const next = { ...(current[item] ?? emptyPrick()), ...change };
+      next.reaction = reactionForMm(next.mm);
+      return { ...current, [item]: next };
+    });
   }
 
   function openReport() {
-    setReportType("prick_test"); setPrickResults({}); setPatchResults({}); setNotes(""); setModal("report");
+    setReportType("prick_test"); setPrickResults({}); setPatchResults({}); setNotes(""); setReportDate(new Date().toISOString().slice(0, 10)); setModal("report");
   }
 
   async function saveReport() {
@@ -108,6 +114,7 @@ export default function NursingPage() {
         notes,
         nurseName: profile.fullName,
         examResponsible: reportType === "prick_test" ? "Dr. Sergio Fabricio Maniglia" : patchResponsible,
+        examDate: reportDate,
         registeredAt: new Date().toISOString(),
       },
     });
@@ -124,14 +131,28 @@ export default function NursingPage() {
     </section>
   </div>
   {modal === "patient" && <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4"><form onSubmit={savePatient} className="w-full max-w-lg rounded-3xl bg-white p-6"><div className="flex justify-between"><h2 className="text-xl font-bold">Cadastrar paciente</h2><button type="button" onClick={() => setModal(null)}>Fechar</button></div><div className="mt-5 grid gap-3"><input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo" className="rounded-xl border p-3"/><input required value={cpf} onChange={(e) => setCpf(e.target.value)} placeholder="CPF" className="rounded-xl border p-3"/><input required type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} className="rounded-xl border p-3"/><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Telefone" className="rounded-xl border p-3"/></div><button className="mt-5 w-full rounded-xl bg-[#a3113a] p-3 font-bold text-white">Salvar paciente</button></form></div>}
-  {modal === "report" && <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4"><section className="mx-auto my-5 max-w-6xl rounded-3xl bg-white p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-2xl font-bold">Preencher laudo</h2><p className="mt-1 text-sm text-[#817578]">Paciente: {selected?.name ?? "Selecione uma paciente antes de criar o laudo"}</p></div><button onClick={() => setModal(null)} className="rounded-xl border px-4 py-2 font-semibold">Fechar laudo</button></div><div className="mt-5 flex flex-wrap gap-3"><select value={reportType} onChange={(e) => setReportType(e.target.value as ReportType)} className="rounded-xl border p-3"><option value="prick_test">Laudo Prick</option><option value="patch_test">Laudo Patch</option></select>{reportType === "prick_test" ? <p className="rounded-xl bg-[#f7f1ee] p-3 text-sm">Responsável: <strong>Dr. Sergio Fabricio Maniglia</strong></p> : <select value={patchResponsible} onChange={(e) => setPatchResponsible(e.target.value)} className="rounded-xl border p-3"><option>Patricia Martinski</option><option>Alessandra Bitencourt</option></select>}</div>
-    {reportType === "prick_test" ? <div className="mt-6 overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead><tr className="bg-[#8f99a5] text-left text-white"><th className="p-3">Item</th><th className="p-3">Medida</th><th className="p-3">Reação</th><th className="p-3">Pseudópode</th><th className="p-3">Dermatografismo</th></tr></thead><tbody>{prickGroups.map((group, groupIndex) => <MemoGroup key={`${group.battery}-${group.category}`} group={group} showBattery={groupIndex === 0 || prickGroups[groupIndex - 1].battery !== group.battery} values={prickResults} update={updatePrick}/>)}</tbody></table></div> : <div className="mt-6 space-y-2">{patchItems.map((item) => <label key={item} className="flex items-center justify-between border-b p-3"><span>{item}</span><select value={patchResults[item] ?? ""} onChange={(e) => setPatchResults((current) => ({ ...current, [item]: e.target.value }))} className="rounded-lg border p-2"><option value="">Não informado</option><option>-</option><option>?</option><option>+</option><option>++</option><option>+++</option></select></label>)}</div>}
+  {modal === "report" && <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4"><section className="mx-auto my-5 max-w-6xl rounded-3xl bg-white p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-2xl font-bold">Preencher laudo</h2><p className="mt-1 text-sm text-[#817578]">Paciente: {selected?.name ?? "Selecione uma paciente antes de criar o laudo"}</p></div><button onClick={() => setModal(null)} className="rounded-xl border px-4 py-2 font-semibold">Fechar laudo</button></div><div className="mt-5 grid gap-3 md:grid-cols-[1fr_210px]"><label className="text-sm font-semibold text-[#544449]">Paciente<input readOnly value={selected?.name ?? ""} className="mt-1 w-full rounded-xl border border-[#ddd5d0] bg-[#faf8f6] p-3 font-normal"/></label><label className="text-sm font-semibold text-[#544449]">Data<input type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} className="mt-1 w-full rounded-xl border border-[#ddd5d0] p-3 font-normal"/></label></div><div className="mt-4 flex flex-wrap gap-3"><select value={reportType} onChange={(e) => setReportType(e.target.value as ReportType)} className="rounded-xl border p-3"><option value="prick_test">Laudo Prick</option><option value="patch_test">Laudo Patch</option></select>{reportType === "prick_test" ? <p className="rounded-xl bg-[#f7f1ee] p-3 text-sm">Responsável: <strong>Dr. Sergio Fabricio Maniglia</strong></p> : <select value={patchResponsible} onChange={(e) => setPatchResponsible(e.target.value)} className="rounded-xl border p-3"><option>Patricia Martinski</option><option>Alessandra Bitencourt</option></select>}</div>
+    {reportType === "prick_test" ? <div className="mt-6 overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="sr-only"><tr><th>Item</th><th>Medida</th><th>Observações</th><th>Resultado</th></tr></thead><tbody>{prickGroups.map((group, groupIndex) => <MemoGroup key={`${group.battery}-${group.category}`} group={group} showBattery={groupIndex === 0 || prickGroups[groupIndex - 1].battery !== group.battery} values={prickResults} update={updatePrick}/>)}</tbody></table></div> : <div className="mt-6 space-y-2">{patchItems.map((item) => <label key={item} className="flex items-center justify-between border-b p-3"><span>{item}</span><select value={patchResults[item] ?? ""} onChange={(e) => setPatchResults((current) => ({ ...current, [item]: e.target.value }))} className="rounded-lg border p-2"><option value="">Não informado</option><option>-</option><option>?</option><option>+</option><option>++</option><option>+++</option></select></label>)}</div>}
     <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Observações clínicas" className="mt-6 min-h-24 w-full rounded-xl border p-3"/><button disabled={!selected} onClick={() => void saveReport()} className="mt-5 w-full rounded-xl bg-[#a3113a] p-3 font-bold text-white disabled:opacity-50">Salvar laudo</button></section></div>}
   </main>;
 }
 
 function MemoGroup({ group, showBattery, values, update }: { group: { battery: string; category: string; items: string[] }; showBattery: boolean; values: Record<string, PrickResult>; update: (item: string, change: Partial<PrickResult>) => void }) {
-  return <>{showBattery && <tr><td colSpan={5} className="border-t-4 border-[#586574] bg-[#d6d9dd] px-4 py-2 font-bold">{group.battery}</td></tr>}<tr><td colSpan={5} className="bg-[#aeb5bd] px-4 py-1 font-semibold">{group.category}</td></tr>{group.items.map((item) => { const value = values[item] ?? emptyPrick(); return <tr key={item} className="border-b"><td className="p-3">{item}</td><td className="p-3"><div className="flex items-center gap-2"><button type="button" onClick={() => update(item, { mm: Math.max(0, value.mm - 1) })} className="h-8 w-8 rounded-full bg-[#45505d] font-bold text-white">−</button><strong className="min-w-12 text-center">{value.mm} mm</strong><button type="button" onClick={() => update(item, { mm: value.mm + 1 })} className="h-8 w-8 rounded-full bg-[#159568] font-bold text-white">+</button></div></td><td className="p-3"><select value={value.reaction} onChange={(e) => update(item, { reaction: e.target.value as PrickResult["reaction"] })} className="rounded-lg border p-2"><option>-</option><option>+</option><option>++</option><option>+++</option><option>++++</option></select></td><td className="p-3"><input type="checkbox" checked={value.pseudopod} onChange={(e) => update(item, { pseudopod: e.target.checked })}/></td><td className="p-3"><input type="checkbox" checked={value.dermatographism} onChange={(e) => update(item, { dermatographism: e.target.checked })}/></td></tr>; })}</>;
+  const groupIndex = prickGroups.indexOf(group);
+  const firstNumber = prickGroups.slice(0, groupIndex).reduce((total, current) => total + current.items.length, 0) + 1;
+
+  return <>
+    {showBattery && <tr><td colSpan={5} className="border-t-4 border-[#596573] bg-[#d4d8dd] px-4 py-1.5 text-xs font-bold text-[#29323b]">{group.battery}</td></tr>}
+    <tr><td colSpan={5} className="bg-[#aeb5bd] px-4 py-1 text-xs font-semibold text-[#26303a]">{group.category}</td></tr>
+    {group.items.map((item, itemIndex) => {
+      const value = values[item] ?? emptyPrick();
+      const reaction = reactionForMm(value.mm);
+      return <tr key={item} className="border-b border-[#d9dde0] bg-white text-xs text-[#2f3840]">
+        <td className="w-[48%] px-3 py-2"><div className="grid grid-cols-[36px_1fr] items-center gap-3"><span className="text-center font-medium">{firstNumber + itemIndex}</span><span className="text-center">{item}</span></div></td>
+        <td className="w-[20%] px-3 py-2"><div className="flex items-center justify-center gap-4"><button aria-label={`Aumentar medida de ${item}`} type="button" onClick={() => update(item, { mm: value.mm + 1 })} className="font-bold text-[#159568]">⊕</button><span className="min-w-12 text-center font-medium">{value.mm} mm</span><button aria-label={`Diminuir medida de ${item}`} type="button" onClick={() => update(item, { mm: Math.max(0, value.mm - 1) })} className="font-bold text-[#4d5965]">⊖</button><button aria-label={`Zerar medida de ${item}`} type="button" onClick={() => update(item, { mm: 0 })} className="font-bold text-[#c52743]">⊗</button></div></td>
+        <td className="w-[18%] px-3 py-2"><label className="flex items-center gap-1.5"><input type="checkbox" checked={value.pseudopod} onChange={(event) => update(item, { pseudopod: event.target.checked })}/><span>Pseudópode</span></label><label className="mt-1 flex items-center gap-1.5"><input type="checkbox" checked={value.dermatographism} onChange={(event) => update(item, { dermatographism: event.target.checked })}/><span>Dermatografismo</span></label></td>
+        <td colSpan={2} className={`w-[14%] px-3 py-2 text-right font-medium ${reaction === "-" ? "text-[#4e5961]" : "text-[#a3113a]"}`}>{reaction === "-" ? "Sem Reação" : reaction}</td>
+      </tr>;
+    })}
+  </>;
 }
-
-
