@@ -278,8 +278,13 @@ export default function PatientPortalPage() {
   const receivedBottleCount = Math.max(patient?.bottlesReceived ?? 0, safePortal.bottles.length);
   const waitingBottleCount = Math.max(0, receivedBottleCount - startedBottleCount);
   const latestAssessment = safePortal.assessments[0];
-  const nextAssessmentAt = latestAssessment ? new Date(new Date(latestAssessment.createdAt).setMonth(new Date(latestAssessment.createdAt).getMonth() + 2)) : null;
-  const pendingAssessmentBottle = patient && (prescriptions[0] || safePortal.bottles.length > 0) && (!nextAssessmentAt || nextAssessmentAt <= new Date()) ? { id: "periodic", number: 0 } : null;
+  const firstBottle = safePortal.bottles.find((bottle) => bottle.number === 1);
+  const nextAssessmentAt = latestAssessment
+    ? new Date(new Date(latestAssessment.createdAt).getTime() + 60 * 24 * 60 * 60 * 1000)
+    : null;
+  const pendingAssessmentBottle = patient && firstBottle && firstBottle.status !== "recebido" && (!nextAssessmentAt || nextAssessmentAt <= new Date())
+    ? { id: firstBottle.id, number: firstBottle.number }
+    : null;
   const latestPrescription = prescriptions[0];
   const currentBottleRecords = safePortal.useRecords.filter(
     (record) => record.bottleId === currentBottle?.id,
@@ -534,8 +539,8 @@ export default function PatientPortalPage() {
       assessments: [
         {
           id: crypto.randomUUID(),
-          bottleId: "",
-          bottleNumber: 0,
+          bottleId: pendingAssessmentBottle.id,
+          bottleNumber: pendingAssessmentBottle.number,
           assessmentType: latestAssessment ? "acompanhamento" : "inicial",
           nuisanceScore: assessmentNuisance,
           symptomScores: assessmentSymptoms,
@@ -847,7 +852,7 @@ export default function PatientPortalPage() {
 
                 <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                   <h2 className="text-lg font-bold text-[#433438]">Suas autoavaliações</h2>
-                  {portal.assessments.length === 0 ? <p className="mt-3 text-sm text-[#817578]">Ao finalizar um frasco, você poderá contar como se sentiu durante o período.</p> : <div className="mt-4 space-y-3">{portal.assessments.slice(0, 3).map((assessment) => { const feeling = assessmentOptions.find((option) => option.value === assessment.feeling); return <div key={assessment.id} className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-sm font-semibold">{assessment.symptomSeverity ? `Sintomas ${assessment.symptomSeverity}` : `${feeling?.emoji ?? "📝"} ${feeling?.label ?? "Avaliação registrada"}`}</p><p className="mt-1 text-xs text-[#817578]">Frasco {assessment.bottleNumber} · {formatDate(assessment.createdAt)}</p>{assessment.notes && <p className="mt-2 text-xs text-[#66595d]">{assessment.notes}</p>}<p className={`mt-3 text-xs font-semibold ${assessment.response ? "text-[#187157]" : assessment.viewedAt ? "text-[#3c5da0]" : "text-[#966419]"}`}>{assessment.response ? `✓ Equipe respondeu: ${assessment.response}` : assessment.viewedAt ? "✓ Sua avaliação foi visualizada pela equipe" : "Aguardando visualização da equipe"}</p></div>; })}</div>}
+                  {portal.assessments.length === 0 ? <p className="mt-3 text-sm text-[#817578]">A primeira avaliação fica disponível ao iniciar o primeiro frasco. Depois, uma nova avaliação aparece automaticamente a cada 60 dias.</p> : <div className="mt-4 space-y-3">{portal.assessments.slice(0, 3).map((assessment) => { const feeling = assessmentOptions.find((option) => option.value === assessment.feeling); return <div key={assessment.id} className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-sm font-semibold">{assessment.symptomSeverity ? `Sintomas ${assessment.symptomSeverity}` : `${feeling?.emoji ?? "📝"} ${feeling?.label ?? "Avaliação registrada"}`}</p><p className="mt-1 text-xs text-[#817578]">Frasco {assessment.bottleNumber} · {formatDate(assessment.createdAt)}</p>{assessment.notes && <p className="mt-2 text-xs text-[#66595d]">{assessment.notes}</p>}<p className={`mt-3 text-xs font-semibold ${assessment.response ? "text-[#187157]" : assessment.viewedAt ? "text-[#3c5da0]" : "text-[#966419]"}`}>{assessment.response ? `✓ Equipe respondeu: ${assessment.response}` : assessment.viewedAt ? "✓ Sua avaliação foi visualizada pela equipe" : "Aguardando visualização da equipe"}</p></div>; })}</div>}
                 </article>
               </div>
             )}
@@ -992,7 +997,7 @@ export default function PatientPortalPage() {
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#2c1b20]/55 p-3 sm:items-center sm:p-5">
           <section className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-[30px] bg-white p-6 shadow-2xl sm:p-8">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Avaliação da imunoterapia · {latestAssessment ? "Acompanhamento" : "Inicial"}</p>
-            <h2 className="mt-3 text-xl font-bold text-[#433438] sm:text-2xl">Como foram seus últimos 60 dias?</h2>
+            <h2 className="mt-3 text-xl font-bold text-[#433438] sm:text-2xl">{latestAssessment ? "Como foram seus últimos 60 dias?" : "Avaliação inicial do tratamento"}</h2>
             <p className="mt-2 text-sm text-[#817578]">Data da avaliação: {formatDate(new Date().toISOString())}</p>
             <div className="mt-5"><p className="text-sm font-semibold">De 0 a 10, quanto os sintomas alérgicos incomodaram você no último mês? *</p><div className="mt-3 flex flex-wrap gap-2">{Array.from({length:11},(_,score)=><button key={score} type="button" onClick={()=>setAssessmentNuisance(score)} className={`h-10 w-10 rounded-full border font-semibold ${assessmentNuisance===score?"border-[#a3113a] bg-[#a3113a] text-white":"border-[#eadfd9]"}`}>{score}</button>)}</div></div>
             <div className="mt-6 space-y-4"><p className="text-sm font-semibold">Na última semana, com que frequência você apresentou:</p>{[["nariz","Nariz entupido ou congestionado"],["espirros","Espirros, coriza ou coceira no nariz"],["olhos","Olhos coçando, lacrimejando ou vermelhos"],["sono","Sintomas que atrapalharam seu sono"],["rotina","Sintomas que atrapalharam trabalho, escola ou lazer"]].map(([id,label])=><label key={id} className="block text-sm"><span>{label}</span><select value={assessmentSymptoms[id]??""} onChange={e=>setAssessmentSymptoms({...assessmentSymptoms,[id]:Number(e.target.value)})} className="mt-2 w-full rounded-xl border p-2"><option value="">Selecione</option><option value="0">Nunca (0)</option><option value="1">1 a 2 vezes (1)</option><option value="2">Mais de 2 vezes (2)</option><option value="5">Quase todos os dias (5)</option></select></label>)}</div>
