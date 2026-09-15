@@ -29,12 +29,6 @@ import {
 
 type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes" | "laudos" | "dashboard";
 
-const prickItems = [
-  "Controle Positivo", "Controle Negativo", "Blomia tropicalis", "Dermatophagoides farinae", "Dermatophagoides pteronyssinus",
-  "Fungos II: Alternaria, Cladosporium, Aspergillus, Penicillium", "Gramíneas mix: Dactylis glomerata, Festuca pratensis, Lolium multiflorum, Phleum pratense, Poa pratensis",
-  "Látex", "Epitélio de cão", "Epitélio de gato", "Barata Mix", "Mosquito Mix", "Leite de vaca", "Ovo de galinha", "Trigo", "Crustáceos (mix): lagosta, ostra, siri, marisco", "Amendoim",
-];
-
 function formatDate(value?: string) {
   if (!value) return "Não informado";
 
@@ -522,8 +516,7 @@ export default function MedicalPatientPage() {
     if (!printWindow) { setError("Permita a abertura de janelas no navegador para imprimir o laudo."); return; }
     const reportResults = (report.content.prickResults ?? report.content.results ?? {}) as Record<string, unknown>;
     const isPrick = report.reportType === "prick_test";
-    const entries = isPrick ? prickItems.map((name) => [name, reportResults[name] ?? {}] as const) : Object.entries(reportResults);
-    const results = entries.map(([name, result]) => {
+    const results = Object.entries(reportResults).map(([name, result]) => {
       if (isPrick && result && typeof result === "object") {
         const value = result as Record<string, unknown>;
         return `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(String(value.mm ?? 0))} mm</td><td>${value.pseudopod ? "Sim" : "Não"}</td><td>${escapeHtml(String(value.reaction ?? "-"))}</td><td>${value.dermatographism ? "Sim" : "Não"}</td></tr>`;
@@ -978,7 +971,7 @@ export default function MedicalPatientPage() {
           </section>
         )}
 
-        {selectedNursingReport && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#2c1b20]/55 p-4"><section className="max-h-[88vh] w-full max-w-4xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-2xl sm:p-8"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[.14em] text-[#a3113a]">Laudo da enfermagem</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">{selectedNursingReport.reportType === "prick_test" ? "Prick Test" : "Patch Test"}</h2><p className="mt-1 text-sm text-[#817578]">{formatDate(selectedNursingReport.createdAt)}</p></div><button type="button" onClick={() => setSelectedNursingReport(null)} className="rounded-full bg-[#f5efec] px-3 py-2 font-bold text-[#76686c]">×</button></div><div className="mt-6 grid gap-3 sm:grid-cols-2">{(selectedNursingReport.reportType === "prick_test" ? prickItems.map((name) => [name, ((selectedNursingReport.content.prickResults ?? selectedNursingReport.content.results ?? {}) as Record<string, unknown>)[name] ?? { mm: 0, reaction: "-" }]) : Object.entries((selectedNursingReport.content.results ?? {}) as Record<string, unknown>)).map(([name, result]) => <div key={String(name)} className="rounded-xl bg-[#fcf8f8] p-3 text-sm"><strong>{String(name)}</strong><p className="mt-1">{typeof result === "object" && result ? `${String((result as Record<string, unknown>).mm ?? 0)} mm · ${String((result as Record<string, unknown>).reaction ?? "Sem reação")}` : String(result)}</p></div>)}</div>{typeof selectedNursingReport.content.notes === "string" && selectedNursingReport.content.notes && <p className="mt-5 rounded-xl bg-[#fcf8f8] p-4 text-sm"><strong>Observações:</strong><br />{selectedNursingReport.content.notes}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" onClick={() => printNursingReport(selectedNursingReport)} className="rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">Imprimir / gerar PDF</button></div></section></div>}
+        {selectedNursingReport && <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#2c1b20]/55 p-4"><section className="max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-2xl sm:p-8"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[.14em] text-[#a3113a]">Laudo da enfermagem</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">{selectedNursingReport.reportType === "prick_test" ? "Prick Test" : "Patch Test"}</h2><p className="mt-1 text-sm text-[#817578]">{formatDate(selectedNursingReport.createdAt)}</p></div><button type="button" onClick={() => setSelectedNursingReport(null)} className="rounded-full bg-[#f5efec] px-3 py-2 font-bold text-[#76686c]">×</button></div><div className="mt-6 grid gap-3 sm:grid-cols-2">{Object.entries((selectedNursingReport.content.results ?? {}) as Record<string, unknown>).map(([name, result]) => <div key={name} className="rounded-xl bg-[#fcf8f8] p-3 text-sm"><strong>{name}</strong><p className="mt-1">{String(result)}</p></div>)}</div>{typeof selectedNursingReport.content.notes === "string" && selectedNursingReport.content.notes && <p className="mt-5 rounded-xl bg-[#fcf8f8] p-4 text-sm"><strong>Observações:</strong><br />{selectedNursingReport.content.notes}</p>}<div className="mt-6 flex flex-wrap justify-end gap-3"><button type="button" onClick={() => printNursingReport(selectedNursingReport)} className="rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">Imprimir / gerar PDF</button></div></section></div>}
 
         {activeTab === "historico" && (
           <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
