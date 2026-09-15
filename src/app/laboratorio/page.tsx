@@ -12,7 +12,6 @@ import {
 import { getSupabaseClient } from "../../lib/supabase/client";
 import {
   loadLaboratoryWorkspace,
-  markLaboratoryBatchOk,
   saveLaboratoryBatch,
   type LaboratoryContext,
 } from "../../lib/supabase/laboratory-records";
@@ -246,27 +245,14 @@ export default function LaboratorioPage() {
         productionFinishedAt: new Date().toISOString(),
         productionResponsible: responsible.trim() || batch.productionResponsible,
         productionNotes: productionNotes.trim() || batch.productionNotes,
+        laboratoryOkAt: new Date().toISOString(),
+        laboratoryOkBy: context?.fullName || responsible.trim() || "Laboratório CRA",
       });
       setError("");
       setProductionNotes("");
-      setMessage(`Lote ${batch.code} finalizado. A secretaria já pode realizar a conferência.`);
+      setMessage(`Lote ${batch.code} confirmado como pronto. A secretaria já pode realizar a conferência.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível concluir a produção.");
-    }
-  }
-
-  async function approveLaboratoryBatch(batch: DemoBatch) {
-    if (!context) {
-      setError("Sessão do Laboratório não encontrada.");
-      return;
-    }
-    try {
-      const saved = await markLaboratoryBatchOk(context, batch);
-      setBatches((current) => current.map((item) => item.id === saved.id ? saved : item));
-      setError("");
-      setMessage(`OK do laboratório registrado no lote ${batch.code}. A secretaria já pode conferir e liberar o estoque.`);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Não foi possível registrar o OK do lote.");
     }
   }
 
@@ -787,17 +773,7 @@ export default function LaboratorioPage() {
                         onClick={() => void finishProduction(selectedBatch)}
                         className="mt-5 w-full rounded-xl bg-[#187157] px-4 py-3.5 text-sm font-semibold text-white hover:bg-[#115842]"
                       >
-                        Concluir produção
-                      </button>
-                    )}
-
-                    {selectedBatch.status === "pronto" && !selectedBatch.laboratoryOkAt && (
-                      <button
-                        type="button"
-                        onClick={() => void approveLaboratoryBatch(selectedBatch)}
-                        className="mt-5 w-full rounded-xl bg-[#7351a3] px-4 py-3.5 text-sm font-semibold text-white hover:bg-[#5e3e8d]"
-                      >
-                        Confirmar lote
+                        Confirmar lote pronto
                       </button>
                     )}
 

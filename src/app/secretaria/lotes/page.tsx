@@ -182,14 +182,13 @@ export default function SecretariaLotesPage() {
     [patients],
   );
 
+  const editingBatch = batches.find((batch) => batch.id === editingBatchId && batch.status === "rascunho");
   const includedPrescriptionIds = useMemo(
     () =>
       new Set(
-        batches.flatMap((batch) =>
-          batch.items.map((item) => item.prescriptionId),
-        ),
+        (editingBatch?.items ?? []).map((item) => item.prescriptionId),
       ),
-    [batches],
+    [editingBatch],
   );
 
   const availablePrescriptions = useMemo(() => {
@@ -234,7 +233,7 @@ export default function SecretariaLotesPage() {
     ? readyItems.reduce((total, item) => total + item.bottles, 0)
     : selectedPrescriptions.reduce((total, prescription) => total + prescription.bottles, 0);
   const selectedItemCount = orderType === "pronta-entrega" ? readyItems.length : selectedPrescriptions.length;
-  const editingBatch = batches.find((batch) => batch.id === editingBatchId && batch.status === "rascunho");
+  const openPatientBatches = batches.filter((batch) => batch.status === "rascunho" && batch.orderType !== "pronta-entrega");
 
   const filteredBatches = batches.filter(
     (batch) => filter === "todos" || batch.status === filter,
@@ -849,6 +848,15 @@ export default function SecretariaLotesPage() {
               <p className="mt-1 text-sm text-[#817578]">
                 {editingBatch ? `Você está adicionando pacientes ao lote ${editingBatch.name ?? editingBatch.code}.` : orderType === "pronta-entrega" ? "Monte um lote sem paciente para abastecer a pronta entrega." : "Crie o lote com a data e adicione os pacientes aos poucos."}
               </p>
+
+              {!editingBatch && orderType === "pedido-paciente" && openPatientBatches.length > 0 && (
+                <label className="mt-5 block text-sm font-semibold text-[#544449]">Adicionar em lote já aberto
+                  <select defaultValue="" onChange={(event) => { const batch = batches.find((item) => item.id === event.target.value); if (batch) editDraftBatch(batch); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 font-normal outline-none focus:border-[#b91142]">
+                    <option value="">Criar um novo lote</option>
+                    {openPatientBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name ?? batch.code} · {batch.items.length} paciente(s)</option>)}
+                  </select>
+                </label>
+              )}
 
               <label className="mt-5 block text-sm font-semibold text-[#544449]">
                 Nome do lote *

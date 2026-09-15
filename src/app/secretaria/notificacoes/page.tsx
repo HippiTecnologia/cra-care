@@ -25,6 +25,12 @@ export default function SecretariaNotificationsPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
+  const [doctorFilter, setDoctorFilter] = useState("todos");
+  const [statusFilter, setStatusFilter] = useState("todos");
+  const [birthdayMonth, setBirthdayMonth] = useState("todos");
+  const [orderDate, setOrderDate] = useState("");
+  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
 
   async function load() {
     try {
@@ -54,7 +60,8 @@ export default function SecretariaNotificationsPage() {
       setError("A sessão da Secretaria ainda não foi carregada.");
       return;
     }
-    const targetIds = recipient === "todos" ? patients.map((patient) => patient.id) : [recipient];
+    const targetIds = recipient === "todos" ? filteredPatients.map((patient) => patient.id) : recipient === "selecionados" ? selectedRecipients : [recipient];
+    if (!targetIds.length) { setError("Selecione ao menos um paciente para receber a notificação."); return; }
     setSaving(true);
     try {
       await createSecretaryNotification(context, targetIds, { icon, title, text });
@@ -72,6 +79,17 @@ export default function SecretariaNotificationsPage() {
   }
 
   const patientName = (patientId: string) => patients.find((patient) => patient.id === patientId)?.name ?? "Paciente";
+  const doctors = Array.from(new Set(patients.map((patient) => patient.doctor).filter(Boolean)));
+  const filteredPatients = useMemo(() => patients.filter((patient) => {
+    const searchable = `${patient.name} ${patient.cpf}`.toLocaleLowerCase();
+    if (search && !searchable.includes(search.toLocaleLowerCase())) return false;
+    if (doctorFilter !== "todos" && patient.doctor !== doctorFilter) return false;
+    if (statusFilter !== "todos" && patient.status !== statusFilter) return false;
+    if (birthdayMonth !== "todos" && String(new Date(`${patient.birthDate}T12:00:00`).getMonth() + 1) !== birthdayMonth) return false;
+    if (orderDate && !patient.createdAt.startsWith(orderDate)) return false;
+    return true;
+  }), [birthdayMonth, doctorFilter, orderDate, patients, search, statusFilter]);
+  const toggleRecipient = (patientId: string) => setSelectedRecipients((current) => current.includes(patientId) ? current.filter((id) => id !== patientId) : [...current, patientId]);
 
   return (
     <main className="min-h-screen bg-[#f8f5f2] text-[#34292d]">
@@ -108,10 +126,19 @@ export default function SecretariaNotificationsPage() {
               <p className="mt-1 text-sm text-[#817578]">O aviso ficará salvo no histórico do portal.</p>
               <label className="mt-6 block text-sm font-semibold text-[#544449]">Destinatário
                 <select value={recipient} onChange={(event) => setRecipient(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 font-normal outline-none focus:border-[#b91142]">
-                  <option value="todos">Todos os pacientes ({patients.length})</option>
-                  {patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name} · CPF {patient.cpf}</option>)}
+                  <option value="todos">Todos do filtro ({filteredPatients.length})</option>
+                  <option value="selecionados">Somente pacientes selecionados ({selectedRecipients.length})</option>
+                  {filteredPatients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name} · CPF {patient.cpf}</option>)}
                 </select>
               </label>
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Nome ou CPF" className="h-11 rounded-xl border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142]" />
+                <input type="date" value={orderDate} onChange={(event) => setOrderDate(event.target.value)} className="h-11 rounded-xl border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142]" title="Data de cadastro/pedido" />
+                <select value={doctorFilter} onChange={(event) => setDoctorFilter(event.target.value)} className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]"><option value="todos">Todos os médicos</option>{doctors.map((doctor) => <option key={doctor} value={doctor}>{doctor}</option>)}</select>
+                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]"><option value="todos">Todas as colunas</option>{Array.from(new Set(patients.map((patient) => patient.status).filter(Boolean))).map((status) => <option key={status} value={status}>{status}</option>)}</select>
+                <select value={birthdayMonth} onChange={(event) => setBirthdayMonth(event.target.value)} className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]"><option value="todos">Todos os aniversários</option>{Array.from({ length: 12 }, (_, index) => <option key={index + 1} value={String(index + 1)}>{new Date(2026, index, 1).toLocaleString("pt-BR", { month: "long" })}</option>)}</select>
+              </div>
+              <div className="mt-4 max-h-44 space-y-2 overflow-y-auto rounded-xl border border-[#eee5e0] p-3 text-xs">{filteredPatients.map((patient) => <label key={patient.id} className="flex items-center gap-2"><input type="checkbox" checked={selectedRecipients.includes(patient.id)} onChange={() => toggleRecipient(patient.id)} className="accent-[#a3113a]" />{patient.name} · {patient.doctor || "Sem médico"}</label>)}{filteredPatients.length === 0 && <p className="text-[#817578]">Nenhum paciente encontrado.</p>}</div>
               <div className="mt-5 grid gap-4 sm:grid-cols-[120px_1fr]">
                 <label className="text-sm font-semibold text-[#544449]">Ícone
                   <select value={icon} onChange={(event) => setIcon(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 text-xl outline-none focus:border-[#b91142]">{icons.map((item) => <option key={item}>{item}</option>)}</select>

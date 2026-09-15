@@ -11,6 +11,7 @@ import {
 } from "../../medico/patient-store";
 import {
   loadSecretaryPatients,
+  loadSecretaryBatches,
   loadSecretaryPrescriptions,
   loadSecretaryStock,
   saveSecretaryPatient,
@@ -78,20 +79,32 @@ export default function SecretariaEstoquePage() {
   const [deliveredRetentionCutoff, setDeliveredRetentionCutoff] = useState(0);
   const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
   const [context, setContext] = useState<SecretaryContext | null>(null);
+  const [batchNames, setBatchNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let active = true;
     void (async () => {
       try {
         const workspace = await loadSecretaryPatients();
-        const [loadedStock, loadedPrescriptions] = await Promise.all([
+        const [loadedStock, loadedPrescriptions, loadedBatches] = await Promise.all([
           loadSecretaryStock(workspace.context),
           loadSecretaryPrescriptions(workspace.context),
+          loadSecretaryBatches(workspace.context),
         ]);
         if (!active) return;
         setContext(workspace.context);
-        setStock(loadedStock);
+        // Cada pedido de paciente precisa respeitar a quantidade da receita.
+        // Isso também impede que um número inconsistente vindo de um lote antigo
+        // apareça como quantidade entregue no estoque.
+        const prescriptionById = new Map(loadedPrescriptions.map((prescription) => [prescription.id, prescription]));
+        setStock(loadedStock.map((item) => {
+          const prescription = item.patientId ? prescriptionById.get(item.prescriptionId) : undefined;
+          return prescription && item.bottles > prescription.bottles
+            ? { ...item, bottles: prescription.bottles }
+            : item;
+        }));
         setPrescriptions(loadedPrescriptions);
+        setBatchNames(Object.fromEntries(loadedBatches.map((batch) => [batch.id, batch.name ?? batch.code])));
         setPatients(workspace.patients);
         setDeliveredRetentionCutoff(new Date().getTime() - 30 * 86_400_000);
       } catch (cause) {
@@ -136,17 +149,16 @@ export default function SecretariaEstoquePage() {
     return stock.filter((item) => {
       if (item.status === "entregue" && item.deliveredAt && deliveredRetentionCutoff > 0 && new Date(item.deliveredAt).getTime() < deliveredRetentionCutoff) return false;
       if (filter !== "todos" && item.status !== filter) return false;
-      if (originFilter === "pronta-entrega" && item.patientId) return false;
-      if (originFilter === "pedido-paciente" && !item.patientId) return false;
+      if (originFilter !== "todos" && item.origin !== originFilter) return false;
       if (deliveryFilter !== "todas" && item.delivery !== deliveryFilter) return false;
       if (batchFilter !== "todos" && item.batchId !== batchFilter) return false;
       if (!normalized) return true;
 
       return normalizeSearch(
-        `${item.patientName} ${item.patientCpf} ${item.batchCode} ${item.doctor} ${item.treatment}`,
+        `${item.patientName} ${item.patientCpf} ${item.batchCode} ${batchNames[item.batchId] ?? ""} ${item.doctor} ${item.treatment}`,
       ).includes(normalized);
     });
-  }, [batchFilter, deliveredRetentionCutoff, deliveryFilter, filter, originFilter, search, stock]);
+  }, [batchFilter, batchNames, deliveredRetentionCutoff, deliveryFilter, filter, originFilter, search, stock]);
 
   const selectedItem =
     filteredStock.find((item) => item.id === selectedItemId) ?? filteredStock[0];
@@ -154,7 +166,16 @@ export default function SecretariaEstoquePage() {
   const assignmentPrescription = assignmentPatient ? prescriptions.find((prescription) => prescription.patientId === assignmentPatient.id) : undefined;
   const assignmentBilling = assignmentPatient ? getBillingRequirement(assignmentPatient) : undefined;
   const selectedPatient = selectedItem?.patientId ? patients.find((patient) => patient.id === selectedItem.patientId) : undefined;
-  const availableBatches = Array.from(new Map(stock.map((item) => [item.batchId, item.batchCode])).entries());
+  const availableBatches = Array.from(new Map(stock.map((item) => [item.batchId, batchNames[item.batchId] ?? item.batchCode])).entries());
+
+  function printStockReport() {
+    const rows = filteredStock.map((item) => `<tr><td>${item.patientId ? item.patientName : "Pronta entrega"}</td><td>${batchNames[item.batchId] ?? item.batchCode}</td><td>${item.doctor || "-"}</td><td>${item.status}</td><td>${item.bottles}</td></tr>`).join("");
+    const reportWindow = window.open("", "_blank");
+    if (!reportWindow) { setMessage("Permita a abertura de janelas no navegador para gerar o relatório."); return; }
+    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de estoque</title><style>@page{size:A4 portrait;margin:14mm}body{font-family:Arial,sans-serif;color:#34292d;font-size:11px}h1{color:#a3113a;margin:0}table{border-collapse:collapse;width:100%;margin-top:18px}th,td{border:1px solid #ddd;padding:7px;text-align:left}th{background:#f1e6e8}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Imprimir / salvar em PDF</button><h1>Relatório de vacinas em estoque</h1><p>Gerado em ${new Date().toLocaleString("pt-BR")} · ${filteredStock.length} registro(s)</p><table><thead><tr><th>Paciente / origem</th><th>Lote</th><th>Médico</th><th>Status</th><th>Frascos</th></tr></thead><tbody>${rows || "<tr><td colspan=\"5\">Nenhum registro no filtro atual.</td></tr>"}</tbody></table></body></html>`);
+    reportWindow.document.close();
+    reportWindow.focus();
+  }
   const readyBottleCount = stock
     .filter((item) => item.origin === "pronta-entrega" && !item.patientId)
     .reduce((total, item) => total + item.bottles, 0);
@@ -460,12 +481,13 @@ export default function SecretariaEstoquePage() {
               <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <select value={batchFilter} onChange={(event) => { setBatchFilter(event.target.value); setSelectedStockIds([]); }} className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]">
                   <option value="todos">Todos os lotes</option>
-                  {availableBatches.map(([id, code]) => <option key={id} value={id}>Lote {code}</option>)}
+                  {availableBatches.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
                 </select>
                 <select value={deliveryFilter} onChange={(event) => { setDeliveryFilter(event.target.value as DeliveryFilter); setSelectedStockIds([]); }} className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]">
                   <option value="todas">Todas as entregas</option><option value="Motoboy">Motoboy</option><option value="Sedex">Sedex</option><option value="Retirada">Retirada</option><option value="Aéreo">Aéreo</option>
                 </select>
                 <button type="button" onClick={selectAllFiltered} className="h-11 rounded-xl border border-[#eadfd9] px-3 text-sm font-semibold text-[#a3113a]">Selecionar todos do filtro</button>
+                <button type="button" onClick={printStockReport} className="h-11 rounded-xl border border-[#eadfd9] px-3 text-sm font-semibold text-[#a3113a]">Gerar relatório</button>
               </div>
               {selectedStockIds.length > 0 && <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-[#fff4e4] px-4 py-3 text-xs text-[#806238]"><strong>{selectedStockIds.length} envio(s) selecionado(s)</strong><button type="button" onClick={reserveSelected} className="rounded-lg bg-[#a3113a] px-3 py-2 font-semibold text-white">Reservar selecionados</button></div>}
 
