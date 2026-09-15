@@ -29,6 +29,17 @@ import {
 
 type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes" | "laudos" | "dashboard";
 
+const prickGroups = [
+  { battery: "BATERIA A", category: "Controles", items: ["Controle Positivo", "Controle Negativo"] },
+  { battery: "BATERIA A", category: "Ácaros", items: ["Blomia tropicalis", "Dermatophagoides farinae", "Dermatophagoides pteronyssinus"] },
+  { battery: "BATERIA A", category: "Fungos", items: ["Fungos II: Alternaria, Cladosporium, Aspergillus, Penicillium"] },
+  { battery: "BATERIA A", category: "Pólens", items: ["Gramíneas mix: Dactylis glomerata, Festuca pratensis, Lolium multiflorum, Phleum pratense, Poa pratensis"] },
+  { battery: "BATERIA A", category: "Outros", items: ["Látex"] },
+  { battery: "BATERIA A", category: "Epitélios", items: ["Epitélio de cão", "Epitélio de gato"] },
+  { battery: "BATERIA B", category: "Insetos", items: ["Barata Mix", "Mosquito Mix"] },
+  { battery: "BATERIA B", category: "Alimentos", items: ["Leite de vaca", "Ovo de galinha", "Trigo", "Crustáceos (mix): lagosta, ostra, siri, marisco", "Amendoim"] },
+];
+
 function formatDate(value?: string) {
   if (!value) return "Não informado";
 
@@ -510,12 +521,28 @@ export default function MedicalPatientPage() {
     printWindow.focus();
   }
 
-  function printNursingReport(report: { reportType: "prick_test" | "patch_test"; content: Record<string, unknown>; createdAt: string }) {
+  function printNursingReport(report: { reportType: "prick_test" | "patch_test"; content: Record<string, unknown>; createdAt: string }, autoPrint = true) {
     if (!patient) return;
     const printWindow = window.open("", "_blank");
     if (!printWindow) { setError("Permita a abertura de janelas no navegador para imprimir o laudo."); return; }
-    const reportResults = (report.content.prickResults ?? report.content.results ?? {}) as Record<string, unknown>;
+    const reportResults = (report.content.prickResults ?? report.content.prick_results ?? report.content.results ?? {}) as Record<string, unknown>;
     const isPrick = report.reportType === "prick_test";
+    if (isPrick) {
+      const rows = prickGroups.map((group) => {
+        const items = group.items.map((name, itemIndex) => {
+          const index = prickGroups.slice(0, prickGroups.indexOf(group)).reduce((total, current) => total + current.items.length, 0) + itemIndex + 1;
+          const value = (reportResults[name] ?? {}) as Record<string, unknown>;
+          const mm = Number(value.mm ?? 0);
+          const reaction = String(value.reaction ?? (mm === 0 ? "Sem Reação" : mm <= 3 ? "+" : mm <= 6 ? "++" : mm <= 9 ? "+++" : "++++"));
+          return `<tr><td>${index}</td><td>${escapeHtml(name)}</td><td>${mm} mm</td><td>${value.pseudopod ? "sim" : "não"}</td><td>${escapeHtml(reaction === "-" ? "Sem Reação" : reaction)}</td><td>${value.dermatographism ? "sim" : "não"}</td></tr>`;
+        }).join("");
+        return `<tr class="category"><td colspan="6">${escapeHtml(group.category)}</td></tr>${items}`;
+      });
+      const batteries = ["BATERIA A", "BATERIA B"].map((battery) => `<section class="battery"><h2>${battery}</h2><table><thead><tr><th></th><th>Extrato</th><th>MM</th><th>Pseudópode</th><th>Resposta Alérgica</th><th>Dermatografismo</th></tr></thead><tbody>${rows.filter((_, index) => prickGroups[index].battery === battery).join("")}</tbody></table></section>`).join("");
+      const nurse = escapeHtml(String(report.content.nurseName ?? "Enfermagem"));
+      printWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Laudo Prick</title><style>@page{size:A4 portrait;margin:9mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:8px}.actions{margin-bottom:8px}button{padding:8px 12px;border:0;border-radius:6px;background:#a3113a;color:#fff;font-weight:bold}.logo{display:inline-block;border-left:6px solid #a71437;padding-left:8px;font-weight:800;font-size:17px;line-height:14px;color:#7d2435}.logo small{display:block;font-size:6px;letter-spacing:1px;color:#333}.patient{margin:8px 0 11px;font-size:10px;line-height:15px}table{width:100%;border-collapse:collapse;table-layout:fixed}th{background:#aeb5be;border:1px solid #8e959d;padding:3px 1px;text-align:center;font-size:7px}td{border-bottom:1px solid #e3e5e8;padding:2px 2px;text-align:center;word-break:break-word}td:nth-child(2){text-align:left}.category td{background:#d3d6da;text-align:left;font-weight:700;padding:3px 7px}.battery{margin-top:7px;border:1px solid #bac0c7;border-radius:3px;overflow:hidden}.battery h2{font-size:9px;margin:0;padding:3px 8px;background:#d3d6da;border-top:2px solid #687380}.legend{margin-top:13px;font-size:8px;line-height:12px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:32px;text-align:center;font-size:8px}.line{border-top:1px solid #111;padding-top:4px;margin:auto;width:170px}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><div class="logo">HOSPITAL<br/>IPO<small>INSTITUTO PARANAENSE DE OTORRINOLARINGOLOGIA</small></div><div class="patient">Paciente: <strong>${escapeHtml(patient.name)}</strong><br/>Data: <strong>${escapeHtml(formatDate(report.createdAt))}</strong></div>${batteries}<div class="legend"><strong>Legenda:</strong><br/>- = Sem reação<br/>+ = Reação fraca<br/>++ = Reação moderada<br/>+++ = Reação forte<br/>++++ = Reação muito forte<br/>XXXX = Teste inválido por dermatografismo/impossibilidade técnica.</div><div class="signatures"><div><div class="line">${nurse}<br/>Enfermagem</div></div><div><div class="line">Dr. Sérgio Maniglia<br/>CRM 20.762</div></div></div>${autoPrint ? "<script>window.onload=()=>window.print()<\\/script>" : ""}</body></html>`);
+      printWindow.document.close(); printWindow.focus(); return;
+    }
     const results = Object.entries(reportResults).map(([name, result]) => {
       if (isPrick && result && typeof result === "object") {
         const value = result as Record<string, unknown>;
@@ -967,7 +994,7 @@ export default function MedicalPatientPage() {
           <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
             <h2 className="text-2xl font-bold text-[#433438]">Laudos da enfermagem</h2>
             <p className="mt-2 text-sm text-[#817578]">Resultados preenchidos pela enfermagem e vinculados a esta paciente.</p>
-            <div className="mt-6 space-y-4">{nursingReports.length === 0 ? <p className="rounded-2xl border border-dashed border-[#e6dbd6] p-6 text-center text-sm text-[#817578]">Nenhum laudo registrado.</p> : nursingReports.map((report) => <article key={report.id} className="rounded-2xl border border-[#e6dbd6] bg-[#fdfbf9] p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-bold">{report.reportType === "prick_test" ? "Prick Test" : "Patch Test"}</h3><span className="mt-1 block text-xs text-[#817578]">{formatDate(report.createdAt)}</span></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => setSelectedNursingReport(report)} className="rounded-xl border border-[#e6dbd6] bg-white px-4 py-2 text-xs font-semibold text-[#a3113a]">Visualizar</button><button type="button" onClick={() => printNursingReport(report)} className="rounded-xl bg-[#a3113a] px-4 py-2 text-xs font-semibold text-white">Imprimir / gerar PDF</button></div></div>{typeof report.content.notes === "string" && report.content.notes && <p className="mt-4 text-sm"><strong>Observações:</strong> {report.content.notes}</p>}</article>)}</div>
+            <div className="mt-6 space-y-4">{nursingReports.length === 0 ? <p className="rounded-2xl border border-dashed border-[#e6dbd6] p-6 text-center text-sm text-[#817578]">Nenhum laudo registrado.</p> : nursingReports.map((report) => <article key={report.id} className="rounded-2xl border border-[#e6dbd6] bg-[#fdfbf9] p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-bold">{report.reportType === "prick_test" ? "Prick Test" : "Patch Test"}</h3><span className="mt-1 block text-xs text-[#817578]">{formatDate(report.createdAt)}</span></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => printNursingReport(report, false)} className="rounded-xl border border-[#e6dbd6] bg-white px-4 py-2 text-xs font-semibold text-[#a3113a]">Visualizar</button><button type="button" onClick={() => printNursingReport(report)} className="rounded-xl bg-[#a3113a] px-4 py-2 text-xs font-semibold text-white">Imprimir / gerar PDF</button></div></div>{typeof report.content.notes === "string" && report.content.notes && <p className="mt-4 text-sm"><strong>Observações:</strong> {report.content.notes}</p>}</article>)}</div>
           </section>
         )}
 
