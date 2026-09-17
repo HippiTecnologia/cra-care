@@ -23,11 +23,23 @@ import {
   loadMedicalPatientWorkspace,
   prepareMedicalPrescriptionSignature,
   updateMedicalPatientBasics,
+  updateMedicalPatientTreatmentDuration,
   updateClinicalRecord,
   type MedicalDoctorProfile,
 } from "../../../../lib/supabase/medical-records";
+import { patchSubstanceCode, patchSubstanceDetails } from "../../../../lib/patch-substances";
 
 type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes" | "laudos" | "dashboard";
+type VaccineType = "rinite" | "imunobacteriana";
+
+const immunobacterialFormulas: PrescriptionFormula[] = [
+  { id: "imuno-pneumoniae", name: "S. pneumoniae", percentage: 40 },
+  { id: "imuno-aureus", name: "S. aureus", percentage: 20 },
+  { id: "imuno-pyogenes", name: "S. pyogenes", percentage: 10 },
+  { id: "imuno-catarrhalis", name: "Brahmanella catarrhalis", percentage: 10 },
+  { id: "imuno-influenzae", name: "H. influenzae", percentage: 10 },
+  { id: "imuno-parvum", name: "C. parvum", percentage: 10 },
+];
 
 const prickGroups = [
   { battery: "BATERIA A", category: "Controles", items: ["Controle Positivo", "Controle Negativo"] },
@@ -95,11 +107,13 @@ export default function MedicalPatientPage() {
   const [doctor, setDoctor] = useState<MedicalDoctorProfile | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
+  const [vaccineType, setVaccineType] = useState<VaccineType>("rinite");
   const [selectedFormula, setSelectedFormula] = useState(availableFormulas[0]);
   const [formulaPercentage, setFormulaPercentage] = useState("");
   const [formulas, setFormulas] = useState<PrescriptionFormula[]>([]);
   const [phase, setPhase] = useState(treatmentPhases[0]);
   const [bottles, setBottles] = useState(1);
+  const [durationMonths, setDurationMonths] = useState(36);
   const [drops, setDrops] = useState(6);
   const [frequency, setFrequency] = useState("3 vezes por semana");
   const [customPosology, setCustomPosology] = useState(false);
@@ -156,6 +170,7 @@ export default function MedicalPatientPage() {
         if (!active) return;
         setDoctor(workspace.doctor);
         setPatient(workspace.patient);
+        setDurationMonths(workspace.patient?.totalMonths ?? 36);
         setPatientDataDraft(workspace.patient ? { name: workspace.patient.name, cpf: workspace.patient.cpf, birthDate: workspace.patient.birthDate } : { name: "", cpf: "", birthDate: "" });
         setPrescriptions(workspace.prescriptions);
         setClinicalRecords(workspace.clinicalRecords);
@@ -237,7 +252,7 @@ export default function MedicalPatientPage() {
   }
 
   function clearPrescription() {
-    setFormulas([]);
+    setFormulas(vaccineType === "imunobacteriana" ? immunobacterialFormulas.map((formula) => ({ ...formula })) : []);
     setFormulaPercentage("");
     setSelectedFormula(availableFormulas[0]);
     setPhase(patient?.phase ?? treatmentPhases[0]);
@@ -249,6 +264,14 @@ export default function MedicalPatientPage() {
     setNotes("");
     setError("");
     setSelectedPrescriptionId(null);
+  }
+
+  function changeVaccineType(type: VaccineType) {
+    setVaccineType(type);
+    setFormulas(type === "imunobacteriana" ? immunobacterialFormulas.map((formula) => ({ ...formula })) : []);
+    setDurationMonths(type === "imunobacteriana" ? 12 : 36);
+    setSelectedPrescriptionId(null);
+    setError("");
   }
 
   async function createPrescription() {
@@ -270,7 +293,7 @@ export default function MedicalPatientPage() {
       doctor: doctor.fullName,
       doctorCrm: doctor.crm,
       createdAt: new Date().toISOString(),
-      treatment: patient.treatment ?? "Imunoterapia para rinite",
+      treatment: vaccineType === "imunobacteriana" ? "Vacina Imunobacteriana" : patient.treatment ?? "Vacina Rinite",
       phase,
       bottles,
       drops,
@@ -282,6 +305,8 @@ export default function MedicalPatientPage() {
     };
 
     try {
+      const updatedPatient = await updateMedicalPatientTreatmentDuration(doctor, patient.id, durationMonths);
+      setPatient(updatedPatient);
       const saved = await createMedicalPrescription(doctor, patient, prescription);
       setPrescriptions((current) => [saved, ...current]);
       setPatient((current) => current ? {
@@ -543,16 +568,28 @@ export default function MedicalPatientPage() {
       printWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Laudo Prick</title><style>@page{size:A4 portrait;margin:9mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:8px}.actions{margin-bottom:8px}button{padding:8px 12px;border:0;border-radius:6px;background:#a3113a;color:#fff;font-weight:bold}.brand-logo{display:block;width:105px;height:72px;object-fit:contain;background:#a71437;border-radius:4px;padding:4px}.patient{margin:8px 0 11px;font-size:10px;line-height:15px}table{width:100%;border-collapse:collapse;table-layout:fixed}th{background:#aeb5be;border:1px solid #8e959d;padding:3px 1px;text-align:center;font-size:7px}td{border-bottom:1px solid #e3e5e8;padding:2px 2px;text-align:center;word-break:break-word}td:nth-child(2){text-align:left}.category td{background:#d3d6da;text-align:left;font-weight:700;padding:3px 7px}.battery{margin-top:7px;border:1px solid #bac0c7;border-radius:3px;overflow:hidden}.battery h2{font-size:9px;margin:0;padding:3px 8px;background:#d3d6da;border-top:2px solid #687380}.legend{margin-top:13px;font-size:8px;line-height:12px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:32px;text-align:center;font-size:8px}.line{border-top:1px solid #111;padding-top:4px;margin:auto;width:170px}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>${autoPrint ? '<div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div>' : ""}<img class="brand-logo" src="${window.location.origin}/logo-cra-branca.png" alt="CRA Care"/><div class="patient">Paciente: <strong>${escapeHtml(patient.name)}</strong><br/>Data: <strong>${escapeHtml(formatDate(report.createdAt))}</strong></div>${batteries}<div class="legend"><strong>Legenda:</strong><br/>- = Sem reação<br/>+ = Reação fraca<br/>++ = Reação moderada<br/>+++ = Reação forte<br/>++++ = Reação muito forte<br/>XXXX = Teste inválido por dermatografismo/impossibilidade técnica.</div><div class="signatures"><div><div class="line">${nurse}<br/>Enfermagem</div></div><div><div class="line">Dr. Sérgio Maniglia<br/>CRM 20.762</div></div></div>${autoPrint ? "<script>window.onload=()=>window.print()<\\/script>" : ""}</body></html>`);
       printWindow.document.close(); printWindow.focus(); return;
     }
-    const results = Object.entries(reportResults).map(([name, result]) => {
-      if (isPrick && result && typeof result === "object") {
-        const value = result as Record<string, unknown>;
-        return `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(String(value.mm ?? 0))} mm</td><td>${value.pseudopod ? "Sim" : "Não"}</td><td>${escapeHtml(String(value.reaction ?? "-"))}</td><td>${value.dermatographism ? "Sim" : "Não"}</td></tr>`;
-      }
-      return `<tr><td>${escapeHtml(name)}</td><td colspan="4">${escapeHtml(String(result))}</td></tr>`;
+    const patchRows = Object.entries(reportResults).map(([name, result]) => {
+      const value = result && typeof result === "object" ? result as Record<string, unknown> : {};
+      const first = String(value.firstReading ?? "—");
+      const second = String(value.secondReading ?? "—");
+      const final = second !== "—" ? second : first;
+      return `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(first)}</td><td>${escapeHtml(second)}</td><td><strong>${escapeHtml(final)}</strong></td></tr>`;
+    }).join("");
+    const positiveDetails = Object.entries(reportResults).filter(([, result]) => {
+      const value = result && typeof result === "object" ? result as Record<string, unknown> : {};
+      return ["+", "++", "+++"].includes(String(value.secondReading ?? value.firstReading ?? ""));
+    }).map(([name, result]) => {
+      const value = result as Record<string, unknown>;
+      const detail = patchSubstanceDetails[patchSubstanceCode(name)];
+      if (!detail) return "";
+      const fields = [["O que é", detail.what], ["Descrição", detail.description], ["Onde é encontrada", detail.where], ["Também pode ser encontrada como", detail.aliases], ["Reação cruzada", detail.crossReaction], ["Observações", detail.observations]]
+        .filter(([, text]) => text && text !== "-")
+        .map(([label, text]) => `<p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(text)}</p>`).join("");
+      return `<article class="detail"><h2>${escapeHtml(name)}</h2><p><strong>Leituras:</strong> 1ª leitura ${escapeHtml(String(value.firstReading ?? "—"))} · 2ª leitura ${escapeHtml(String(value.secondReading ?? "—"))}</p>${fields}</article>`;
     }).join("");
     const title = report.reportType === "prick_test" ? "Laudo Prick Test" : "Laudo Patch Test";
     const notes = typeof report.content.notes === "string" ? report.content.notes : "";
-    printWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${title}</title><style>@page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#34292d;font-size:10px}header{border-bottom:3px solid #a3113a;padding-bottom:12px;margin-bottom:16px}h1{margin:0;color:#8f1539;font-size:20px}table{width:100%;border-collapse:collapse;margin-top:16px;table-layout:fixed}th,td{padding:6px 5px;border:1px solid #ddd;text-align:left;word-break:break-word}th{background:#d3d6da;font-size:9px}.actions{margin-bottom:14px}button{padding:10px 14px;border:0;border-radius:8px;background:#a3113a;color:#fff;font-weight:bold}@media print{.actions{display:none}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header><h1>${title}</h1><p>CRA Care · Centro de Rinite e Alergia</p></header><p><strong>Paciente:</strong> ${escapeHtml(patient.name)}<br><strong>CPF:</strong> ${escapeHtml(patient.cpf)}<br><strong>Data:</strong> ${escapeHtml(formatDate(report.createdAt))}</p><table><thead><tr>${isPrick ? "<th>Extrato</th><th>MM</th><th>Pseudópode</th><th>Resposta alérgica</th><th>Dermatografismo</th>" : "<th>Item</th><th>Resultado</th>"}</tr></thead><tbody>${results || `<tr><td colspan="${isPrick ? 5 : 2}">Sem resultados detalhados.</td></tr>`}</tbody></table>${notes ? `<p><strong>Observações:</strong> ${escapeHtml(notes)}</p>` : ""}</body></html>`);
+    printWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${title}</title><style>@page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#34292d;font-size:10px}header{border-bottom:3px solid #a3113a;padding-bottom:12px;margin-bottom:16px}h1{margin:0;color:#8f1539;font-size:20px}table{width:100%;border-collapse:collapse;margin-top:16px;table-layout:fixed}th,td{padding:6px 5px;border:1px solid #ddd;text-align:left;word-break:break-word}th{background:#d3d6da;font-size:9px}.actions{margin-bottom:14px}button{padding:10px 14px;border:0;border-radius:8px;background:#a3113a;color:#fff;font-weight:bold}.detail{border-top:1px solid #d7d0cc;margin-top:14px;padding-top:10px}.detail h2{font-size:13px;color:#8f1539;margin:0 0 6px}.detail p{line-height:1.45;margin:5px 0}@media print{.actions{display:none}}</style></head><body>${autoPrint ? '<div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div>' : ""}<header><h1>${title}</h1><p>CRA Care · Centro de Rinite e Alergia</p></header><p><strong>Paciente:</strong> ${escapeHtml(patient.name)}<br><strong>CPF:</strong> ${escapeHtml(patient.cpf)}<br><strong>Data:</strong> ${escapeHtml(formatDate(report.createdAt))}</p><table><thead><tr><th>Substância</th><th>1ª leitura · 48h</th><th>2ª leitura · 48h</th><th>Resultado</th></tr></thead><tbody>${patchRows || "<tr><td colspan=\"4\">Sem resultados detalhados.</td></tr>"}</tbody></table>${positiveDetails ? `<section><h1 style="font-size:15px;margin-top:20px">Substâncias com reação positiva</h1>${positiveDetails}</section>` : ""}${notes ? `<p><strong>Observações:</strong> ${escapeHtml(notes)}</p>` : ""}</body></html>`);
     printWindow.document.close();
     printWindow.focus();
   }
@@ -707,19 +744,22 @@ export default function MedicalPatientPage() {
               </div>
 
               <div className="mt-7 border-b border-[#f0e8e4] pb-6">
+                <h3 className="text-base font-bold text-[#a3113a]">Tipo de vacina</h3>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <button type="button" onClick={() => changeVaccineType("rinite")} className={`rounded-xl border p-4 text-left text-sm font-semibold ${vaccineType === "rinite" ? "border-[#a3113a] bg-[#fff2f4] text-[#a3113a]" : "border-[#e9dfda] bg-white text-[#544449]"}`}>Vacina Rinite<span className="mt-1 block text-xs font-normal text-[#817578]">Composição personalizada como já funciona hoje.</span></button>
+                  <button type="button" onClick={() => changeVaccineType("imunobacteriana")} className={`rounded-xl border p-4 text-left text-sm font-semibold ${vaccineType === "imunobacteriana" ? "border-[#a3113a] bg-[#fff2f4] text-[#a3113a]" : "border-[#e9dfda] bg-white text-[#544449]"}`}>Vacina Imunobacteriana<span className="mt-1 block text-xs font-normal text-[#817578]">Composição fixa · 9 mL por frasco.</span></button>
+                </div>
+              </div>
+
+              <div className="border-b border-[#f0e8e4] py-6">
                 <h3 className="text-base font-bold text-[#a3113a]">1. Composição</h3>
-                <p className="mt-1 text-xs text-[#817578]">Informe uma porcentagem ou deixe o campo vazio para completar automaticamente os 100%.</p>
-                <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_110px]">
+                <p className="mt-1 text-xs text-[#817578]">{vaccineType === "imunobacteriana" ? "Composição clínica fixa da Vacina Imunobacteriana." : "Informe uma porcentagem ou deixe o campo vazio para completar automaticamente os 100%."}</p>
+                {vaccineType === "rinite" && <><div className="mt-4 grid gap-3 sm:grid-cols-[1fr_110px]">
                   <select value={selectedFormula} onChange={(event) => setSelectedFormula(event.target.value)} className="h-12 rounded-xl border border-[#e9dfda] bg-white px-4 text-sm outline-none focus:border-[#b91142]">
-                    {availableFormulas.map((formula) => (
-                      <option key={formula} value={formula}>{formula}</option>
-                    ))}
+                    {availableFormulas.map((formula) => <option key={formula} value={formula}>{formula}</option>)}
                   </select>
                   <input value={formulaPercentage} onChange={(event) => { setFormulaPercentage(event.target.value); setError(""); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addFormula(); } }} inputMode="decimal" placeholder={`${Math.max(0, 100 - totalPercentage)}%`} aria-label="Porcentagem da composição" className="h-12 rounded-xl border border-[#e9dfda] px-4 text-sm outline-none focus:border-[#b91142]" />
-                </div>
-                <button type="button" onClick={addFormula} className="mt-3 rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">
-                  + Adicionar composição
-                </button>
+                </div><button type="button" onClick={addFormula} className="mt-3 rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">+ Adicionar composição</button></>}
 
                 {error && <p role="alert" className="mt-3 rounded-xl bg-[#fff1f3] px-4 py-3 text-sm text-[#a3113a]">{error}</p>}
 
@@ -747,7 +787,7 @@ export default function MedicalPatientPage() {
 
               <div className="border-b border-[#f0e8e4] py-6">
                 <h3 className="text-base font-bold text-[#a3113a]">2. Fase e frascos</h3>
-                <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_140px]">
+                <div className="mt-4 grid gap-4 sm:grid-cols-3">
                   <label className="text-sm text-[#544449]">Fase
                     <select value={phase} onChange={(event) => { setPhase(event.target.value); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]">
                       {treatmentPhases.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -755,6 +795,11 @@ export default function MedicalPatientPage() {
                   </label>
                   <label className="text-sm text-[#544449]">Frascos
                     <input type="number" min={1} value={bottles} onChange={(event) => { setBottles(Number(event.target.value)); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" />
+                  </label>
+                  <label className="text-sm text-[#544449]">Duração
+                    <select value={durationMonths} onChange={(event) => { setDurationMonths(Number(event.target.value)); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]">
+                      {(vaccineType === "imunobacteriana" ? [{ value: 4, label: "4 meses" }, { value: 6, label: "6 meses" }, { value: 12, label: "1 ano" }] : [{ value: 36, label: "3 anos" }, { value: 48, label: "4 anos" }, { value: 60, label: "5 anos" }]).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
                   </label>
                 </div>
               </div>

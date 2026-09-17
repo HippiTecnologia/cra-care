@@ -88,6 +88,10 @@ function normalizeSearch(value: string) {
     .replace(/[.\-/]/g, "");
 }
 
+function escapeReportHtml(value: string | number) {
+  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
 function defaultBatchName() {
   const today = new Date();
   return `${String(today.getDate()).padStart(2, "0")}-${String(today.getMonth() + 1).padStart(2, "0")}-${today.getFullYear()}`;
@@ -99,6 +103,7 @@ export default function SecretariaLotesPage() {
   const [batches, setBatches] = useState<DemoBatch[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
+  const [recentPrescriptionIds, setRecentPrescriptionIds] = useState<string[]>([]);
   const [filter, setFilter] = useState<BatchFilter>("todos");
   const [laboratory, setLaboratory] = useState("Laboratório CRA");
   const [batchName, setBatchName] = useState(defaultBatchName);
@@ -143,6 +148,13 @@ export default function SecretariaLotesPage() {
       }
     })();
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem("cra-care:secretaria:lotes:recentes");
+    if (stored) {
+      try { setRecentPrescriptionIds(JSON.parse(stored).slice(0, 5)); } catch { /* histórico local inválido é ignorado */ }
+    }
   }, []);
 
   async function persistBatch(batch: DemoBatch) {
@@ -225,6 +237,14 @@ export default function SecretariaLotesPage() {
     });
   }, [availablePrescriptions, patientById, search]);
 
+  const displayedPrescriptions = useMemo(() => {
+    if (search.trim()) return filteredPrescriptions;
+    const recent = recentPrescriptionIds
+      .map((id) => availablePrescriptions.find((prescription) => prescription.id === id))
+      .filter((prescription): prescription is DemoPrescription => Boolean(prescription));
+    return recent.length ? recent : availablePrescriptions.slice(0, 5);
+  }, [availablePrescriptions, filteredPrescriptions, recentPrescriptionIds, search]);
+
   const selectedPrescriptions = availablePrescriptions.filter((prescription) =>
     selectedIds.includes(prescription.id),
   );
@@ -254,6 +274,11 @@ export default function SecretariaLotesPage() {
         ? current.filter((id) => id !== prescription.id)
         : [...current, prescription.id],
     );
+    setRecentPrescriptionIds((current) => {
+      const next = [prescription.id, ...current.filter((id) => id !== prescription.id)].slice(0, 5);
+      window.localStorage.setItem("cra-care:secretaria:lotes:recentes", JSON.stringify(next));
+      return next;
+    });
     setError("");
   }
 
@@ -563,6 +588,15 @@ export default function SecretariaLotesPage() {
     },
   ];
 
+  function printBatchReport() {
+    const rows = filteredBatches.flatMap((batch) => batch.items.map((item) => `<tr><td>${escapeReportHtml(batch.name ?? batch.code)}</td><td>${escapeReportHtml(batch.orderType === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente")}</td><td>${escapeReportHtml(batchStatuses[batch.status].label)}</td><td>${escapeReportHtml(item.patientName || "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf || "—")}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase)}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(item.doctor || "—")}</td><td>${escapeReportHtml(formatDate(batch.createdAt))}</td></tr>`)).join("");
+    const reportWindow = window.open("", "_blank");
+    if (!reportWindow) { setError("Permita a abertura de janelas para gerar o relatório."); return; }
+    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de lotes</title><style>@page{size:A4 landscape;margin:10mm}body{font-family:Arial,sans-serif;color:#34292d;font-size:10px}h1{color:#a3113a;margin:0}table{border-collapse:collapse;width:100%;margin-top:16px}th,td{border:1px solid #ddd;padding:5px;text-align:left;vertical-align:top}th{background:#f1e6e8;font-size:9px}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Imprimir / salvar em PDF</button><h1>Relatório de lotes</h1><p>Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${filteredBatches.length} lote(s)</p><table><thead><tr><th>Lote</th><th>Tipo</th><th>Status</th><th>Paciente / origem</th><th>CPF</th><th>Tratamento</th><th>Fase</th><th>Frascos</th><th>Médico</th><th>Criação</th></tr></thead><tbody>${rows || '<tr><td colspan="10">Nenhum lote no filtro atual.</td></tr>'}</tbody></table></body></html>`);
+    reportWindow.document.close();
+    reportWindow.focus();
+  }
+
   return (
     <main className="min-h-screen bg-[#f8f5f2] text-[#34292d]">
       <div className="min-h-screen lg:grid lg:grid-cols-[285px_minmax(0,1fr)]">
@@ -640,6 +674,7 @@ export default function SecretariaLotesPage() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3 self-start">
+              <button type="button" onClick={printBatchReport} className="rounded-2xl border border-[#eadfd9] bg-white px-5 py-3 text-sm font-semibold text-[#a3113a] shadow-sm hover:bg-[#fff8f8]">Gerar relatório</button>
               <Link
                 href="/secretaria"
                 className="rounded-2xl border border-[#eadfd9] bg-white px-5 py-3 text-sm font-semibold text-[#a3113a] shadow-sm hover:bg-[#fff8f8]"
@@ -702,7 +737,7 @@ export default function SecretariaLotesPage() {
                 <div>
                   <h2 className="text-xl font-bold text-[#433438]">Adicionar paciente ao lote</h2>
                   <p className="mt-1 text-sm text-[#817578]">
-                    Digite o nome ou CPF do paciente solicitante. A última receita médica será carregada automaticamente.
+                    {search.trim() ? "Resultados da pesquisa por nome ou CPF." : "Os 5 últimos pacientes utilizados aparecem abaixo. Pesquise para localizar outro paciente."}
                   </p>
                 </div>
                 <input
@@ -714,7 +749,7 @@ export default function SecretariaLotesPage() {
               </div>
 
               <div className="mt-6 space-y-3">
-                {filteredPrescriptions.length === 0 ? (
+                {displayedPrescriptions.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-6 py-12 text-center">
                     <p className="font-semibold text-[#53454a]">Nenhuma receita disponível</p>
                     <p className="mt-2 text-sm text-[#817578]">
@@ -722,7 +757,7 @@ export default function SecretariaLotesPage() {
                     </p>
                   </div>
                 ) : (
-                  filteredPrescriptions.map((prescription) => {
+                  displayedPrescriptions.map((prescription) => {
                     const patient = patientById.get(prescription.patientId);
                     const selected = selectedIds.includes(prescription.id);
                     const registrationPending =

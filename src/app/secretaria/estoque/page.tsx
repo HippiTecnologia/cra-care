@@ -61,6 +61,10 @@ function normalizeSearch(value: string) {
     .replace(/[.\-/]/g, "");
 }
 
+function escapeReportHtml(value: string | number | undefined) {
+  return String(value ?? "—").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
 export default function SecretariaEstoquePage() {
   const [stock, setStock] = useState<DemoStockItem[]>([]);
   const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
@@ -169,10 +173,10 @@ export default function SecretariaEstoquePage() {
   const availableBatches = Array.from(new Map(stock.map((item) => [item.batchId, batchNames[item.batchId] ?? item.batchCode])).entries());
 
   function printStockReport() {
-    const rows = filteredStock.map((item) => `<tr><td>${item.patientId ? item.patientName : "Pronta entrega"}</td><td>${batchNames[item.batchId] ?? item.batchCode}</td><td>${item.doctor || "-"}</td><td>${item.status}</td><td>${item.bottles}</td></tr>`).join("");
+    const rows = filteredStock.map((item) => `<tr><td>${escapeReportHtml(item.patientId ? item.patientName : "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf)}</td><td>${escapeReportHtml(batchNames[item.batchId] ?? item.batchCode)}</td><td>${escapeReportHtml(item.origin === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente")}</td><td>${escapeReportHtml(item.doctor)}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase)}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(stockStatuses[item.status].label)}</td><td>${escapeReportHtml(item.delivery)}</td><td>${escapeReportHtml(item.laboratory)}</td><td>${escapeReportHtml(formatDate(item.receivedAt))}</td><td>${escapeReportHtml(formatDate(item.reservedAt))}</td><td>${escapeReportHtml(formatDate(item.deliveredAt))}</td><td>${escapeReportHtml(item.checkedBy)}</td><td>${escapeReportHtml(item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · "))}</td></tr>`).join("");
     const reportWindow = window.open("", "_blank");
     if (!reportWindow) { setMessage("Permita a abertura de janelas no navegador para gerar o relatório."); return; }
-    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de estoque</title><style>@page{size:A4 portrait;margin:14mm}body{font-family:Arial,sans-serif;color:#34292d;font-size:11px}h1{color:#a3113a;margin:0}table{border-collapse:collapse;width:100%;margin-top:18px}th,td{border:1px solid #ddd;padding:7px;text-align:left}th{background:#f1e6e8}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Imprimir / salvar em PDF</button><h1>Relatório de vacinas em estoque</h1><p>Gerado em ${new Date().toLocaleString("pt-BR")} · ${filteredStock.length} registro(s)</p><table><thead><tr><th>Paciente / origem</th><th>Lote</th><th>Médico</th><th>Status</th><th>Frascos</th></tr></thead><tbody>${rows || "<tr><td colspan=\"5\">Nenhum registro no filtro atual.</td></tr>"}</tbody></table></body></html>`);
+    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de estoque</title><style>@page{size:A4 landscape;margin:10mm}body{font-family:Arial,sans-serif;color:#34292d;font-size:9px}h1{color:#a3113a;margin:0}table{border-collapse:collapse;width:100%;margin-top:18px}th,td{border:1px solid #ddd;padding:4px;text-align:left;vertical-align:top}th{background:#f1e6e8;font-size:8px}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Imprimir / salvar em PDF</button><h1>Relatório de vacinas em estoque</h1><p>Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${filteredStock.length} registro(s)</p><table><thead><tr><th>Paciente/origem</th><th>CPF</th><th>Lote</th><th>Tipo</th><th>Médico</th><th>Tratamento</th><th>Fase</th><th>Frascos</th><th>Status</th><th>Entrega</th><th>Laboratório</th><th>Entrada</th><th>Reserva</th><th>Saída</th><th>Conferido por</th><th>Fórmula</th></tr></thead><tbody>${rows || "<tr><td colspan=\"16\">Nenhum registro no filtro atual.</td></tr>"}</tbody></table></body></html>`);
     reportWindow.document.close();
     reportWindow.focus();
   }

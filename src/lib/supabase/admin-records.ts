@@ -277,6 +277,7 @@ function methodForPatient(patient: DemoPatientRecord, methods: AdminTreatmentMet
   const label = (patient.acquisitionMethod ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   if (label.includes("recorrente")) return methods.find((method) => method.name === "Recorrente 1.0") ?? methods[0];
   if (label.includes("6 meses") || label.includes("tratamento de 6")) return methods.find((method) => method.name === "6 meses 1.0") ?? methods[0];
+  if (label.includes("metodo 1.1")) return methods.find((method) => method.name === "Método 1.1") ?? methods.find((method) => method.name === "Método 1.0") ?? methods[0];
   if (label.includes("metodo 1.0")) return methods.find((method) => method.name === "Método 1.0") ?? methods[0];
   return methods.find((method) => method.category === "Por frasco") ?? methods[0];
 }

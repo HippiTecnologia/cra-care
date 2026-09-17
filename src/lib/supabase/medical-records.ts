@@ -497,6 +497,23 @@ export async function updateMedicalPatientBasics(
   return mapMedicalPatient(data as unknown as MedicalPatientRow, doctor.fullName);
 }
 
+export async function updateMedicalPatientTreatmentDuration(
+  doctor: MedicalDoctorProfile,
+  patientId: string,
+  totalMonths: number,
+) {
+  const supabase = getSupabaseClient();
+  const { data: current, error: currentError } = await supabase.from("patients")
+    .select("treatment").eq("id", patientId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id).single();
+  if (currentError || !current) throw currentError ?? new Error("Paciente não encontrado.");
+  const treatment = { ...recordValue(current.treatment), totalMonths };
+  const { data, error } = await supabase.from("patients")
+    .update({ treatment, updated_at: new Date().toISOString() })
+    .eq("id", patientId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id).select("*").single();
+  if (error || !data) throw error ?? new Error("Não foi possível atualizar a duração do tratamento.");
+  return mapMedicalPatient(data as unknown as MedicalPatientRow, doctor.fullName);
+}
+
 export async function completeMedicalPatientTreatment(
   doctor: MedicalDoctorProfile,
   patientId: string,

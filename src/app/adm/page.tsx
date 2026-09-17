@@ -52,6 +52,14 @@ type InstallmentView = {
   invoice?: DemoInvoice;
 };
 
+type HonorariumForecast = {
+  id: string;
+  sale: AdminSaleSnapshot;
+  dueAt: string;
+  value: number;
+  rule: string;
+};
+
 const sections: Array<{ id: Section; icon: string; label: string }> = [
   { id: "dashboard", icon: "▦", label: "Dashboard" },
   { id: "relatorios", icon: "▤", label: "Relatórios" },
@@ -118,8 +126,8 @@ function addDays(value: string, days: number) {
 function commissionDate(payment?: PatientPaymentRecord) {
   if (!payment) return undefined;
   const method = payment.method.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  const isCreditCard = method.includes("cartao") && !method.includes("debito");
-  return isCreditCard ? addDays(payment.paidAt, 30) : payment.paidAt.slice(0, 10);
+  const isCreditOrAsaas = (method.includes("cartao") && !method.includes("debito")) || method.includes("asaas");
+  return isCreditOrAsaas ? addDays(payment.paidAt, 30) : payment.paidAt.slice(0, 10);
 }
 
 function bottleCountForSale(sale: AdminSaleSnapshot) {
@@ -129,6 +137,31 @@ function bottleCountForSale(sale: AdminSaleSnapshot) {
   if (normalized.includes("metodo 1.0") || normalized.includes("metodo 1.1")) return 2;
   if (normalized.includes("recorrente") || normalized.includes("6 meses") || normalized.includes("tratamento de 6")) return 3;
   return 1;
+}
+
+function normalizeFinancialText(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+function createHonorariumForecast(sales: AdminSaleSnapshot[]): HonorariumForecast[] {
+  return sales.filter((sale) => sale.status !== "cancelada").flatMap((sale) => {
+    const bottles = bottleCountForSale(sale);
+    const payment = normalizeFinancialText(sale.paymentMethod);
+    const method = normalizeFinancialText(sale.methodName);
+    const creditOrAsaas = payment.includes("asaas") || (payment.includes("cartao") && !payment.includes("debito"));
+    const cashLike = sale.condition === "À vista" || payment.includes("pix") || payment.includes("dinheiro") || payment.includes("debito");
+    const make = (value: number, offsets: number[], rule: string) => offsets.map((offset, index) => ({ id: `${sale.id}-forecast-${index + 1}`, sale, value, dueAt: addMonths(sale.contractedAt, offset), rule }));
+
+    // Regras confirmadas pela Secretaria: os valores programados são do repasse médico.
+    if (method.includes("metodo 1.0") || method.includes("metodo 1.1")) return make(54, creditOrAsaas ? [1, 2, 3, 4, 5, 6] : [0, 1, 2, 3, 4, 5], creditOrAsaas ? "Método 1.0/1.1 · crédito/Asaas · 6x R$ 54" : "Método 1.0/1.1 · dinheiro/Pix/débito · 6x R$ 54");
+    if (bottles === 2 && creditOrAsaas) return make(54, [1, 2, 3, 4, 5, 6], "2 frascos · crédito/Asaas · 6x R$ 54");
+    if (bottles === 2 && cashLike) return make(162, [0, 3], "2 frascos · dinheiro/Pix/débito · 2x R$ 162");
+    if (bottles === 3 && creditOrAsaas) return make(34, [1, 2, 3, 4, 5, 6], "3 frascos · crédito/Asaas · 6x R$ 34");
+    if (bottles === 3 && cashLike) return make(68, [0, 2, 4], "3 frascos · à vista · R$ 68 no mês e a cada 2 meses");
+
+    const dueAt = sale.firstPaymentDueAt ?? addMonths(sale.contractedAt, 1);
+    return [{ id: `${sale.id}-forecast-manual`, sale, value: bottles * (sale.commissionPerBottleSnapshot ?? COMMISSION_PER_BOTTLE), dueAt, rule: "Quantidade fora das regras automáticas · conferir valor manualmente" }];
+  });
 }
 
 function createInstallments(
@@ -264,6 +297,7 @@ export default function AdminPage() {
 
   const installments = useMemo(() => createInstallments(sales, patients, invoices, commissions), [commissions, invoices, patients, sales]);
   const activeSales = sales.filter((sale) => sale.status !== "cancelada");
+  const honorariumForecast = useMemo(() => createHonorariumForecast(sales), [sales]);
   const received = installments.reduce((sum, installment) => sum + installment.receivedValue, 0);
   const pending = installments.filter((installment) => installment.status === "Pendente" || installment.status === "Vencida").reduce((sum, installment) => sum + installment.scheduledValue, 0);
   const billed = activeSales.reduce((sum, sale) => sum + sale.contractedValue, 0);
@@ -559,7 +593,7 @@ export default function AdminPage() {
 
           {section === "relatorios" && <div className="mt-7 space-y-5"><Panel title="Central de relatórios" subtitle="Filtre, visualize e baixe os dados em CSV"><div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5"><Select label="Relatório" value={reportType} onChange={(value) => setReportType(value as ReportType)} options={reportTypes} /><Input label="Início" type="date" value={periodStart} onChange={setPeriodStart} /><Input label="Fim" type="date" value={periodEnd} onChange={setPeriodEnd} /><Select label="Médico" value={doctorFilter} onChange={setDoctorFilter} options={["Todos", ...doctors.map((doctor) => doctor.name)]} /><Select label="Status" value={statusFilter} onChange={setStatusFilter} options={["Todos", "ativa", "concluida", "cancelada"]} /><div className="sm:col-span-2 xl:col-span-4"><Input label="Paciente" value={patientFilter} onChange={setPatientFilter} placeholder="Nome ou CPF" /></div><button type="button" onClick={() => { if (!downloadCsv(`cra-care-${reportType.toLowerCase().replace(/\s/g, "-")}.csv`, reportRows)) setMessage("Nenhum dado encontrado para baixar."); }} className="self-end rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-bold text-white">↓ Baixar relatório</button></div></Panel><Panel title={`Visualização — ${reportType}`} subtitle={`${reportRows.length} registro(s)`}><ReportPreview rows={reportRows} /></Panel></div>}
 
-          {section === "financeiro" && <div className="mt-7 space-y-5"><div className="grid gap-4 sm:grid-cols-3"><Kpi label="Previsto" value={formatMoney(monthly.reduce((sum, item) => sum + item.expected, 0))} detail="Parcelas distribuídas por competência" tone="wine" /><Kpi label="Recebido" value={formatMoney(received)} detail="Por data efetiva de pagamento" tone="green" /><Kpi label="Pendente" value={formatMoney(pending)} detail="A receber" tone="gold" /></div><Panel title="Controle financeiro mensal" subtitle="A primeira parcela entra no mês seguinte ao fechamento; as demais seguem mês a mês até a quitação."><div className="mt-5 overflow-x-auto"><table className={tableClass}><thead><tr><Th>Mês</Th><Th>Previsto</Th><Th>Recebido</Th><Th>Pendente</Th><Th>Honorários</Th><Th>Resultado após honorários</Th></tr></thead><tbody>{monthly.map((item) => <tr key={item.month}><Td strong>{monthLabel(item.month)}</Td><Td>{formatMoney(item.expected)}</Td><Td tone="green">{formatMoney(item.received)}</Td><Td tone="gold">{formatMoney(item.pending)}</Td><Td>{formatMoney(item.commissions)}</Td><Td strong>{formatMoney(item.received - item.commissions)}</Td></tr>)}</tbody></table></div></Panel><Panel title="Previsão de parcelas e encerramento" subtitle="Cada contrato mostra automaticamente as parcelas futuras, a data prevista de cada entrada e a última parcela que encerra a cobrança."><InstallmentTable installments={installments.filter((item) => item.status !== "Cancelada")} showCommission openInvoice={openInvoice} /></Panel></div>}
+          {section === "financeiro" && <div className="mt-7 space-y-5"><div className="grid gap-4 sm:grid-cols-3"><Kpi label="Previsto" value={formatMoney(monthly.reduce((sum, item) => sum + item.expected, 0))} detail="Parcelas distribuídas por competência" tone="wine" /><Kpi label="Recebido" value={formatMoney(received)} detail="Por data efetiva de pagamento" tone="green" /><Kpi label="Pendente" value={formatMoney(pending)} detail="A receber" tone="gold" /></div><Panel title="Controle financeiro mensal" subtitle="A primeira parcela entra no mês seguinte ao fechamento; as demais seguem mês a mês até a quitação."><div className="mt-5 overflow-x-auto"><table className={tableClass}><thead><tr><Th>Mês</Th><Th>Previsto</Th><Th>Recebido</Th><Th>Pendente</Th><Th>Honorários</Th><Th>Resultado após honorários</Th></tr></thead><tbody>{monthly.map((item) => <tr key={item.month}><Td strong>{monthLabel(item.month)}</Td><Td>{formatMoney(item.expected)}</Td><Td tone="green">{formatMoney(item.received)}</Td><Td tone="gold">{formatMoney(item.pending)}</Td><Td>{formatMoney(item.commissions)}</Td><Td strong>{formatMoney(item.received - item.commissions)}</Td></tr>)}</tbody></table></div></Panel><Panel title="Previsão de parcelas e encerramento" subtitle="Cada contrato mostra automaticamente as parcelas futuras, a data prevista de cada entrada e a última parcela que encerra a cobrança."><InstallmentTable installments={installments.filter((item) => item.status !== "Cancelada")} showCommission openInvoice={openInvoice} /></Panel><Panel title="Previsão de honorários por médico" subtitle="Repasse atual e futuro conforme quantidade de frascos e forma de pagamento."><HonorariumForecastTable rows={honorariumForecast} /></Panel></div>}
 
           {section === "custos" && <div ref={costFormRef} className="mt-7 space-y-5 scroll-mt-6"><div className="grid gap-4 sm:grid-cols-3"><Kpi label="Custo-base ativo" value={formatMoney(totalFixedCosts)} detail="Soma por tratamento" tone="wine" /><Kpi label="Itens ativos" value={String(costs.filter((cost) => cost.active).length)} detail="Custos na calculadora" tone="green" /><Kpi label="Margem estimada" value={activeSales.length ? formatMoney(billed - totalFixedCosts * activeSales.length) : formatMoney(0)} detail="Antes de honorários e impostos" tone="blue" /></div><Panel title={costDraft.id ? "Editar custo" : "Cadastrar custo fixo"} subtitle="Somente o ADM pode alterar estes valores"><div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Input label="Descrição" value={costDraft.description} onChange={(value) => setCostDraft((current) => ({ ...current, description: value }))} /><Input label="Categoria" value={costDraft.category} onChange={(value) => setCostDraft((current) => ({ ...current, category: value }))} /><Input label="Valor (R$)" type="number" value={String(costDraft.amount)} onChange={(value) => setCostDraft((current) => ({ ...current, amount: Number(value) }))} /><Select label="Situação" value={costDraft.active ? "Ativo" : "Inativo"} onChange={(value) => setCostDraft((current) => ({ ...current, active: value === "Ativo" }))} options={["Ativo", "Inativo"]} /><div className="flex gap-2 xl:col-span-4"><button type="button" onClick={submitCost} className="rounded-xl bg-[#a3113a] px-5 py-3 text-sm font-bold text-white">{costDraft.id ? "Salvar alterações" : "Cadastrar custo"}</button>{costDraft.id && <button type="button" onClick={() => { setCostDraft(blankCost()); setMessage("Edição cancelada."); }} className="rounded-xl border border-[#e5d9d4] px-5 py-3 text-sm font-bold text-[#716569]">Cancelar edição</button>}</div></div></Panel><Panel title="Custos cadastrados" subtitle="Base da calculadora interna"><div className="mt-4 grid gap-3 lg:grid-cols-2">{costs.map((cost) => <article key={cost.id} className="flex items-center justify-between gap-4 rounded-2xl bg-[#fbf7f5] p-4"><div><p className="font-bold">{cost.description}</p><p className="mt-1 text-xs text-[#817578]">{cost.category} · atualizado em {formatDate(cost.updatedAt, true)}</p><span className={`mt-2 inline-flex rounded-full px-2 py-1 text-[10px] font-bold ${cost.active ? "bg-[#edf8f3] text-[#187157]" : "bg-[#eee9e7] text-[#716569]"}`}>{cost.active ? "Ativo" : "Inativo"}</span></div><div className="text-right"><p className="font-bold text-[#a3113a]">{formatMoney(cost.amount)}</p><div className="mt-2 flex justify-end gap-3"><button type="button" onClick={() => editCost(cost)} className="text-xs font-bold text-[#a3113a]">Editar</button><button type="button" onClick={() => deleteCost(cost)} className="text-xs font-bold text-[#a3113a]">Remover</button></div></div></article>)}</div></Panel></div>}
 
@@ -602,6 +636,17 @@ function buildReportRows(type: ReportType, sales: AdminSaleSnapshot[], installme
 }
 
 const tableClass = "w-full min-w-[760px] text-left text-sm";
+function HonorariumForecastTable({ rows }: { rows: HonorariumForecast[] }) {
+  const grouped = Array.from(rows.reduce((map, item) => {
+    const key = `${item.sale.doctor}::${monthKey(item.dueAt)}`;
+    const current = map.get(key) ?? { doctor: item.sale.doctor, month: monthKey(item.dueAt), total: 0, entries: [] as HonorariumForecast[] };
+    current.total += item.value;
+    current.entries.push(item);
+    map.set(key, current);
+    return map;
+  }, new Map<string, { doctor: string; month: string; total: number; entries: HonorariumForecast[] }>() ).values()).sort((first, second) => first.month.localeCompare(second.month) || first.doctor.localeCompare(second.doctor));
+  return <div className="mt-4 space-y-3">{grouped.map((group) => <article key={`${group.doctor}-${group.month}`} className="rounded-2xl border border-[#eee5e0] bg-[#fbf7f5] p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wide text-[#817578]">{monthLabel(group.month)}</p><h3 className="mt-1 font-bold text-[#433438]">{group.doctor}</h3></div><p className="text-xl font-bold text-[#a3113a]">{formatMoney(group.total)}</p></div><div className="mt-3 space-y-2 text-sm">{group.entries.map((entry) => <div key={entry.id} className="flex flex-wrap justify-between gap-2 border-t border-[#ece2dd] pt-2"><span>{entry.sale.patientName} <small className="text-[#817578]">· {entry.rule}</small></span><strong>{formatMoney(entry.value)}</strong></div>)}</div></article>)}{!grouped.length && <p className="py-8 text-center text-sm text-[#817578]">Nenhum honorário previsto.</p>}</div>;
+}
 function Panel({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) { return <section className="rounded-3xl border border-[#ebe2de] bg-white p-5 shadow-sm sm:p-6"><h2 className="text-lg font-bold">{title}</h2>{subtitle && <p className="mt-1 text-xs text-[#817578]">{subtitle}</p>}{children}</section>; }
 function Kpi({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: "wine" | "green" | "gold" | "blue" | "red" | "purple" | "gray" }) { const colors = { wine: "text-[#a3113a]", green: "text-[#187157]", gold: "text-[#966419]", blue: "text-[#3f729b]", red: "text-[#bd4b48]", purple: "text-[#6a54a3]", gray: "text-[#62585b]" }; return <article className="rounded-2xl border border-[#ebe2de] bg-white p-5 shadow-sm"><p className="text-xs font-semibold text-[#817578]">{label}</p><p className={`mt-3 text-2xl font-bold ${colors[tone]}`}>{value}</p><p className="mt-2 text-[11px] text-[#978c8f]">{detail}</p></article>; }
 function Mini({ label, value }: { label: string; value: string }) { return <div className="rounded-xl bg-[#fbf7f5] p-3"><p className="text-[10px] text-[#817578]">{label}</p><p className="mt-1 text-sm font-bold text-[#86203b]">{value}</p></div>; }
