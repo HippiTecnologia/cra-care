@@ -112,7 +112,7 @@ export default function MedicalPatientPage() {
   const [formulaPercentage, setFormulaPercentage] = useState("");
   const [formulas, setFormulas] = useState<PrescriptionFormula[]>([]);
   const [phase, setPhase] = useState(treatmentPhases[0]);
-  const [bottles, setBottles] = useState(1);
+  const [bottlesByTreatment, setBottlesByTreatment] = useState<Record<VaccineType, number>>({ rinite: 1, imunobacteriana: 1 });
   const [durationMonths, setDurationMonths] = useState(36);
   const [drops, setDrops] = useState(6);
   const [frequency, setFrequency] = useState("3 vezes por semana");
@@ -203,6 +203,8 @@ export default function MedicalPatientPage() {
   const currentPosology = customPosology && posology.trim()
     ? posology.trim()
     : generatedPosology;
+  const bottles = bottlesByTreatment[vaccineType];
+  const setBottles = (value: number) => setBottlesByTreatment((current) => ({ ...current, [vaccineType]: Math.max(1, value || 1) }));
 
   function addFormula() {
     const remainingPercentage = Math.max(0, 100 - totalPercentage);
@@ -293,8 +295,8 @@ export default function MedicalPatientPage() {
       doctor: doctor.fullName,
       doctorCrm: doctor.crm,
       createdAt: new Date().toISOString(),
-      treatment: vaccineType === "imunobacteriana" ? "Vacina Imunobacteriana" : patient.treatment ?? "Vacina Rinite",
-      phase,
+      treatment: vaccineType === "imunobacteriana" ? "Vacina Imunobacteriana" : "Vacina Rinite",
+      phase: vaccineType === "imunobacteriana" ? "" : phase,
       bottles,
       drops,
       frequency,
@@ -311,7 +313,7 @@ export default function MedicalPatientPage() {
       setPrescriptions((current) => [saved, ...current]);
       setPatient((current) => current ? {
         ...current,
-        phase,
+        phase: vaccineType === "imunobacteriana" ? undefined : phase,
         drops,
         treatment: prescription.treatment,
         status: "com-pedido",
@@ -462,8 +464,8 @@ export default function MedicalPatientPage() {
     doctor: doctor?.fullName ?? "Médico responsável",
     doctorCrm: doctor?.crm ?? "",
     createdAt: new Date().toISOString(),
-    treatment: patient.treatment ?? "Imunoterapia para rinite",
-    phase,
+    treatment: vaccineType === "imunobacteriana" ? "Vacina Imunobacteriana" : "Vacina Rinite",
+    phase: vaccineType === "imunobacteriana" ? "" : phase,
     bottles,
     drops,
     frequency,
@@ -534,7 +536,7 @@ export default function MedicalPatientPage() {
             <div><strong>Médico:</strong> ${escapeHtml(preview.doctor)}</div>
           </div>
           <h2>RECEITA</h2>
-          <div class="section"><div class="section-title">${escapeHtml(preview.treatment.toUpperCase())}</div><p><strong>Frascos:</strong> ${escapeHtml(preview.bottles)}</p><p><strong>Fase:</strong> ${escapeHtml(preview.phase)}</p></div>
+          <div class="section"><div class="section-title">${escapeHtml(preview.treatment.toUpperCase())}</div><p><strong>Frascos:</strong> ${escapeHtml(preview.bottles)}</p>${preview.phase ? `<p><strong>Fase:</strong> ${escapeHtml(preview.phase)}</p>` : ""}</div>
           <div class="section"><div class="section-title">Composição</div><table><thead><tr><th>Componente</th><th>%</th></tr></thead><tbody>${formulaRows}</tbody></table></div>
           <div class="section"><div class="section-title">Posologia</div><p>${escapeHtml(preview.posology)}</p></div>
           ${preview.notes ? `<div class="section"><div class="section-title">Observações</div><p>${escapeHtml(preview.notes)}</p></div>` : ""}
@@ -786,13 +788,13 @@ export default function MedicalPatientPage() {
               </div>
 
               <div className="border-b border-[#f0e8e4] py-6">
-                <h3 className="text-base font-bold text-[#a3113a]">2. Fase e frascos</h3>
-                <div className="mt-4 grid gap-4 sm:grid-cols-3">
-                  <label className="text-sm text-[#544449]">Fase
+                <h3 className="text-base font-bold text-[#a3113a]">2. {vaccineType === "rinite" ? "Fase e frascos" : "Frascos"}</h3>
+                <div className={`mt-4 grid gap-4 ${vaccineType === "rinite" ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+                  {vaccineType === "rinite" && <label className="text-sm text-[#544449]">Fase
                     <select value={phase} onChange={(event) => { setPhase(event.target.value); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]">
                       {treatmentPhases.map((item) => <option key={item} value={item}>{item}</option>)}
                     </select>
-                  </label>
+                  </label>}
                   <label className="text-sm text-[#544449]">Frascos
                     <input type="number" min={1} value={bottles} onChange={(event) => { setBottles(Number(event.target.value)); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" />
                   </label>
@@ -878,7 +880,7 @@ export default function MedicalPatientPage() {
                 <p className="text-sm font-bold uppercase text-[#433438]">{preview.treatment}</p>
                 <div className="mt-5 space-y-2 text-sm text-[#5a4e51]">
                   <p><strong>Frascos:</strong> {preview.bottles}</p>
-                  <p><strong>Fase:</strong> {preview.phase}</p>
+                  {preview.phase && <p><strong>Fase:</strong> {preview.phase}</p>}
                 </div>
 
                 <div className="mt-6">

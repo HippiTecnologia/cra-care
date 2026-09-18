@@ -11,6 +11,7 @@ import {
   loadNursingWorkspace,
   type NursingPatient,
   type NursingProfile,
+  updateNursingReport,
 } from "../../lib/supabase/nursing-records";
 import { patchSubstanceCode, patchSubstanceDetails } from "../../lib/patch-substances";
 
@@ -85,6 +86,7 @@ export default function NursingPage() {
   const [patchResponsible, setPatchResponsible] = useState("Patricia Martinski");
   const [prickResults, setPrickResults] = useState<Record<string, PrickResult>>({});
   const [patchResults, setPatchResults] = useState<Record<string, PatchResult>>({});
+  const [editingPatchReportId, setEditingPatchReportId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
   const [reportDate, setReportDate] = useState(() => new Date().toISOString().slice(0, 10));
 
@@ -107,14 +109,15 @@ export default function NursingPage() {
       const matchesSearch = !query || patientName.toLocaleLowerCase("pt-BR").includes(query) || patientCpf.replace(/\D/g, "").includes(query.replace(/\D/g, ""));
       const matchesPatient = !reportPatientFilter || patientName === reportPatientFilter;
       const reportDate = (typeof report.content.examDate === "string" ? report.content.examDate : report.created_at).slice(0, 10);
-      return matchesSearch && matchesPatient && (!reportDateFilter || reportDate === reportDateFilter);
+      return report.content.status !== "em_andamento" && matchesSearch && matchesPatient && (!reportDateFilter || reportDate === reportDateFilter);
     });
   }, [rawReports, reportDateFilter, reportPatientFilter, reportSearchQuery]);
   const allReports = filteredReports;
 
   async function openPatient(patient: NursingPatient, destination: Section = "patients") {
     setSelected(patient);
-    setReports(await loadNursingReportsForPatient(patient.id) as SavedReport[]);
+    const patientReports = await loadNursingReportsForPatient(patient.id) as SavedReport[];
+    setReports(patientReports.filter((report) => report.content.status !== "em_andamento"));
     setSection(destination);
   }
 
@@ -147,33 +150,53 @@ export default function NursingPage() {
   }
 
   function openReport() {
-    setReportType("prick_test"); setPrickResults({}); setPatchResults(createInitialPatchResults()); setNotes(""); setReportDate(new Date().toISOString().slice(0, 10)); setModal("report");
+    setReportType("prick_test"); setPrickResults({}); setPatchResults(createInitialPatchResults()); setEditingPatchReportId(null); setNotes(""); setReportDate(new Date().toISOString().slice(0, 10)); setModal("report");
   }
 
   async function saveReport() {
     if (!profile || !selected) return;
-    await createNursingReport(profile, {
+    const isPatchInProgress = reportType === "patch_test" && !editingPatchReportId;
+    const content = {
+      status: isPatchInProgress ? "em_andamento" : "concluido",
       patientId: selected.id,
-      doctorId: selected.doctorId,
-      reportType,
-      content: {
-        prickResults: reportType === "prick_test" ? prickResults : undefined,
-        results: reportType === "patch_test" ? patchResults : undefined,
-        notes,
-        nurseName: profile.fullName,
-        patientName: selected.name,
-        patientCpf: selected.cpf,
-        examResponsible: reportType === "prick_test" ? "Dr. Sergio Fabricio Maniglia" : patchResponsible,
-        examDate: reportDate,
-        registeredAt: new Date().toISOString(),
-      },
-    });
+      prickResults: reportType === "prick_test" ? prickResults : undefined,
+      results: reportType === "patch_test" ? patchResults : undefined,
+      notes,
+      nurseName: profile.fullName,
+      patientName: selected.name,
+      patientCpf: selected.cpf,
+      examResponsible: reportType === "prick_test" ? "Dr. Sergio Fabricio Maniglia" : patchResponsible,
+      examDate: reportDate,
+      registeredAt: new Date().toISOString(),
+    };
+    if (editingPatchReportId) {
+      await updateNursingReport(profile, editingPatchReportId, content);
+    } else {
+      await createNursingReport(profile, { patientId: selected.id, doctorId: selected.doctorId, reportType, content });
+    }
     const updatedReports = await loadNursingReportsForPatient(selected.id) as SavedReport[];
-    setReports(updatedReports);
+    setReports(updatedReports.filter((report) => report.content.status !== "em_andamento"));
     await reload();
     setModal(null);
     setSection("patients");
-    setMessage("Laudo salvo no histórico da paciente.");
+    setMessage(isPatchInProgress ? "1ª leitura salva. O laudo permanece em andamento para a 2ª leitura." : "Laudo salvo no histórico da paciente.");
+  }
+
+  async function continuePatchReport(report: SavedReport) {
+    if (!profile) return;
+    const patientName = String(report.content.patientName ?? "");
+    const patientCpf = String(report.content.patientCpf ?? "");
+    const patient = patients.find((candidate) => candidate.id === report.patient_id) ?? await findNursingPatient(profile, patientCpf || patientName);
+    if (!patient) { setMessage("Não foi possível localizar a paciente deste laudo."); return; }
+    setPatients((current) => current.some((candidate) => candidate.id === patient.id) ? current : [patient, ...current]);
+    setSelected(patient);
+    setReportType("patch_test");
+    setPatchResults({ ...createInitialPatchResults(), ...((report.content.results ?? {}) as Record<string, PatchResult>) });
+    setPatchResponsible(String(report.content.examResponsible ?? "Patricia Martinski"));
+    setNotes(String(report.content.notes ?? ""));
+    setReportDate(String(report.content.examDate ?? report.created_at).slice(0, 10));
+    setEditingPatchReportId(report.id);
+    setModal("report");
   }
 
   function printPrickReport(report: SavedReport, openPrintDialog = true) {
@@ -197,6 +220,7 @@ export default function NursingPage() {
     const printable = window.open("", "_blank");
     if (!printable) { setMessage("Permita a abertura de janelas para gerar o PDF."); return; }
     printable.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"/><title>Laudo Prick - ${escapeHtml(patientName)}</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:10px}.logo{display:inline-block;border-left:6px solid #a71437;padding-left:8px;font-weight:800;font-size:18px;line-height:15px;color:#7d2435}.logo small{display:block;font-size:7px;letter-spacing:1px;color:#333}.patient{margin:9px 0 13px;font-size:11px;line-height:17px}.head{background:#aeb5be;font-weight:700}table{width:100%;border-collapse:collapse}th{background:#aeb5be;border:1px solid #8e959d;padding:6px;text-align:center;font-size:10px}td{border-bottom:1px solid #e3e5e8;padding:4px 6px;text-align:center}td:nth-child(2){text-align:left}.number{width:34px}.category td{background:#d3d6da;text-align:left;font-weight:700;padding:4px 8px}.battery{margin-top:12px;border:1px solid #bac0c7;border-radius:3px;overflow:hidden}.battery h2{font-size:12px;margin:0;padding:5px 18px;background:#d3d6da;border-top:2px solid #687380}.battery .category:first-child td{background:#d3d6da}.legend{margin-top:16px;font-size:10px;line-height:15px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:90px;margin-top:72px;text-align:center;font-size:10px}.line{border-top:1px solid #111;padding-top:4px;margin:auto;width:220px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="logo">HOSPITAL<br/>IPO<small>INSTITUTO PARANAENSE DE OTORRINOLARINGOLOGIA</small></div><div class="patient">Paciente: <strong>${escapeHtml(patientName)}</strong><br/>Data: <strong>${formattedDate}</strong></div>${batteries}<div class="legend"><strong>Legenda:</strong><br/>- = Sem reação<br/>+ = Reação fraca<br/>++ = Reação moderada<br/>+++ = Reação forte<br/>++++ = Reação muito forte<br/>XXXX = Teste inválido por dermatografismo/impossibilidade técnica.</div><div class="signatures"><div><div class="line">${nurse}<br/>Enfermagem</div></div><div><div class="line">Dr. Sérgio Maniglia<br/>CRM 20.762</div></div></div>${openPrintDialog ? "<script>window.onload=()=>window.print()<\\/script>" : ""}</body></html>`);
+    printable.document.body.innerHTML = printable.document.body.innerHTML.replace("HOSPITAL<br>IPO<small>INSTITUTO PARANAENSE DE OTORRINOLARINGOLOGIA</small>", "CRA CARE<small>CENTRO DE RINITE E ALERGIA</small>");
     printable.document.head.insertAdjacentHTML("beforeend", "<style>@page{size:A4 portrait;margin:9mm}body{font-size:8px}.battery{margin-top:7px}.battery h2{font-size:9px;padding:3px 8px}table{table-layout:fixed}th{font-size:7px;padding:3px 1px}td{font-size:7px;padding:2px 1px;word-break:break-word}.number{width:22px}.signatures{gap:30px;margin-top:32px;font-size:8px}.line{width:170px}</style>");
     printable.document.close();
   }
@@ -222,6 +246,7 @@ export default function NursingPage() {
       {message && <p className="mt-5 rounded-xl bg-[#edf8f3] p-4 text-sm">{message}</p>}
       {section === "patients" && <p className="mt-4 text-sm text-[#817578]">Você pode localizar a paciente pelo nome ou pelo CPF.</p>}
       {section === "reports" && <div className="mt-6 rounded-2xl bg-white p-4"><input value={reportSearchQuery} onChange={(event) => setReportSearchQuery(event.target.value)} placeholder="Pesquisar laudo pelo nome ou CPF do paciente" className="w-full rounded-xl border p-3" /></div>}
+      {section === "reports" && rawReports.some((report) => report.report_type === "patch_test" && report.content.status === "em_andamento") && <section className="mt-5 rounded-2xl border border-[#f1d5dc] bg-[#fff8fa] p-5"><h2 className="text-lg font-bold text-[#a3113a]">Laudos em andamento</h2><p className="mt-1 text-sm text-[#817578]">Laudos Patch aguardando a 2ª leitura.</p><div className="mt-4 space-y-3">{rawReports.filter((report) => report.report_type === "patch_test" && report.content.status === "em_andamento").map((report) => <article key={report.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4"><div><strong>{String(report.content.patientName ?? "Paciente")}</strong><p className="mt-1 text-sm text-[#817578]">1ª leitura: {new Date(String(report.content.examDate ?? report.created_at)).toLocaleDateString("pt-BR")}</p></div><button type="button" onClick={() => void continuePatchReport(report)} className="rounded-xl bg-[#a3113a] px-4 py-2 text-sm font-bold text-white">Continuar 2ª leitura</button></article>)}</div></section>}
       {section === "patients" ? <><div className="mt-7 flex gap-2 rounded-2xl bg-white p-4"><input value={searchCpf} onChange={(e) => setSearchCpf(e.target.value)} placeholder="Pesquisar paciente pelo nome ou CPF" className="flex-1 rounded-xl border p-3"/><button onClick={() => void searchPatient()} className="rounded-xl border px-5 font-bold text-[#a3113a]">Buscar</button></div>{selected && <article className="mt-5 rounded-3xl border border-[#eadfd9] bg-white p-6"><h2 className="text-xl font-bold">{selected.name}</h2><p className="mt-1 text-sm text-[#817578]">CPF {selected.cpf} · Nascimento {selected.birthDate}</p><div className="mt-5 flex items-center justify-between"><strong>Histórico de laudos ({reportCount})</strong><button onClick={openReport} className="rounded-xl bg-[#a3113a] px-4 py-2 text-sm font-bold text-white">+ Novo laudo</button></div>{reports.map((report) => <article key={report.id} className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#fbf5f2] p-4 text-sm"><span><strong>{report.report_type === "prick_test" ? "Prick Test" : "Patch Test"}</strong> · {new Date(report.created_at).toLocaleDateString("pt-BR")}</span><span className="flex gap-2"><button type="button" onClick={() => report.report_type === "prick_test" ? printPrickReport(report, false) : printPatchReport(report, false)} className="rounded-lg border border-[#d8cbc7] bg-white px-3 py-2 text-xs font-bold text-[#a3113a]">Visualizar</button><button type="button" onClick={() => report.report_type === "prick_test" ? printPrickReport(report) : printPatchReport(report)} className="rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-bold text-white">Gerar PDF / Imprimir</button></span></article>)}</article>}<div className="mt-5 space-y-3">{patients.map((patient) => <button key={patient.id} onClick={() => void openPatient(patient)} className="block w-full rounded-2xl bg-white p-5 text-left shadow-sm"><strong>{patient.name}</strong><span className="ml-3 text-sm text-[#817578]">CPF {patient.cpf}</span></button>)}</div></> : <><div className="mt-7 flex flex-wrap gap-3"><select value={reportPatientFilter} onChange={(event) => setReportPatientFilter(event.target.value)} className="rounded-xl border p-3"><option value="">Todos os pacientes</option>{[...new Set(allReports.map((report) => String(report.content.patientName ?? "Paciente")))].sort().map((patientName) => <option key={patientName} value={patientName}>{patientName}</option>)}</select><input type="date" value={reportDateFilter} onChange={(event) => setReportDateFilter(event.target.value)} aria-label="Filtrar pela data do laudo" className="rounded-xl border p-3" /></div><div className="mt-5"><h2 className="text-xl font-bold">Histórico de laudos</h2><p className="mt-1 text-sm text-[#817578]">Todos os laudos já preenchidos por você permanecem disponíveis aqui.</p><div className="mt-4 space-y-3">{allReports.filter((report) => (!reportPatientFilter || String(report.content.patientName ?? "Paciente") === reportPatientFilter) && (!reportDateFilter || (typeof report.content.examDate === "string" ? report.content.examDate : report.created_at).slice(0, 10) === reportDateFilter)).map((report) => <article key={report.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-5"><div><strong>{report.report_type === "prick_test" ? "Laudo Prick" : "Laudo Patch"}</strong><p className="mt-1 text-sm font-medium text-[#544449]">{String(report.content.patientName ?? "Paciente")}</p><p className="text-sm text-[#817578]">{new Date(report.created_at).toLocaleDateString("pt-BR")}</p></div><span className="flex gap-2"><button type="button" onClick={() => report.report_type === "prick_test" ? printPrickReport(report, false) : printPatchReport(report, false)} className="rounded-lg border border-[#d8cbc7] bg-white px-3 py-2 text-xs font-bold text-[#a3113a]">Visualizar</button><button type="button" onClick={() => report.report_type === "prick_test" ? printPrickReport(report) : printPatchReport(report)} className="rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-bold text-white">Gerar PDF / Imprimir</button></span></article>)}</div></div></>}
     </section>
   </div>

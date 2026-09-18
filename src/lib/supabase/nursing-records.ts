@@ -38,6 +38,15 @@ export async function createNursingReport(profile: NursingProfile, input: { pati
   if (error) throw error;
 }
 
+export async function updateNursingReport(profile: NursingProfile, reportId: string, content: Record<string, unknown>) {
+  const { error } = await (getSupabaseClient().from("nursing_reports") as any)
+    .update({ content })
+    .eq("id", reportId)
+    .eq("clinic_id", profile.clinicId)
+    .eq("nurse_profile_id", profile.id);
+  if (error) throw error;
+}
+
 export async function findNursingPatientByCpf(profile: NursingProfile, cpf: string): Promise<NursingPatient | null> {
   const wantedCpf = cpf.replace(/\D/g, "");
   const { data: rows, error } = await (getSupabaseClient().from("patients") as any).select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)").eq("clinic_id", profile.clinicId);
