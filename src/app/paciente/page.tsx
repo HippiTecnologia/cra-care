@@ -586,18 +586,30 @@ export default function PatientPortalPage() {
     }
 
     let notificationPermission = permission;
-    if (reminderDraft.enabled && "Notification" in window && Notification.permission === "default") {
-      notificationPermission = await Notification.requestPermission();
-      setPermission(notificationPermission);
-    }
+    if (reminderDraft.enabled) {
+      if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+        setMessage("Este navegador não permite notificações. Abra o CRA Care pelo navegador normal ou pelo ícone instalado no celular.");
+        return;
+      }
+      if (Notification.permission === "default") {
+        notificationPermission = await Notification.requestPermission();
+        setPermission(notificationPermission);
+      }
+      if (notificationPermission !== "granted") {
+        setMessage("Permita as notificações nas configurações do navegador para ativar os avisos no celular.");
+        return;
+      }
 
-    if (reminderDraft.enabled && notificationPermission === "granted") {
       try {
         const publicKey = process.env.NEXT_PUBLIC_WEB_PUSH_PUBLIC_KEY;
         if (!publicKey || publicKey === "generate-a-vapid-public-key") throw new Error("As notificações ainda estão sendo configuradas.");
         const padding = "=".repeat((4 - (publicKey.length % 4)) % 4);
         const bytes = Uint8Array.from(atob((publicKey + padding).replace(/-/g, "+").replace(/_/g, "/")), (character) => character.charCodeAt(0));
         const registration = await navigator.serviceWorker.register("/cra-care-push-sw.js");
+        // A chave VAPID pode ser renovada pela clínica. Nesse caso, o navegador
+        // mantém a inscrição antiga e impede a criação da nova até removê-la.
+        const previousSubscription = await registration.pushManager.getSubscription();
+        if (previousSubscription) await previousSubscription.unsubscribe();
         const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
         const { data: { session } } = await getSupabaseClient().auth.getSession();
         const response = await fetch("/api/push/subscription", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` }, body: JSON.stringify(subscription.toJSON()) });

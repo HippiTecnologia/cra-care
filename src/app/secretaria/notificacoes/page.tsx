@@ -76,7 +76,7 @@ export default function SecretariaNotificationsPage() {
       setTitle("");
       setText("");
       setRecipient("todos");
-      setMessage(`Notificação enviada para ${targetIds.length === 1 ? "o paciente selecionado" : `${targetIds.length} pacientes`}${pushResult.sent ? ` · ${pushResult.sent} dispositivo(s) avisado(s) no celular.` : ""}`);
+      setMessage(`Notificação enviada para ${targetIds.length === 1 ? "o paciente selecionado" : `${targetIds.length} pacientes`}${pushResult.sent ? ` · ${pushResult.sent} dispositivo(s) avisado(s) no celular.` : " · O aviso ficou no sino; o paciente ainda não habilitou o celular para receber push."}`);
       setError("");
       await load();
     } catch (cause) {
