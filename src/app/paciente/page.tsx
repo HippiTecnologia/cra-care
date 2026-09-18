@@ -585,15 +585,33 @@ export default function PatientPortalPage() {
       return;
     }
 
+    let notificationPermission = permission;
     if (reminderDraft.enabled && "Notification" in window && Notification.permission === "default") {
-      const result = await Notification.requestPermission();
-      setPermission(result);
+      notificationPermission = await Notification.requestPermission();
+      setPermission(notificationPermission);
+    }
+
+    if (reminderDraft.enabled && notificationPermission === "granted") {
+      try {
+        const publicKey = process.env.NEXT_PUBLIC_WEB_PUSH_PUBLIC_KEY;
+        if (!publicKey || publicKey === "generate-a-vapid-public-key") throw new Error("As notificações ainda estão sendo configuradas.");
+        const padding = "=".repeat((4 - (publicKey.length % 4)) % 4);
+        const bytes = Uint8Array.from(atob((publicKey + padding).replace(/-/g, "+").replace(/_/g, "/")), (character) => character.charCodeAt(0));
+        const registration = await navigator.serviceWorker.register("/cra-care-push-sw.js");
+        const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+        const { data: { session } } = await getSupabaseClient().auth.getSession();
+        const response = await fetch("/api/push/subscription", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` }, body: JSON.stringify(subscription.toJSON()) });
+        if (!response.ok) throw new Error("Não foi possível autorizar este dispositivo.");
+      } catch (cause) {
+        setMessage(cause instanceof Error ? cause.message : "Não foi possível ativar as notificações neste dispositivo.");
+        return;
+      }
     }
 
     updatePortal({ ...portal, reminders: reminderDraft });
     setMessage(
       reminderDraft.enabled
-        ? "Lembretes salvos! Seus dias e horário de tratamento foram atualizados."
+        ? "Lembretes e notificações no celular ativados neste dispositivo."
         : "Lembretes desativados. Você pode reativá-los quando quiser.",
     );
   }

@@ -11,6 +11,7 @@ import {
   type SecretaryContext,
 } from "../../../lib/supabase/secretary-records";
 import type { DemoPatientRecord } from "../../medico/patient-store";
+import { getSupabaseClient } from "../../../lib/supabase/client";
 
 const icons = ["📣", "💊", "📅", "⚠️", "✅", "💗"];
 
@@ -65,10 +66,17 @@ export default function SecretariaNotificationsPage() {
     setSaving(true);
     try {
       await createSecretaryNotification(context, targetIds, { icon, title, text });
+      const { data: { session } } = await getSupabaseClient().auth.getSession();
+      const pushResponse = await fetch("/api/push/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` },
+        body: JSON.stringify({ patientIds: targetIds, icon, title, text }),
+      });
+      const pushResult = await pushResponse.json().catch(() => ({ sent: 0 }));
       setTitle("");
       setText("");
       setRecipient("todos");
-      setMessage(`Notificação enviada para ${targetIds.length === 1 ? "o paciente selecionado" : `${targetIds.length} pacientes`}.`);
+      setMessage(`Notificação enviada para ${targetIds.length === 1 ? "o paciente selecionado" : `${targetIds.length} pacientes`}${pushResult.sent ? ` · ${pushResult.sent} dispositivo(s) avisado(s) no celular.` : ""}`);
       setError("");
       await load();
     } catch (cause) {
