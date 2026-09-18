@@ -368,7 +368,8 @@ export default function PatientPortalPage() {
       return;
     }
 
-    const checkReminder = () => {
+    let sendingReminder = false;
+    const checkReminder = async () => {
       const current = new Date();
       const time = `${String(current.getHours()).padStart(2, "0")}:${String(current.getMinutes()).padStart(2, "0")}`;
       const notifiedKey = `cra-care-reminder-${patient.id}-${dateKey(current)}-${time}`;
@@ -376,19 +377,29 @@ export default function PatientPortalPage() {
       if (
         !portal.reminders.weekdays.includes(current.getDay()) ||
         portal.reminders.time !== time ||
-        window.sessionStorage.getItem(notifiedKey)
+        window.sessionStorage.getItem(notifiedKey) ||
+        sendingReminder
       ) {
         return;
       }
 
-      new Notification("CRA Care · Hora do seu tratamento", {
-        body: `Olá, ${patient.name.split(" ")[0]}! Este é um lembrete gentil para registrar o uso do seu frasco.`,
-      });
-      window.sessionStorage.setItem(notifiedKey, "sent");
+      sendingReminder = true;
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        await registration.showNotification("CRA Care · Hora do seu tratamento", {
+          body: `Olá, ${patient.name.split(" ")[0]}! Este é um lembrete gentil para registrar o uso do seu frasco.`,
+          icon: "/logo-cra.png",
+          badge: "/logo-cra.png",
+          data: { url: "/paciente" },
+        });
+        window.sessionStorage.setItem(notifiedKey, "sent");
+      } finally {
+        sendingReminder = false;
+      }
     };
 
-    checkReminder();
-    const interval = window.setInterval(checkReminder, 30_000);
+    void checkReminder();
+    const interval = window.setInterval(() => void checkReminder(), 15_000);
 
     return () => window.clearInterval(interval);
   }, [currentBottle, patient, permission, portal]);
@@ -832,7 +843,7 @@ export default function PatientPortalPage() {
         </aside>
 
         <div className="min-w-0">
-          <header className="relative z-30 bg-gradient-to-br from-[#bf1545] via-[#a3113a] to-[#790b2a] px-5 pb-12 pt-7 text-white sm:px-8 lg:px-10 lg:pb-12 lg:pt-9">
+          <header className="relative z-30 bg-gradient-to-br from-[#bf1545] via-[#a3113a] to-[#790b2a] px-5 pb-12 pt-[calc(1.75rem+env(safe-area-inset-top))] text-white sm:px-8 sm:pt-8 lg:px-10 lg:pb-12 lg:pt-9">
             <div className="pointer-events-none absolute -right-12 -top-16 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
             <div className="relative mx-auto flex max-w-5xl items-center justify-between gap-4">
               <div>
