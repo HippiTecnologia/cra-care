@@ -21,6 +21,12 @@ type PrickResult = { mm: number; reaction: "-" | "+" | "++" | "+++" | "++++"; ps
 type PatchResult = { firstReading: "" | "-" | "?" | "+" | "++" | "+++"; secondReading: "" | "-" | "?" | "+" | "++" | "+++" };
 type SavedReport = { id: string; patient_id: string; report_type: ReportType; content: Record<string, unknown>; created_at: string };
 
+function createInitialPatchResults(): Record<string, PatchResult> {
+  return Object.fromEntries(
+    patchBatteries.flatMap((battery) => battery.items.map((item) => [item, { firstReading: "-", secondReading: "-" }])),
+  );
+}
+
 const prickGroups = [
   { battery: "BATERIA A", category: "Controles", items: ["Controle Positivo", "Controle Negativo"] },
   { battery: "BATERIA A", category: "Ácaros", items: ["Blomia tropicalis", "Dermatophagoides farinae", "Dermatophagoides pteronyssinus"] },
@@ -62,8 +68,9 @@ export default function NursingPage() {
   const [patients, setPatients] = useState<NursingPatient[]>([]);
   const [selected, setSelected] = useState<NursingPatient | null>(null);
   const [reports, setReports] = useState<SavedReport[]>([]);
-  const [allReports, setAllReports] = useState<SavedReport[]>([]);
+  const [rawReports, setAllReports] = useState<SavedReport[]>([]);
   const [reportPatientFilter, setReportPatientFilter] = useState("");
+  const [reportSearchQuery, setReportSearchQuery] = useState("");
   const [reportDateFilter, setReportDateFilter] = useState("");
   const [modal, setModal] = useState<Modal>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -92,6 +99,18 @@ export default function NursingPage() {
   useEffect(() => { void reload().catch(() => setMessage("Não foi possível carregar a área de Enfermagem.")); }, []);
 
   const reportCount = useMemo(() => reports.length, [reports]);
+  const filteredReports = useMemo(() => {
+    const query = reportSearchQuery.trim().toLocaleLowerCase("pt-BR");
+    return rawReports.filter((report) => {
+      const patientName = String(report.content.patientName ?? "Paciente");
+      const patientCpf = String(report.content.patientCpf ?? "");
+      const matchesSearch = !query || patientName.toLocaleLowerCase("pt-BR").includes(query) || patientCpf.replace(/\D/g, "").includes(query.replace(/\D/g, ""));
+      const matchesPatient = !reportPatientFilter || patientName === reportPatientFilter;
+      const reportDate = (typeof report.content.examDate === "string" ? report.content.examDate : report.created_at).slice(0, 10);
+      return matchesSearch && matchesPatient && (!reportDateFilter || reportDate === reportDateFilter);
+    });
+  }, [rawReports, reportDateFilter, reportPatientFilter, reportSearchQuery]);
+  const allReports = filteredReports;
 
   async function openPatient(patient: NursingPatient, destination: Section = "patients") {
     setSelected(patient);
@@ -128,7 +147,7 @@ export default function NursingPage() {
   }
 
   function openReport() {
-    setReportType("prick_test"); setPrickResults({}); setPatchResults({}); setNotes(""); setReportDate(new Date().toISOString().slice(0, 10)); setModal("report");
+    setReportType("prick_test"); setPrickResults({}); setPatchResults(createInitialPatchResults()); setNotes(""); setReportDate(new Date().toISOString().slice(0, 10)); setModal("report");
   }
 
   async function saveReport() {
@@ -202,6 +221,7 @@ export default function NursingPage() {
     <section className="p-6 lg:p-10"><header className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-[#a3113a]">Área clínica</p><h1 className="mt-2 text-3xl font-bold">{section === "patients" ? "Pacientes" : "Laudos"}</h1></div><button onClick={() => section === "patients" ? setModal("patient") : openReport()} className="rounded-xl bg-[#a3113a] px-5 py-3 font-bold text-white">{section === "patients" ? "+ Cadastrar paciente" : "+ Novo laudo"}</button></header>
       {message && <p className="mt-5 rounded-xl bg-[#edf8f3] p-4 text-sm">{message}</p>}
       {section === "patients" && <p className="mt-4 text-sm text-[#817578]">Você pode localizar a paciente pelo nome ou pelo CPF.</p>}
+      {section === "reports" && <div className="mt-6 rounded-2xl bg-white p-4"><input value={reportSearchQuery} onChange={(event) => setReportSearchQuery(event.target.value)} placeholder="Pesquisar laudo pelo nome ou CPF do paciente" className="w-full rounded-xl border p-3" /></div>}
       {section === "patients" ? <><div className="mt-7 flex gap-2 rounded-2xl bg-white p-4"><input value={searchCpf} onChange={(e) => setSearchCpf(e.target.value)} placeholder="Pesquisar paciente pelo nome ou CPF" className="flex-1 rounded-xl border p-3"/><button onClick={() => void searchPatient()} className="rounded-xl border px-5 font-bold text-[#a3113a]">Buscar</button></div>{selected && <article className="mt-5 rounded-3xl border border-[#eadfd9] bg-white p-6"><h2 className="text-xl font-bold">{selected.name}</h2><p className="mt-1 text-sm text-[#817578]">CPF {selected.cpf} · Nascimento {selected.birthDate}</p><div className="mt-5 flex items-center justify-between"><strong>Histórico de laudos ({reportCount})</strong><button onClick={openReport} className="rounded-xl bg-[#a3113a] px-4 py-2 text-sm font-bold text-white">+ Novo laudo</button></div>{reports.map((report) => <article key={report.id} className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[#fbf5f2] p-4 text-sm"><span><strong>{report.report_type === "prick_test" ? "Prick Test" : "Patch Test"}</strong> · {new Date(report.created_at).toLocaleDateString("pt-BR")}</span><span className="flex gap-2"><button type="button" onClick={() => report.report_type === "prick_test" ? printPrickReport(report, false) : printPatchReport(report, false)} className="rounded-lg border border-[#d8cbc7] bg-white px-3 py-2 text-xs font-bold text-[#a3113a]">Visualizar</button><button type="button" onClick={() => report.report_type === "prick_test" ? printPrickReport(report) : printPatchReport(report)} className="rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-bold text-white">Gerar PDF / Imprimir</button></span></article>)}</article>}<div className="mt-5 space-y-3">{patients.map((patient) => <button key={patient.id} onClick={() => void openPatient(patient)} className="block w-full rounded-2xl bg-white p-5 text-left shadow-sm"><strong>{patient.name}</strong><span className="ml-3 text-sm text-[#817578]">CPF {patient.cpf}</span></button>)}</div></> : <><div className="mt-7 flex flex-wrap gap-3"><select value={reportPatientFilter} onChange={(event) => setReportPatientFilter(event.target.value)} className="rounded-xl border p-3"><option value="">Todos os pacientes</option>{[...new Set(allReports.map((report) => String(report.content.patientName ?? "Paciente")))].sort().map((patientName) => <option key={patientName} value={patientName}>{patientName}</option>)}</select><input type="date" value={reportDateFilter} onChange={(event) => setReportDateFilter(event.target.value)} aria-label="Filtrar pela data do laudo" className="rounded-xl border p-3" /></div><div className="mt-5"><h2 className="text-xl font-bold">Histórico de laudos</h2><p className="mt-1 text-sm text-[#817578]">Todos os laudos já preenchidos por você permanecem disponíveis aqui.</p><div className="mt-4 space-y-3">{allReports.filter((report) => (!reportPatientFilter || String(report.content.patientName ?? "Paciente") === reportPatientFilter) && (!reportDateFilter || (typeof report.content.examDate === "string" ? report.content.examDate : report.created_at).slice(0, 10) === reportDateFilter)).map((report) => <article key={report.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-5"><div><strong>{report.report_type === "prick_test" ? "Laudo Prick" : "Laudo Patch"}</strong><p className="mt-1 text-sm font-medium text-[#544449]">{String(report.content.patientName ?? "Paciente")}</p><p className="text-sm text-[#817578]">{new Date(report.created_at).toLocaleDateString("pt-BR")}</p></div><span className="flex gap-2"><button type="button" onClick={() => report.report_type === "prick_test" ? printPrickReport(report, false) : printPatchReport(report, false)} className="rounded-lg border border-[#d8cbc7] bg-white px-3 py-2 text-xs font-bold text-[#a3113a]">Visualizar</button><button type="button" onClick={() => report.report_type === "prick_test" ? printPrickReport(report) : printPatchReport(report)} className="rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-bold text-white">Gerar PDF / Imprimir</button></span></article>)}</div></div></>}
     </section>
   </div>
