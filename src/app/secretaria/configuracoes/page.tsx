@@ -7,109 +7,54 @@ import { getSupabaseClient } from "../../../lib/supabase/client";
 import { loadSecretaryContext, loadSecretaryUsers } from "../../../lib/supabase/secretary-records";
 
 type StaffRole = "medico" | "secretaria" | "laboratorio" | "enfermagem";
-type UserAccount = { id: string; name: string; username: string; role: string; crm?: string; specialty?: string };
-
-const labels: Record<string, string> = {
-  medico: "Médico",
-  secretaria: "Secretaria",
-  laboratorio: "Laboratório",
-  enfermagem: "Enfermagem",
-  admin: "Administrador",
-  super_admin: "Administrador",
+type UserAccount = {
+  id: string; patientId?: string; name: string; username: string; role: string; crm?: string; specialty?: string;
+  accountType: "equipe" | "paciente"; accessStatus: string; createdAt: string; lastLoginAt?: string;
+  deactivatedAt?: string; deactivationReason?: string; failedAttempts?: number;
 };
+
+const labels: Record<string, string> = { medico: "Médico", secretaria: "Secretaria", laboratorio: "Laboratório", enfermagem: "Enfermagem", paciente: "Paciente", admin: "Administrador", super_admin: "Administrador" };
+const statuses: Record<string, string> = { ativo: "Ativo", bloqueado: "Bloqueado", desativado: "Desativado" };
+const date = (value?: string) => value ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "—";
 
 export default function SecretariaSettingsPage() {
   const [users, setUsers] = useState<UserAccount[]>([]);
-  const [name, setName] = useState("");
-  const [username, setUsername] = useState("");
-  const [role, setRole] = useState<StaffRole>("medico");
-  const [crm, setCrm] = useState("");
-  const [specialty, setSpecialty] = useState("");
-  const [initialPassword, setInitialPassword] = useState("1234");
-  const [message, setMessage] = useState("");
-  const [recoverySearch, setRecoverySearch] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState(""); const [username, setUsername] = useState(""); const [role, setRole] = useState<StaffRole>("medico");
+  const [crm, setCrm] = useState(""); const [specialty, setSpecialty] = useState(""); const [initialPassword, setInitialPassword] = useState("1234");
+  const [message, setMessage] = useState(""); const [search, setSearch] = useState(""); const [roleFilter, setRoleFilter] = useState("todos"); const [statusFilter, setStatusFilter] = useState("todos"); const [saving, setSaving] = useState(false);
 
-  async function refresh() {
-    const context = await loadSecretaryContext();
-    const rows = await loadSecretaryUsers(context);
-    setUsers(rows.map((row) => ({
-      id: String(row.id),
-      name: String(row.full_name),
-      username: String(row.username ?? ""),
-      role: String(row.role),
-      crm: row.crm ? String(row.crm) : undefined,
-      specialty: row.specialty ? String(row.specialty) : undefined,
-    })));
-  }
+  async function refresh() { const context = await loadSecretaryContext(); setUsers(await loadSecretaryUsers(context) as UserAccount[]); }
+  useEffect(() => { queueMicrotask(() => void refresh().catch(() => setMessage("Não foi possível carregar os acessos reais."))); }, []);
+  const visibleUsers = useMemo(() => users.filter((user) => {
+    const term = search.trim().toLocaleLowerCase("pt-BR");
+    return (!term || `${user.name} ${user.username} ${labels[user.role] ?? user.role}`.toLocaleLowerCase("pt-BR").includes(term)) && (roleFilter === "todos" || user.role === roleFilter) && (statusFilter === "todos" || user.accessStatus === statusFilter);
+  }), [search, users, roleFilter, statusFilter]);
 
-  useEffect(() => {
-    queueMicrotask(() => void refresh().catch(() => setMessage("Não foi possível carregar os acessos reais.")));
-  }, []);
-
-  const visibleUsers = useMemo(() => {
-    const term = recoverySearch.trim().toLocaleLowerCase("pt-BR");
-    return users.filter((user) => !term || `${user.name} ${user.username} ${labels[user.role] ?? user.role}`.toLocaleLowerCase("pt-BR").includes(term));
-  }, [recoverySearch, users]);
-
-  function updateName(value: string) {
-    setName(value);
-    if (role === "medico") setUsername(doctorUsername(value));
-  }
-
-  async function authorizedRequest(method: "POST" | "PUT", body: Record<string, unknown>) {
-    const { data: { session } } = await getSupabaseClient().auth.getSession();
-    if (!session) throw new Error("Sessão expirada.");
-    const response = await fetch("/api/access", {
-      method,
-      headers: { "content-type": "application/json", authorization: `Bearer ${session.access_token}` },
-      body: JSON.stringify(body),
-    });
+  function updateName(value: string) { setName(value); if (role === "medico") setUsername(doctorUsername(value)); }
+  async function authorizedRequest(method: "POST" | "PUT" | "PATCH", body: Record<string, unknown>) {
+    const { data: { session } } = await getSupabaseClient().auth.getSession(); if (!session) throw new Error("Sessão expirada.");
+    const response = await fetch("/api/access", { method, headers: { "content-type": "application/json", authorization: `Bearer ${session.access_token}` }, body: JSON.stringify(body) });
     const result = await response.json() as { error?: string; username?: string; initialPassword?: string; temporaryPassword?: string };
-    if (!response.ok) throw new Error(result.error ?? "Não foi possível concluir.");
-    return result;
+    if (!response.ok) throw new Error(result.error ?? "Não foi possível concluir."); return result;
   }
-
   async function createUser(event: FormEvent) {
-    event.preventDefault();
-    if (!name.trim() || !username.trim()) return setMessage("Informe nome e usuário para criar o acesso.");
-    if (role === "medico" && !crm.replace(/\D/g, "")) return setMessage("Informe o CRM do médico.");
-    setSaving(true);
+    event.preventDefault(); if (!name.trim() || !username.trim()) return setMessage("Informe nome e usuário para criar o acesso."); if (role === "medico" && !crm.replace(/\D/g, "")) return setMessage("Informe o CRM do médico.");
+    setSaving(true); try { const result = await authorizedRequest("POST", { fullName: name.trim(), username: normalizeUsername(username), role, crm: crm || undefined, specialty: specialty || undefined, initialPassword: role === "medico" ? undefined : initialPassword }); await refresh(); setMessage(`Acesso criado. Usuário: ${result.username}. Senha inicial: ${result.initialPassword}. Entregue-a somente ao usuário.`); setName(""); setUsername(""); setCrm(""); setSpecialty(""); setInitialPassword("1234"); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Não foi possível criar o acesso."); } finally { setSaving(false); }
+  }
+  async function resetPassword(user: UserAccount) { try { const result = await authorizedRequest("PUT", { userId: user.id, temporaryPassword: "1234" }); await refresh(); setMessage(`Senha redefinida para ${user.name}. Usuário: ${result.username}. Senha temporária: ${result.temporaryPassword}.`); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Não foi possível redefinir a senha."); } }
+  async function changeStatus(user: UserAccount) {
     try {
-      const result = await authorizedRequest("POST", {
-        fullName: name.trim(),
-        username: normalizeUsername(username),
-        role,
-        crm: crm || undefined,
-        specialty: specialty || undefined,
-        initialPassword: role === "medico" ? undefined : initialPassword,
-      });
+      if (user.accessStatus === "ativo") { const reason = window.prompt(`Motivo para desativar o acesso de ${user.name}:`); if (!reason?.trim()) return; await authorizedRequest("PATCH", { action: "deactivate", userId: user.id, reason }); setMessage(`Acesso de ${user.name} desativado.`); }
+      else { await authorizedRequest("PATCH", { action: "activate", userId: user.id }); setMessage(`Acesso de ${user.name} ${user.accessStatus === "bloqueado" ? "desbloqueado" : "reativado"}.`); }
       await refresh();
-      setMessage(`Acesso criado. Usuário: ${result.username}. Senha inicial: ${result.initialPassword}.`);
-      setName(""); setUsername(""); setCrm(""); setSpecialty(""); setInitialPassword("1234");
-    } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "Não foi possível criar o acesso.");
-    } finally {
-      setSaving(false);
-    }
+    } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Não foi possível alterar o acesso."); }
   }
+  async function changeRole(user: UserAccount, nextRole: string) { if (nextRole === user.role) return; try { await authorizedRequest("PATCH", { action: "change_role", userId: user.id, role: nextRole }); await refresh(); setMessage(`Perfil de ${user.name} atualizado.`); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Não foi possível alterar o perfil."); } }
 
-  async function resetPassword(user: UserAccount) {
-    try {
-      const result = await authorizedRequest("PUT", { userId: user.id, temporaryPassword: "1234" });
-      setMessage(`Senha redefinida. Usuário: ${result.username}. Senha: ${result.temporaryPassword}.`);
-    } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "Não foi possível redefinir a senha.");
-    }
-  }
-
-  return (
-    <main className="min-h-screen bg-[#f8f5f2] p-4 text-[#34292d] sm:p-7"><div className="mx-auto max-w-5xl">
-      <header className="flex items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.15em] text-[#a3113a]">Secretaria</p><h1 className="mt-2 text-3xl font-bold">Configurações e acessos</h1></div><Link href="/secretaria" className="rounded-xl border px-4 py-3 text-sm font-semibold text-[#a3113a]">← Voltar</Link></header>
-      {message && <p className="mt-5 rounded-xl bg-[#edf8f3] p-4 text-sm font-semibold text-[#187157]">{message}</p>}
-      <section className="mt-7 grid gap-6 lg:grid-cols-[.85fr_1.15fr]"><form onSubmit={createUser} className="rounded-3xl bg-white p-6 shadow-sm"><h2 className="text-xl font-bold">Novo usuário</h2><label className="mt-5 block text-sm font-medium">Nome completo<input required value={name} onChange={(event) => updateName(event.target.value)} className="mt-2 h-12 w-full rounded-xl border p-4" /></label><label className="mt-4 block text-sm font-medium">Usuário<input required value={username} onChange={(event) => setUsername(normalizeUsername(event.target.value))} className="mt-2 h-12 w-full rounded-xl border p-4" /></label><label className="mt-4 block text-sm font-medium">Perfil<select value={role} onChange={(event) => { const next = event.target.value as StaffRole; setRole(next); setUsername(next === "medico" ? doctorUsername(name) : ""); }} className="mt-2 h-12 w-full rounded-xl border p-3"><option value="medico">Médico</option><option value="secretaria">Secretaria</option><option value="laboratorio">Laboratório</option><option value="enfermagem">Enfermagem</option></select></label>{role === "medico" ? <><label className="mt-4 block text-sm font-medium">CRM<input required value={crm} onChange={(event) => setCrm(event.target.value)} className="mt-2 h-12 w-full rounded-xl border p-4" /></label><label className="mt-4 block text-sm font-medium">Especialidade<input value={specialty} onChange={(event) => setSpecialty(event.target.value)} className="mt-2 h-12 w-full rounded-xl border p-4" /></label></> : <label className="mt-4 block text-sm font-medium">Senha inicial<input required value={initialPassword} onChange={(event) => setInitialPassword(event.target.value)} className="mt-2 h-12 w-full rounded-xl border p-4" /></label>}<button disabled={saving} className="mt-5 w-full rounded-xl bg-[#a3113a] px-4 py-3 font-semibold text-white">{saving ? "Criando..." : "Criar acesso"}</button></form><section className="rounded-3xl bg-white p-6 shadow-sm"><h2 className="text-xl font-bold">Usuários</h2><input value={recoverySearch} onChange={(event) => setRecoverySearch(event.target.value)} placeholder="Buscar usuário" className="mt-4 h-12 w-full rounded-xl border p-4"/><div className="mt-4 space-y-3">{visibleUsers.map(user=><article key={user.id} className="flex items-center justify-between rounded-xl bg-[#fbf7f5] p-4"><div><strong>{user.name}</strong><p className="text-xs text-[#817578]">{user.username} · {labels[user.role] ?? user.role}</p></div><button type="button" onClick={()=>void resetPassword(user)} className="rounded-lg border px-3 py-2 text-xs font-bold text-[#a3113a]">Redefinir senha</button></article>)}</div></section></section>
-    </div></main>
-  );
-
-  return <main className="min-h-screen bg-[#f8f5f2] p-4 text-[#34292d] sm:p-7"><div className="mx-auto max-w-5xl"><header className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.15em] text-[#a3113a]">Secretaria</p><h1 className="mt-2 text-3xl font-bold">Configurações e acessos</h1><p className="mt-2 text-sm text-[#817578]">Crie acessos e redefina senhas com segurança.</p></div><Link href="/secretaria" className="rounded-xl border border-[#e6dbd6] bg-white px-4 py-3 text-sm font-semibold text-[#a3113a]">← Voltar</Link></header>{message && <div className="mt-5 rounded-2xl bg-[#edf8f3] px-4 py-3 text-sm font-semibold text-[#187157]">{message}</div>}<section className="mt-7 grid gap-6 lg:grid-cols-[.85fr_1.15fr]"><form onSubmit={createUser} className="rounded-3xl bg-white p-6 shadow-sm"><h2 className="text-xl font-bold">Novo usuário</h2><p className="mt-1 text-sm text-[#817578]">Pacientes são criados pelo fluxo Médico → Secretaria.</p><label className="mt-5 block text-sm font-medium">Nome completo<input value={name} onChange={(event) => updateName(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4" /></label><label className="mt-4 block text-sm font-medium">Usuário<input value={username} onChange={(event) => setUsername(normalizeUsername(event.target.value))} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4" /></label><label className="mt-4 block text-sm font-medium">Perfil<select value={role} onChange={(event) => { const next = event.target.value as StaffRole; setRole(next); setUsername(next === "medico" ? doctorUsername(name) : ""); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4"><option value="medico">Médico</option><option value="secretaria">Secretaria</option><option value="laboratorio">Laboratório</option></select></label>{role === "medico" ? <><label className="mt-4 block text-sm font-medium">CRM<input value={crm} onChange={(event) => setCrm(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4" /></label><label className="mt-4 block text-sm font-medium">Especialidade<input value={specialty} onChange={(event) => setSpecialty(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4" /></label></> : <label className="mt-4 block text-sm font-medium">Senha inicial<input value={initialPassword} onChange={(event) => setInitialPassword(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4" /></label>}<button disabled={saving} className="mt-5 w-full rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">{saving ? "Criando..." : "Criar acesso"}</button></form><section className="rounded-3xl bg-white p-6 shadow-sm"><h2 className="text-xl font-bold">Usuários e recuperação de senha</h2><input value={recoverySearch} onChange={(event) => setRecoverySearch(event.target.value)} placeholder="Buscar nome, usuário ou perfil" className="mt-4 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /><p className="mt-2 text-xs text-[#817578]">{visibleUsers.length} usuário(s) encontrado(s)</p><div className="mt-4 space-y-3">{visibleUsers.map((user) => <article key={user.id} className="flex flex-col gap-3 rounded-2xl bg-[#fbf7f5] p-4 sm:flex-row sm:items-center sm:justify-between"><div><strong className="text-sm">{user.name}</strong><p className="mt-1 text-xs text-[#817578]">{user.username} · {labels[user.role] ?? user.role}{user.crm ? ` · CRM ${user.crm}` : ""}</p></div><button type="button" onClick={() => void resetPassword(user)} className="self-start rounded-xl border border-[#e6dbd6] bg-white px-4 py-2.5 text-xs font-bold text-[#a3113a]">Redefinir senha</button></article>)}{visibleUsers.length === 0 && <p className="rounded-2xl bg-[#fbf7f5] p-5 text-center text-sm text-[#817578]">Nenhum usuário encontrado.</p>}</div></section></section></div></main>;
+  return <main className="min-h-screen bg-[#f8f5f2] p-4 text-[#34292d] sm:p-7"><div className="mx-auto max-w-6xl">
+    <header className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.15em] text-[#a3113a]">Secretaria</p><h1 className="mt-2 text-3xl font-bold">Configurações e acessos</h1><p className="mt-2 text-sm text-[#817578]">Crie, consulte e administre acessos com segurança.</p></div><Link href="/secretaria" className="rounded-xl border border-[#e6dbd6] bg-white px-4 py-3 text-sm font-semibold text-[#a3113a]">← Voltar</Link></header>
+    {message && <div className="mt-5 rounded-2xl bg-[#edf8f3] px-4 py-3 text-sm font-semibold text-[#187157]">{message}</div>}
+    <section className="mt-7 grid gap-6 lg:grid-cols-[.8fr_1.2fr]"><form onSubmit={createUser} className="rounded-3xl bg-white p-6 shadow-sm"><h2 className="text-xl font-bold">Novo usuário da equipe</h2><p className="mt-1 text-sm text-[#817578]">Pacientes são criados pelo fluxo Médico → Secretaria.</p><label className="mt-5 block text-sm font-medium">Nome completo<input required value={name} onChange={(event) => updateName(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4" /></label><label className="mt-4 block text-sm font-medium">Usuário<input required value={username} onChange={(event) => setUsername(normalizeUsername(event.target.value))} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4" /></label><label className="mt-4 block text-sm font-medium">Perfil<select value={role} onChange={(event) => { const next = event.target.value as StaffRole; setRole(next); setUsername(next === "medico" ? doctorUsername(name) : ""); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4"><option value="medico">Médico</option><option value="secretaria">Secretaria</option><option value="laboratorio">Laboratório</option><option value="enfermagem">Enfermagem</option></select></label>{role === "medico" ? <><label className="mt-4 block text-sm font-medium">CRM<input required value={crm} onChange={(event) => setCrm(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4" /></label><label className="mt-4 block text-sm font-medium">Especialidade<input value={specialty} onChange={(event) => setSpecialty(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4" /></label></> : <label className="mt-4 block text-sm font-medium">Senha inicial<input required value={initialPassword} onChange={(event) => setInitialPassword(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4" /></label>}<button disabled={saving} className="mt-5 w-full rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">{saving ? "Criando..." : "Criar acesso"}</button></form>
+      <section className="rounded-3xl bg-white p-6 shadow-sm"><div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-xl font-bold">Usuários</h2><p className="mt-1 text-sm text-[#817578]">As senhas atuais nunca são exibidas. Você pode gerar uma senha temporária.</p></div><p className="text-sm font-semibold text-[#817578]">{visibleUsers.length} encontrado(s)</p></div><div className="mt-4 grid gap-3 sm:grid-cols-3"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Nome ou usuário" className="h-12 rounded-xl border border-[#e9dfda] px-4 sm:col-span-1"/><select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)} className="h-12 rounded-xl border border-[#e9dfda] bg-white px-3"><option value="todos">Todos os perfis</option>{Object.entries(labels).filter(([key]) => !["admin", "super_admin"].includes(key)).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</select><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-12 rounded-xl border border-[#e9dfda] bg-white px-3"><option value="todos">Todos os status</option><option value="ativo">Ativos</option><option value="bloqueado">Bloqueados</option><option value="desativado">Desativados</option></select></div><div className="mt-4 space-y-3">{visibleUsers.map((user) => <article key={user.id} className="rounded-2xl bg-[#fbf7f5] p-4"><div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"><div><div className="flex flex-wrap items-center gap-2"><strong className="text-sm">{user.name}</strong><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${user.accessStatus === "ativo" ? "bg-[#e4f6ed] text-[#187157]" : user.accessStatus === "bloqueado" ? "bg-[#fff3d9] text-[#956600]" : "bg-[#fdebed] text-[#a3113a]"}`}>{statuses[user.accessStatus] ?? user.accessStatus}</span></div><p className="mt-1 text-xs text-[#817578]">{user.username} · {labels[user.role] ?? user.role}{user.crm ? ` · CRM ${user.crm}` : ""}</p><p className="mt-2 text-[11px] text-[#8c8083]">Criado em {date(user.createdAt)} · Último acesso: {date(user.lastLoginAt)}</p>{user.accessStatus === "bloqueado" && <p className="mt-1 text-xs font-medium text-[#956600]">3 tentativas inválidas. Redefina a senha para liberar.</p>}{user.deactivationReason && <p className="mt-1 text-xs text-[#a3113a]">Motivo: {user.deactivationReason}</p>}</div><div className="flex flex-wrap gap-2 lg:justify-end"><button type="button" onClick={() => void resetPassword(user)} className="rounded-xl border border-[#e6dbd6] bg-white px-3 py-2 text-xs font-bold text-[#a3113a]">Redefinir senha</button>{user.accountType === "equipe" && !["admin", "super_admin"].includes(user.role) && <select aria-label={`Alterar perfil de ${user.name}`} value={user.role} onChange={(event) => void changeRole(user, event.target.value)} className="rounded-xl border border-[#e6dbd6] bg-white px-2 py-2 text-xs font-bold text-[#66595d]"><option value="medico">Médico</option><option value="secretaria">Secretaria</option><option value="laboratorio">Laboratório</option><option value="enfermagem">Enfermagem</option></select>}<button type="button" onClick={() => void changeStatus(user)} className="rounded-xl border border-[#e6dbd6] bg-white px-3 py-2 text-xs font-bold text-[#66595d]">{user.accessStatus === "ativo" ? "Desativar" : user.accessStatus === "bloqueado" ? "Desbloquear" : "Reativar"}</button></div></div></article>)}{visibleUsers.length === 0 && <p className="rounded-2xl bg-[#fbf7f5] p-5 text-center text-sm text-[#817578]">Nenhum usuário encontrado.</p>}</div></section></section>
+  </div></main>;
 }

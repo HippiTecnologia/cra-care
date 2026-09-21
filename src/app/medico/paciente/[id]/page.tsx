@@ -114,7 +114,7 @@ export default function MedicalPatientPage() {
   const [phase, setPhase] = useState(treatmentPhases[0]);
   const [bottlesByTreatment, setBottlesByTreatment] = useState<Record<VaccineType, number>>({ rinite: 1, imunobacteriana: 1 });
   const [durationMonths, setDurationMonths] = useState(36);
-  const [drops, setDrops] = useState(6);
+  const [drops, setDrops] = useState(2);
   const [frequency, setFrequency] = useState("3 vezes por semana");
   const [customPosology, setCustomPosology] = useState(false);
   const [posology, setPosology] = useState("");
@@ -259,8 +259,8 @@ export default function MedicalPatientPage() {
     setSelectedFormula(availableFormulas[0]);
     setPhase(patient?.phase ?? treatmentPhases[0]);
     setBottles(1);
-    setDrops(patient?.drops ?? 6);
-    setFrequency("3 vezes por semana");
+    setDrops(vaccineType === "imunobacteriana" ? 4 : 2);
+    setFrequency(vaccineType === "imunobacteriana" ? "todos os dias" : "3 vezes por semana");
     setCustomPosology(false);
     setPosology("");
     setNotes("");
@@ -272,6 +272,10 @@ export default function MedicalPatientPage() {
     setVaccineType(type);
     setFormulas(type === "imunobacteriana" ? immunobacterialFormulas.map((formula) => ({ ...formula })) : []);
     setDurationMonths(type === "imunobacteriana" ? 12 : 36);
+    setDrops(type === "imunobacteriana" ? 4 : 2);
+    setFrequency(type === "imunobacteriana" ? "todos os dias" : "3 vezes por semana");
+    setCustomPosology(false);
+    setPosology("");
     setSelectedPrescriptionId(null);
     setError("");
   }

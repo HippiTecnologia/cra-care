@@ -831,10 +831,56 @@ export async function removeSecretaryInvoice(context: SecretaryContext, invoiceI
 
 export async function loadSecretaryUsers(context?: SecretaryContext) {
   const current = context ?? await loadSecretaryContext();
-  const { data, error } = await getSupabaseClient().from("profiles")
-    .select("id, full_name, role, username, crm, specialty")
-    .eq("clinic_id", current.clinicId)
-    .order("full_name");
-  if (error) throw error;
-  return data ?? [];
+  const supabase = getSupabaseClient();
+  const [profilesResult, patientsResult, securityResult] = await Promise.all([
+    supabase.from("profiles")
+      .select("id, full_name, role, username, crm, specialty, access_status, created_at, last_login_at, deactivated_at, deactivation_reason")
+      .eq("clinic_id", current.clinicId)
+      .order("full_name"),
+    supabase.from("patients")
+      .select("id, auth_user_id, full_name, cpf, username, access_status, created_at, last_login_at, deactivated_at, deactivation_reason")
+      .eq("clinic_id", current.clinicId)
+      .order("full_name"),
+    supabase.from("login_security")
+      .select("user_id, failed_attempts, locked_at")
+      .eq("clinic_id", current.clinicId),
+  ]);
+  if (profilesResult.error) throw profilesResult.error;
+  if (patientsResult.error) throw patientsResult.error;
+  // A tela continua funcionando antes da migration, apenas sem a informação de bloqueio.
+  const securityByUser = new Map((securityResult.data ?? []).map((row) => [String(row.user_id), row]));
+  const profiles = (profilesResult.data ?? []).map((row) => ({
+    id: String(row.id),
+    name: String(row.full_name),
+    username: String(row.username ?? ""),
+    role: String(row.role),
+    crm: row.crm ? String(row.crm) : undefined,
+    specialty: row.specialty ? String(row.specialty) : undefined,
+    accountType: "equipe" as const,
+    accessStatus: String(row.access_status ?? "ativo"),
+    createdAt: String(row.created_at ?? ""),
+    lastLoginAt: row.last_login_at ? String(row.last_login_at) : undefined,
+    deactivatedAt: row.deactivated_at ? String(row.deactivated_at) : undefined,
+    deactivationReason: row.deactivation_reason ? String(row.deactivation_reason) : undefined,
+  }));
+  const patients = (patientsResult.data ?? [])
+    .filter((row) => Boolean(row.auth_user_id))
+    .map((row) => {
+      const security = securityByUser.get(String(row.auth_user_id));
+      return {
+        id: String(row.auth_user_id),
+        patientId: String(row.id),
+        name: String(row.full_name),
+        username: String(row.username ?? row.cpf ?? ""),
+        role: "paciente",
+        accountType: "paciente" as const,
+        accessStatus: String(row.access_status ?? (security?.locked_at ? "bloqueado" : "ativo")),
+        createdAt: String(row.created_at ?? ""),
+        lastLoginAt: row.last_login_at ? String(row.last_login_at) : undefined,
+        deactivatedAt: row.deactivated_at ? String(row.deactivated_at) : undefined,
+        deactivationReason: row.deactivation_reason ? String(row.deactivation_reason) : undefined,
+        failedAttempts: Number(security?.failed_attempts ?? 0),
+      };
+    });
+  return [...profiles, ...patients].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
 }

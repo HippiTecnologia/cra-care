@@ -22,6 +22,7 @@ import {
 } from "./patient-portal-store";
 import { loadPatientWorkspace, savePatientPortalState } from "../../lib/supabase/patient-records";
 import { getSupabaseClient } from "../../lib/supabase/client";
+import { currentRelease } from "../../lib/release-notes";
 
 type PatientSection = "inicio" | "frasco" | "alertas" | "calendario" | "receitas" | "notas" | "notas-fiscais" | "termo";
 
@@ -242,6 +243,7 @@ export default function PatientPortalPage() {
   const [assessmentRescue, setAssessmentRescue] = useState<NonNullable<PatientAssessment["rescueMedication"]> | "">("");
   const [assessmentNotes, setAssessmentNotes] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showReleaseNotes, setShowReleaseNotes] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -791,6 +793,7 @@ export default function PatientPortalPage() {
     : 0;
   const automaticNotifications = buildAutomaticPatientNotifications(patient, currentBottle, new Date());
   const notifications = [
+    { id: currentRelease.id, icon: currentRelease.icon, title: currentRelease.title, text: currentRelease.summary },
     ...(portal.manualNotifications ?? []),
     ...automaticNotifications,
     ...(currentBottle && portal.reminders.enabled && portal.reminders.weekdays.includes(new Date().getDay()) && !todayRecord
@@ -864,7 +867,7 @@ export default function PatientPortalPage() {
                   <div className="absolute right-0 top-full z-[70] mt-3 w-[min(92vw,460px)] overflow-hidden rounded-2xl border border-[#eadfd9] bg-white text-[#34292d] shadow-[0_24px_70px_rgba(52,20,30,0.28)]">
                     <div className="flex items-center justify-between border-b border-[#eee5e0] px-4 py-3"><div><p className="text-sm font-bold text-[#86203b]">Notificações</p><p className="mt-0.5 text-[11px] text-[#817578]">Avisos do seu tratamento</p></div><button type="button" onClick={() => setShowNotifications(false)} aria-label="Fechar notificações" className="rounded-lg px-2 py-1 text-lg text-[#817578]">×</button></div>
                     <div className="max-h-[65vh] overflow-y-auto p-2">
-                      {notifications.length === 0 ? <p className="px-4 py-8 text-center text-sm text-[#817578]">Tudo certo por aqui. Nenhum aviso no momento.</p> : notifications.map((notification) => { const unread = !readNotificationIds.includes(notification.id); return <article key={notification.id} className={`flex gap-3 rounded-xl px-3 py-3 hover:bg-[#fcf6f4] ${unread ? "bg-[#fff8fa]" : ""}`}><span className="text-xl">{notification.icon}</span><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><p className="text-sm font-bold text-[#433438]">{notification.title}</p>{unread && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#b31340]" aria-label="Não lida" />}</div><p className="mt-1 whitespace-pre-line text-xs leading-5 text-[#74676a]">{notification.text}</p></div></article>; })}
+                      {notifications.length === 0 ? <p className="px-4 py-8 text-center text-sm text-[#817578]">Tudo certo por aqui. Nenhum aviso no momento.</p> : notifications.map((notification) => { const unread = !readNotificationIds.includes(notification.id); const isRelease = notification.id === currentRelease.id; return <article key={notification.id} className={`flex gap-3 rounded-xl px-3 py-3 hover:bg-[#fcf6f4] ${unread ? "bg-[#fff8fa]" : ""}`}><span className="text-xl">{notification.icon}</span><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><p className="text-sm font-bold text-[#433438]">{notification.title}</p>{unread && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#b31340]" aria-label="Não lida" />}</div><p className="mt-1 whitespace-pre-line text-xs leading-5 text-[#74676a]">{notification.text}</p>{isRelease && <button type="button" onClick={() => { setShowNotifications(false); setShowReleaseNotes(true); }} className="mt-2 text-xs font-bold text-[#a3113a] hover:underline">Ver o que mudou →</button>}</div></article>; })}
                     </div>
                   </div>
                 )}
@@ -1074,6 +1077,7 @@ export default function PatientPortalPage() {
           </section>
         </div>
       )}
+      {showReleaseNotes && <div className="fixed inset-0 z-[80] flex items-end justify-center bg-[#2c1b20]/55 p-3 sm:items-center sm:p-5"><section className="w-full max-w-lg rounded-[30px] bg-white p-6 shadow-2xl sm:p-8"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Atualização do CRA Care</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">{currentRelease.title}</h2><p className="mt-2 text-sm text-[#817578]">Publicada em {currentRelease.publishedAt}</p></div><button type="button" onClick={() => setShowReleaseNotes(false)} aria-label="Fechar" className="rounded-lg px-2 py-1 text-xl text-[#817578]">×</button></div><ul className="mt-6 space-y-3">{currentRelease.items.map((item) => <li key={item} className="rounded-2xl bg-[#fbf7f5] px-4 py-3 text-sm leading-6 text-[#544449]">✓ {item}</li>)}</ul><button type="button" onClick={() => setShowReleaseNotes(false)} className="mt-6 w-full rounded-2xl bg-[#a3113a] px-4 py-3 font-semibold text-white">Entendi</button></section></div>}
     </main>
   );
 }

@@ -84,9 +84,30 @@ export default function Home() {
       }
 
       if (error || !data.user) {
+        if (selectedRole === "Paciente") {
+          const response = await fetch("/api/login-security", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ event: "failure", identifier }),
+          });
+          const security = await response.json() as { locked?: boolean; remaining?: number };
+          if (security.locked) {
+            setMessage("Acesso bloqueado após 3 tentativas. Solicite à Secretaria o desbloqueio e uma nova senha.");
+            return;
+          }
+          if (typeof security.remaining === "number") {
+            setMessage(`Usuário ou senha inválidos. Restam ${security.remaining} tentativa(s) antes do bloqueio. Se precisar, solicite ajuda à Secretaria.`);
+            return;
+          }
+        }
         setMessage("Usuário ou senha inválidos. Se precisar, solicite ajuda à secretaria.");
         return;
       }
+      void fetch("/api/login-security", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${data.session?.access_token ?? ""}` },
+        body: JSON.stringify({ event: "success" }),
+      });
       if (rememberDevice) window.localStorage.setItem("cra-care-keep-signed-in", "true");
       else window.localStorage.removeItem("cra-care-keep-signed-in");
       const { data: profile } = await supabase.from("profiles").select("role, must_change_password").eq("id", data.user.id).maybeSingle();
