@@ -73,6 +73,10 @@ function normalizeSearch(value: string) {
     .replace(/[.\-/]/g, "");
 }
 
+function escapeReportHtml(value: string | number) {
+  return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
 export default function LaboratorioPage() {
   const router = useRouter();
   const [batches, setBatches] = useState<DemoBatch[]>([]);
@@ -165,6 +169,14 @@ export default function LaboratorioPage() {
     (total, item) => total + item.bottles,
     0,
   );
+
+  function printBatchReport() {
+    const rows = filteredBatches.flatMap((batch) => batch.items.map((item) => `<tr><td>${escapeReportHtml(batch.name ?? batch.code)}</td><td>${escapeReportHtml(batch.indication === "bacteriana" ? "Bacteriana / Imunobacteriana" : batch.indication === "misto" ? "Misto" : "Rinite")}</td><td>${escapeReportHtml(batch.status === "rascunho" ? "Rascunho" : statusAppearance[batch.status].label)}</td><td>${escapeReportHtml(item.patientName || "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf || "—")}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase || "—")}</td><td>${escapeReportHtml(item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ") || "—")}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(item.doctor || "—")}</td><td>${escapeReportHtml(formatDate(batch.createdAt))}</td></tr>`)).join("");
+    const reportWindow = window.open("", "_blank");
+    if (!reportWindow) { setError("Permita a abertura de janelas para gerar o relatório."); return; }
+    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de lotes · Laboratório</title><style>@page{size:A4 landscape;margin:10mm}body{font-family:Arial,sans-serif;color:#34292d;font-size:9px}h1{color:#a3113a;margin:0}table{border-collapse:collapse;width:100%;margin-top:14px}th,td{border:1px solid #ddd;padding:5px;text-align:left;vertical-align:top}th{background:#f1e6e8;font-size:8px}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Imprimir / salvar em PDF</button><h1>CRA Care · Relatório de lotes</h1><p>Laboratório · Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${filteredBatches.length} lote(s)</p><table><thead><tr><th>Lote</th><th>Indicação</th><th>Status</th><th>Paciente/origem</th><th>CPF</th><th>Tratamento</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Médico</th><th>Criação</th></tr></thead><tbody>${rows || '<tr><td colspan="11">Nenhum lote no filtro atual.</td></tr>'}</tbody></table></body></html>`);
+    reportWindow.document.close(); reportWindow.focus();
+  }
 
   const summaryCards = [
     {
@@ -429,7 +441,9 @@ export default function LaboratorioPage() {
               </p>
             </div>
 
-            <div className="flex items-center gap-3 self-start rounded-2xl border border-[#eadfd9] bg-white px-4 py-3 shadow-sm">
+            <div className="flex flex-wrap items-center gap-3 self-start">
+              <button type="button" onClick={printBatchReport} className="rounded-2xl border border-[#eadfd9] bg-white px-4 py-3 text-sm font-semibold text-[#a3113a] shadow-sm hover:bg-[#fff5f7]">Relatório dos lotes</button>
+            <div className="flex items-center gap-3 rounded-2xl border border-[#eadfd9] bg-white px-4 py-3 shadow-sm">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#faedf0] text-sm font-bold text-[#a3113a]">
                 L
               </div>
@@ -440,6 +454,7 @@ export default function LaboratorioPage() {
               <button type="button" onClick={() => void signOut()} className="ml-2 rounded-xl border border-[#eadfd9] px-3 py-2 text-xs font-semibold text-[#a3113a] hover:bg-[#fff5f7]">
                 Sair
               </button>
+            </div>
             </div>
           </header>
 

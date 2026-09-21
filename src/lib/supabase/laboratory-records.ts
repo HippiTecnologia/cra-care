@@ -144,6 +144,7 @@ export async function saveLaboratoryBatch(context: LaboratoryContext, batch: Dem
     laboratoryOkAt: batch.laboratoryOkAt,
     laboratoryOkBy: batch.laboratoryOkBy,
     orderType: batch.orderType,
+    indication: batch.indication,
   };
   const { error } = await getSupabaseClient().from("batches").update({
     name: batch.name ?? batch.code,

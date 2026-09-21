@@ -173,6 +173,7 @@ export type DemoBatch = {
   laboratoryOkAt?: string;
   laboratoryOkBy?: string;
   orderType?: "pedido-paciente" | "pronta-entrega";
+  indication?: "rinite" | "bacteriana" | "misto";
   status: DemoBatchStatus;
   laboratory: string;
   notes: string;

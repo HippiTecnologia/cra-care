@@ -289,6 +289,11 @@ export default function PatientPortalPage() {
     : null;
   const latestPrescription = prescriptions[0];
   const prescribedBottleCount = Math.max(0, Number(latestPrescription?.bottles ?? 0));
+  const nextAssignedBottle = safePortal.bottles.filter((bottle) => bottle.status === "recebido").sort((first, second) => first.number - second.number)[0];
+  const previousAssignedBottle = nextAssignedBottle && nextAssignedBottle.number > 1
+    ? safePortal.bottles.find((bottle) => bottle.number === nextAssignedBottle.number - 1)
+    : undefined;
+  const canStartAssignedBottle = Boolean(nextAssignedBottle && (!previousAssignedBottle || previousAssignedBottle.status === "finalizado"));
   const currentBottleRecords = safePortal.useRecords.filter(
     (record) => record.bottleId === currentBottle?.id,
   );
@@ -458,20 +463,22 @@ export default function PatientPortalPage() {
       return;
     }
 
-    const receivedBottle = portal.bottles.find((candidate) => candidate.status === "recebido");
-    const nextNumber = Math.max(0, ...portal.bottles.map((candidate) => candidate.number)) + 1;
-    const bottle: PatientBottle = receivedBottle
-      ? { ...receivedBottle, startedAt: today, status: "em-uso" }
-      : {
-          id: crypto.randomUUID(),
-          number: nextNumber,
-          receivedAt: bottleHistory.find((item) => item.number === nextNumber)?.receivedAt,
-          startedAt: today,
-          status: "em-uso",
-        };
-    const bottles = receivedBottle
-      ? portal.bottles.map((candidate) => candidate.id === receivedBottle.id ? bottle : candidate)
-      : [bottle, ...portal.bottles];
+    // O portal nunca cria frascos. Eles precisam ser vinculados ao paciente
+    // pela Secretaria/estoque antes de o paciente poder iniciar o uso.
+    const receivedBottle = portal.bottles.filter((candidate) => candidate.status === "recebido").sort((first, second) => first.number - second.number)[0];
+    if (!receivedBottle) {
+      setMessage("Ainda não há um novo frasco atribuído ao seu tratamento. Aguarde a Secretaria liberar o próximo frasco.");
+      return;
+    }
+    if (receivedBottle.number > 1) {
+      const previousBottle = portal.bottles.find((candidate) => candidate.number === receivedBottle.number - 1);
+      if (!previousBottle || previousBottle.status !== "finalizado") {
+        setMessage("Finalize o frasco anterior antes de iniciar o próximo.");
+        return;
+      }
+    }
+    const bottle: PatientBottle = { ...receivedBottle, startedAt: today, status: "em-uso" };
+    const bottles = portal.bottles.map((candidate) => candidate.id === receivedBottle.id ? bottle : candidate);
 
     updatePortal({ ...portal, bottles });
     setShowFinishForm(false);
@@ -926,7 +933,7 @@ export default function PatientPortalPage() {
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Acompanhamento do tratamento</p>
                   <h2 className="mt-2 text-2xl font-bold text-[#433438]">Meu frasco</h2>
                   <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{[{ label: "Recebidos", value: receivedBottleCount }, { label: "Iniciados", value: startedBottleCount }, { label: "Concluídos", value: safePortal.bottles.filter((bottle) => bottle.status === "finalizado").length }, { label: "Aguardando início", value: waitingBottleCount }].map((item) => <div key={item.label} className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">{item.label}</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{item.value}</p></div>)}</div>
-                  {currentBottle ? <><div className="mt-6 rounded-[24px] bg-gradient-to-br from-[#fff3f5] to-[#faf5f1] p-5"><div className="flex items-center justify-between gap-3"><span className="text-3xl">💊</span><span className="rounded-full bg-[#eaf8f3] px-3 py-1 text-xs font-semibold text-[#187157]">Em uso</span></div><h3 className="mt-4 text-xl font-bold text-[#86203b]">Frasco {currentBottle.number}</h3><p className="mt-2 text-sm text-[#66595d]">Iniciado em {formatDate(currentBottle.startedAt)}</p><p className="mt-1 text-sm text-[#66595d]">Fase: {latestPrescription?.phase ?? patient.phase ?? "A definir"}</p><p className="mt-1 text-sm text-[#66595d]">{latestPrescription?.posology ?? `${patient.drops ?? 6} gotas, conforme orientação médica.`}</p></div><div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Dias registrados</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{currentBottleRecords.length}</p></div><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Regularidade</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{regularity}%</p></div></div><button type="button" onClick={() => toggleUse(today)} className={`mt-5 w-full rounded-2xl px-4 py-3.5 text-sm font-semibold ${todayRecord ? "bg-[#edf8f3] text-[#187157]" : "bg-[#a3113a] text-white"}`}>{todayRecord ? "✓ Uso de hoje registrado" : "Registrar uso de hoje"}</button><button type="button" onClick={() => setShowFinishForm(!showFinishForm)} className="mt-3 w-full rounded-2xl border border-[#eadfd9] px-4 py-3.5 text-sm font-semibold text-[#a3113a]">Finalizar frasco</button>{showFinishForm && <div className="mt-4 rounded-2xl border border-[#eee5e0] bg-[#fcfaf8] p-4"><label className="block text-sm font-semibold text-[#544449]">Data de finalização<input type="date" min={currentBottle.startedAt} max={today} value={finishDate} onChange={(event) => setFinishDate(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal" /></label><button type="button" onClick={finishBottle} className="mt-4 w-full rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">Confirmar finalização</button></div>}</> : <div className="mt-6 rounded-[24px] border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-10 text-center"><p className="text-3xl">💊</p><h3 className="mt-4 text-lg font-bold text-[#433438]">{lastBottle ? "Tudo pronto para a próxima etapa" : "Vamos começar o seu acompanhamento?"}</h3><p className="mt-2 text-sm leading-6 text-[#817578]">{lastBottle ? "Adicione o próximo frasco para continuar registrando seu tratamento." : "Inicie seu frasco e acompanhe seus dias de uso de um jeito simples."}</p><button type="button" onClick={startBottle} disabled={Boolean(pendingAssessmentBottle) || !latestPrescription || prescribedBottleCount < 1 || startedBottleCount >= prescribedBottleCount} className="mt-5 rounded-2xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-45">{lastBottle ? "Adicionar próximo frasco" : "Iniciar frasco"}</button></div>}
+                  {currentBottle ? <><div className="mt-6 rounded-[24px] bg-gradient-to-br from-[#fff3f5] to-[#faf5f1] p-5"><div className="flex items-center justify-between gap-3"><span className="text-3xl">💊</span><span className="rounded-full bg-[#eaf8f3] px-3 py-1 text-xs font-semibold text-[#187157]">Em uso</span></div><h3 className="mt-4 text-xl font-bold text-[#86203b]">Frasco {currentBottle.number}</h3><p className="mt-2 text-sm text-[#66595d]">Iniciado em {formatDate(currentBottle.startedAt)}</p><p className="mt-1 text-sm text-[#66595d]">Fase: {latestPrescription?.phase ?? patient.phase ?? "A definir"}</p><p className="mt-1 text-sm text-[#66595d]">{latestPrescription?.posology ?? `${patient.drops ?? 6} gotas, conforme orientação médica.`}</p></div><div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Dias registrados</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{currentBottleRecords.length}</p></div><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Regularidade</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{regularity}%</p></div></div><button type="button" onClick={() => toggleUse(today)} className={`mt-5 w-full rounded-2xl px-4 py-3.5 text-sm font-semibold ${todayRecord ? "bg-[#edf8f3] text-[#187157]" : "bg-[#a3113a] text-white"}`}>{todayRecord ? "✓ Uso de hoje registrado" : "Registrar uso de hoje"}</button><button type="button" onClick={() => setShowFinishForm(!showFinishForm)} className="mt-3 w-full rounded-2xl border border-[#eadfd9] px-4 py-3.5 text-sm font-semibold text-[#a3113a]">Finalizar frasco</button>{showFinishForm && <div className="mt-4 rounded-2xl border border-[#eee5e0] bg-[#fcfaf8] p-4"><label className="block text-sm font-semibold text-[#544449]">Data de finalização<input type="date" min={currentBottle.startedAt} max={today} value={finishDate} onChange={(event) => setFinishDate(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal" /></label><button type="button" onClick={finishBottle} className="mt-4 w-full rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">Confirmar finalização</button></div>}</> : <div className="mt-6 rounded-[24px] border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-10 text-center"><p className="text-3xl">💊</p><h3 className="mt-4 text-lg font-bold text-[#433438]">{lastBottle ? "Próximo frasco" : "Vamos começar o seu acompanhamento?"}</h3><p className="mt-2 text-sm leading-6 text-[#817578]">{lastBottle ? "O próximo frasco só pode ser iniciado após a finalização do anterior e quando estiver atribuído pela equipe." : "O primeiro frasco será liberado assim que for atribuído pela equipe."}</p><button type="button" onClick={startBottle} disabled={Boolean(pendingAssessmentBottle) || !latestPrescription || prescribedBottleCount < 1 || startedBottleCount >= prescribedBottleCount || !canStartAssignedBottle} className="mt-5 rounded-2xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-45">{lastBottle ? "Iniciar próximo frasco" : "Iniciar frasco"}</button></div>}
                 </article>
 
                 {bottleHistory.length > 0 && (

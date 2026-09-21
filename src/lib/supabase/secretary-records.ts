@@ -634,6 +634,7 @@ export async function saveSecretaryBatch(context: SecretaryContext, batch: DemoB
     laboratoryOkAt: savedBatch.laboratoryOkAt,
     laboratoryOkBy: savedBatch.laboratoryOkBy,
     orderType: savedBatch.orderType,
+    indication: savedBatch.indication,
   };
   const { error } = await supabase.from("batches").upsert({
     id: batchId,

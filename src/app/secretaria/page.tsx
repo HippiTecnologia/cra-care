@@ -7,13 +7,14 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   treatmentPhases,
 } from "../medico/patient-store";
-import type { DemoPatientRecord, PatientPaymentRecord } from "../medico/patient-store";
+import type { DemoPatientRecord, DemoPrescription, PatientPaymentRecord } from "../medico/patient-store";
 import { createDefaultPortalState, type PatientPortalState } from "../paciente/patient-portal-store";
 import { patientUsername } from "../../lib/auth/credentials";
 import {
   createSecretaryPatientAccess,
   loadSecretaryPatients,
   loadSecretaryPortals,
+  loadSecretaryPrescriptions,
   saveSecretaryPatient,
   updateSecretaryPatientStatus,
   type SecretaryContext,
@@ -314,6 +315,7 @@ export default function SecretariaPage() {
   const router = useRouter();
   const cardWasDragged = useRef(false);
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
   const [context, setContext] = useState<SecretaryContext | null>(null);
   const [portals, setPortals] = useState<Record<string, PatientPortalState>>({});
   const [search, setSearch] = useState("");
@@ -343,11 +345,15 @@ export default function SecretariaPage() {
     void (async () => {
       try {
         const workspace = await loadSecretaryPatients();
-        const loadedPortals = await loadSecretaryPortals(workspace.patients.map((patient) => patient.id));
+        const [loadedPortals, loadedPrescriptions] = await Promise.all([
+          loadSecretaryPortals(workspace.patients.map((patient) => patient.id)),
+          loadSecretaryPrescriptions(workspace.context),
+        ]);
         if (!active) return;
         setContext(workspace.context);
         setPatients(workspace.patients.map(patientFromMedicalRecord));
         setPortals(loadedPortals);
+        setPrescriptions(loadedPrescriptions);
       } catch {
         if (active) setSuccessMessage("Não foi possível carregar a operação real da Secretaria.");
       }
@@ -359,6 +365,16 @@ export default function SecretariaPage() {
     "Todos os médicos",
     ...Array.from(new Set(patients.map((patient) => patient.doctor))),
   ];
+
+  const indicationsByPatient = useMemo(() => {
+    const result = new Map<string, Set<"Rinite" | "Bacteriana">>();
+    for (const prescription of prescriptions) {
+      const labels = result.get(prescription.patientId) ?? new Set<"Rinite" | "Bacteriana">();
+      labels.add(/bacteriana|imunobacteriana/i.test(prescription.treatment) ? "Bacteriana" : "Rinite");
+      result.set(prescription.patientId, labels);
+    }
+    return result;
+  }, [prescriptions]);
 
   const summary = useMemo(() => {
     return {
@@ -1033,6 +1049,9 @@ export default function SecretariaPage() {
                                 <p className="mt-1 text-xs text-[#85797c]">
                                   {patient.cpf}
                                 </p>
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {[...(indicationsByPatient.get(patient.id) ?? new Set<"Rinite" | "Bacteriana">())].map((indication) => <span key={indication} className={`rounded-full px-2 py-1 text-[10px] font-bold ${indication === "Rinite" ? "bg-[#fff0f3] text-[#a3113a]" : "bg-[#eaf6f9] text-[#28728a]"}`}>{indication}</span>)}
+                                </div>
                               </div>
 
                               {isBirthdayToday(

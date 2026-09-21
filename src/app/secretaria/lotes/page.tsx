@@ -23,6 +23,7 @@ import {
 } from "../../../lib/supabase/secretary-records";
 
 type BatchFilter = "todos" | DemoBatchStatus;
+type BatchIndication = "rinite" | "bacteriana";
 
 const technicalDoctor = {
   name: "Dr. Sérgio Fabricio Maniglia",
@@ -97,6 +98,14 @@ function defaultBatchName() {
   return `${String(today.getDate()).padStart(2, "0")}-${String(today.getMonth() + 1).padStart(2, "0")}-${today.getFullYear()}`;
 }
 
+function indicationForTreatment(treatment: string): BatchIndication {
+  return /bacteriana|imunobacteriana/i.test(treatment) ? "bacteriana" : "rinite";
+}
+
+function indicationLabel(indication?: DemoBatch["indication"]) {
+  return indication === "bacteriana" ? "Bacteriana / Imunobacteriana" : indication === "misto" ? "Indicações mistas" : "Rinite";
+}
+
 export default function SecretariaLotesPage() {
   const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
   const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
@@ -115,6 +124,7 @@ export default function SecretariaLotesPage() {
   const [conferenceResponsible, setConferenceResponsible] = useState("Equipe da secretaria CRA");
   const [conferenceNotes, setConferenceNotes] = useState("");
   const [orderType, setOrderType] = useState<"pedido-paciente" | "pronta-entrega">("pedido-paciente");
+  const [batchIndication, setBatchIndication] = useState<BatchIndication>("rinite");
   const [paymentConfirmations, setPaymentConfirmations] = useState<Record<string, { payment: boolean; asaas: boolean }>>({});
   const [readyItems, setReadyItems] = useState<DemoBatchItem[]>([]);
   const [readyFormula, setReadyFormula] = useState(availableFormulas[0]);
@@ -203,25 +213,10 @@ export default function SecretariaLotesPage() {
     [editingBatch],
   );
 
-  const availablePrescriptions = useMemo(() => {
-    const latestPatientIds = new Set<string>();
-
-    return prescriptions.filter((prescription) => {
-      if (latestPatientIds.has(prescription.patientId)) {
-        return false;
-      }
-
-      latestPatientIds.add(prescription.patientId);
-
-      const patient = patientById.get(prescription.patientId);
-
-      return (
-        Boolean(patient) &&
-        ["com-pedido", "ativo", "em-conversa"].includes(patient?.status ?? "") &&
-        !includedPrescriptionIds.has(prescription.id)
-      );
-    });
-  }, [includedPrescriptionIds, patientById, prescriptions]);
+  const availablePrescriptions = useMemo(() => prescriptions.filter((prescription) => {
+    const patient = patientById.get(prescription.patientId);
+    return Boolean(patient) && ["com-pedido", "ativo", "em-conversa"].includes(patient?.status ?? "") && !includedPrescriptionIds.has(prescription.id) && indicationForTreatment(prescription.treatment) === batchIndication;
+  }), [batchIndication, includedPrescriptionIds, patientById, prescriptions]);
 
   const filteredPrescriptions = useMemo(() => {
     const normalized = normalizeSearch(search);
@@ -374,6 +369,7 @@ export default function SecretariaLotesPage() {
       name: batchName.trim(),
       createdAt,
       orderType,
+      indication: batchIndication,
       status: "rascunho",
       laboratory: laboratory.trim(),
       notes: notes.trim(),
@@ -426,6 +422,7 @@ export default function SecretariaLotesPage() {
     setExpandedBatchId(batch.id);
     setBatchName(batch.name ?? defaultBatchName());
     setOrderType(batch.orderType ?? "pedido-paciente");
+    setBatchIndication(batch.indication === "bacteriana" ? "bacteriana" : "rinite");
     setLaboratory(batch.laboratory);
     setSearch("");
     setError("");
@@ -727,6 +724,13 @@ export default function SecretariaLotesPage() {
                 </button>
               ))}
             </div>
+            <div className="mt-5 border-t border-[#eee5e0] pt-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Indicação do lote</p>
+              <p className="mt-1 text-sm text-[#817578]">Selecione a indicação antes de escolher as receitas. Um paciente com as duas indicações aparecerá em ambas as listas.</p>
+              <div className="mt-3 flex flex-wrap gap-3">
+                {([['rinite', 'Rinite'], ['bacteriana', 'Bacteriana / Imunobacteriana']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => { setBatchIndication(value); setSelectedIds([]); setError(""); }} className={`rounded-xl border px-4 py-3 text-sm font-semibold ${batchIndication === value ? "border-[#b91142] bg-[#fff5f7] text-[#a3113a]" : "border-[#e9dfda] bg-white text-[#66595d]"}`}>{label}</button>)}
+              </div>
+            </div>
           </div>
 
           <div className="mt-7 grid gap-6 2xl:grid-cols-[minmax(0,1.18fr)_410px]">
@@ -736,9 +740,7 @@ export default function SecretariaLotesPage() {
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <h2 className="text-xl font-bold text-[#433438]">Adicionar paciente ao lote</h2>
-                  <p className="mt-1 text-sm text-[#817578]">
-                    {search.trim() ? "Resultados da pesquisa por nome ou CPF." : "Os 5 últimos pacientes utilizados aparecem abaixo. Pesquise para localizar outro paciente."}
-                  </p>
+                  <p className="mt-1 text-sm text-[#817578]">{search.trim() ? "Resultados da pesquisa por nome ou CPF." : `Receitas de ${indicationLabel(batchIndication)} disponíveis. Escolha a indicação correta para cada paciente.`}</p>
                 </div>
                 <input
                   value={search}
@@ -804,6 +806,7 @@ export default function SecretariaLotesPage() {
                         </div>
 
                         <div className="mt-4 grid gap-2 text-xs text-[#6e6165] sm:grid-cols-3">
+                          <span><strong>Indicação:</strong> {prescription.treatment}</span>
                           <span><strong>Fase:</strong> {prescription.phase}</span>
                           <span><strong>Frascos:</strong> {prescription.bottles}</span>
                           <span><strong>Receita:</strong> {formatDate(prescription.createdAt)}</span>
@@ -888,7 +891,7 @@ export default function SecretariaLotesPage() {
                 <label className="mt-5 block text-sm font-semibold text-[#544449]">Adicionar em lote já aberto
                   <select defaultValue="" onChange={(event) => { const batch = batches.find((item) => item.id === event.target.value); if (batch) editDraftBatch(batch); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 font-normal outline-none focus:border-[#b91142]">
                     <option value="">Criar um novo lote</option>
-                    {openPatientBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name ?? batch.code} · {batch.items.length} paciente(s)</option>)}
+                    {openPatientBatches.map((batch) => <option key={batch.id} value={batch.id}>{batch.name ?? batch.code} · {indicationLabel(batch.indication)} · {batch.items.length} paciente(s)</option>)}
                   </select>
                 </label>
               )}
@@ -1046,6 +1049,7 @@ export default function SecretariaLotesPage() {
                           <div className="flex flex-wrap items-center gap-3">
                             <h3 className="text-base font-bold text-[#433438]">Lote {batch.name ?? batch.code}</h3>
                             <span className={`rounded-full px-3 py-1 text-xs font-semibold ${batch.orderType === "pronta-entrega" ? "bg-[#fff4e4] text-[#966419]" : "bg-[#f3edff] text-[#7351a3]"}`}>{batch.orderType === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente"}</span>
+                            <span className="rounded-full bg-[#edf8f3] px-3 py-1 text-xs font-semibold text-[#187157]">{indicationLabel(batch.indication)}</span>
                             <span className={`rounded-full px-3 py-1 text-xs font-semibold ${status.badge}`}>
                               {status.label}
                             </span>
