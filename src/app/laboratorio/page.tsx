@@ -17,6 +17,8 @@ import {
 } from "../../lib/supabase/laboratory-records";
 
 type LaboratoryFilter = "todos" | "enviado" | "em-producao" | "pronto";
+type ReportStatus = "todos" | DemoBatchStatus;
+type ReportIndication = "todas" | "rinite" | "bacteriana" | "misto";
 
 const technicalDoctor = {
   name: "Dr. Sérgio Fabricio Maniglia",
@@ -77,6 +79,16 @@ function escapeReportHtml(value: string | number) {
   return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 
+function batchStatusLabel(status: DemoBatchStatus) {
+  return status === "rascunho" ? "Rascunho" : statusAppearance[status].label;
+}
+
+function indicationLabel(indication?: DemoBatch["indication"]) {
+  if (indication === "bacteriana") return "Bacteriana / Imunobacteriana";
+  if (indication === "misto") return "Misto";
+  return "Rinite";
+}
+
 export default function LaboratorioPage() {
   const router = useRouter();
   const [batches, setBatches] = useState<DemoBatch[]>([]);
@@ -87,6 +99,13 @@ export default function LaboratorioPage() {
   const [search, setSearch] = useState("");
   const [responsible, setResponsible] = useState("Equipe de manipulação CRA");
   const [productionNotes, setProductionNotes] = useState("");
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportMonth, setReportMonth] = useState("");
+  const [reportIndication, setReportIndication] = useState<ReportIndication>("todas");
+  const [reportStatus, setReportStatus] = useState<ReportStatus>("todos");
+  const [reportPatient, setReportPatient] = useState("");
+  const [reportTreatment, setReportTreatment] = useState("todos");
+  const [reportDoctor, setReportDoctor] = useState("todos");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -170,11 +189,44 @@ export default function LaboratorioPage() {
     0,
   );
 
+  const reportTreatments = useMemo(
+    () => Array.from(new Set(batches.flatMap((batch) => batch.items.map((item) => item.treatment)).filter(Boolean))).sort(),
+    [batches],
+  );
+  const reportDoctors = useMemo(
+    () => Array.from(new Set(batches.flatMap((batch) => batch.items.map((item) => item.doctor)).filter(Boolean))).sort(),
+    [batches],
+  );
+  const reportBatches = useMemo(() => {
+    const patientQuery = normalizeSearch(reportPatient);
+    return batches.filter((batch) => {
+      if (reportMonth && !batch.createdAt.startsWith(reportMonth)) return false;
+      if (reportIndication !== "todas" && batch.indication !== reportIndication) return false;
+      if (reportStatus !== "todos" && batch.status !== reportStatus) return false;
+      return batch.items.some((item) => {
+        const matchesPatient = !patientQuery || normalizeSearch(`${item.patientName} ${item.patientCpf}`).includes(patientQuery);
+        const matchesTreatment = reportTreatment === "todos" || item.treatment === reportTreatment;
+        const matchesDoctor = reportDoctor === "todos" || item.doctor === reportDoctor;
+        return matchesPatient && matchesTreatment && matchesDoctor;
+      });
+    });
+  }, [batches, reportDoctor, reportIndication, reportMonth, reportPatient, reportStatus, reportTreatment]);
+
+  const reportRows = useMemo(() => {
+    const patientQuery = normalizeSearch(reportPatient);
+    return reportBatches.flatMap((batch) => batch.items.filter((item) => {
+      const matchesPatient = !patientQuery || normalizeSearch(`${item.patientName} ${item.patientCpf}`).includes(patientQuery);
+      const matchesTreatment = reportTreatment === "todos" || item.treatment === reportTreatment;
+      const matchesDoctor = reportDoctor === "todos" || item.doctor === reportDoctor;
+      return matchesPatient && matchesTreatment && matchesDoctor;
+    }).map((item) => ({ batch, item })));
+  }, [reportBatches, reportDoctor, reportPatient, reportTreatment]);
+
   function printBatchReport() {
-    const rows = filteredBatches.flatMap((batch) => batch.items.map((item) => `<tr><td>${escapeReportHtml(batch.name ?? batch.code)}</td><td>${escapeReportHtml(batch.indication === "bacteriana" ? "Bacteriana / Imunobacteriana" : batch.indication === "misto" ? "Misto" : "Rinite")}</td><td>${escapeReportHtml(batch.status === "rascunho" ? "Rascunho" : statusAppearance[batch.status].label)}</td><td>${escapeReportHtml(item.patientName || "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf || "—")}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase || "—")}</td><td>${escapeReportHtml(item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ") || "—")}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(item.doctor || "—")}</td><td>${escapeReportHtml(formatDate(batch.createdAt))}</td></tr>`)).join("");
+    const rows = reportRows.map(({ batch, item }) => `<tr><td>${escapeReportHtml(batch.name ?? batch.code)}</td><td>${escapeReportHtml(indicationLabel(batch.indication))}</td><td>${escapeReportHtml(batchStatusLabel(batch.status))}</td><td>${escapeReportHtml(item.patientName || "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf || "—")}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase || "—")}</td><td>${escapeReportHtml(item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ") || "—")}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(item.doctor || "—")}</td><td>${escapeReportHtml(formatDate(batch.createdAt))}</td></tr>`).join("");
     const reportWindow = window.open("", "_blank");
     if (!reportWindow) { setError("Permita a abertura de janelas para gerar o relatório."); return; }
-    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de lotes · Laboratório</title><style>@page{size:A4 landscape;margin:10mm}body{font-family:Arial,sans-serif;color:#34292d;font-size:9px}h1{color:#a3113a;margin:0}table{border-collapse:collapse;width:100%;margin-top:14px}th,td{border:1px solid #ddd;padding:5px;text-align:left;vertical-align:top}th{background:#f1e6e8;font-size:8px}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Imprimir / salvar em PDF</button><h1>CRA Care · Relatório de lotes</h1><p>Laboratório · Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${filteredBatches.length} lote(s)</p><table><thead><tr><th>Lote</th><th>Indicação</th><th>Status</th><th>Paciente/origem</th><th>CPF</th><th>Tratamento</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Médico</th><th>Criação</th></tr></thead><tbody>${rows || '<tr><td colspan="11">Nenhum lote no filtro atual.</td></tr>'}</tbody></table></body></html>`);
+    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de lotes · Laboratório</title><style>@page{size:A4 landscape;margin:10mm}body{font-family:Arial,sans-serif;color:#34292d;font-size:9px}h1{color:#a3113a;margin:0}table{border-collapse:collapse;width:100%;margin-top:14px}th,td{border:1px solid #ddd;padding:5px;text-align:left;vertical-align:top}th{background:#f1e6e8;font-size:8px}@media print{button{display:none}}</style></head><body><button onclick="window.print()">Imprimir / salvar em PDF</button><h1>CRA Care · Relatório de lotes</h1><p>Laboratório · Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${reportBatches.length} lote(s) · ${reportRows.length} registro(s)</p><table><thead><tr><th>Lote</th><th>Indicação</th><th>Status</th><th>Paciente/origem</th><th>CPF</th><th>Tratamento</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Médico</th><th>Criação</th></tr></thead><tbody>${rows || '<tr><td colspan="11">Nenhum registro encontrado com os filtros selecionados.</td></tr>'}</tbody></table></body></html>`);
     reportWindow.document.close(); reportWindow.focus();
   }
 
@@ -442,7 +494,7 @@ export default function LaboratorioPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3 self-start">
-              <button type="button" onClick={printBatchReport} className="rounded-2xl border border-[#eadfd9] bg-white px-4 py-3 text-sm font-semibold text-[#a3113a] shadow-sm hover:bg-[#fff5f7]">Relatório dos lotes</button>
+              <button type="button" onClick={() => setReportOpen(true)} className="rounded-2xl border border-[#eadfd9] bg-white px-4 py-3 text-sm font-semibold text-[#a3113a] shadow-sm hover:bg-[#fff5f7]">Relatórios</button>
             <div className="flex items-center gap-3 rounded-2xl border border-[#eadfd9] bg-white px-4 py-3 shadow-sm">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#faedf0] text-sm font-bold text-[#a3113a]">
                 L
@@ -464,6 +516,59 @@ export default function LaboratorioPage() {
               <button type="button" onClick={() => setMessage("")} aria-label="Fechar mensagem">
                 ×
               </button>
+            </div>
+          )}
+
+          {reportOpen && (
+            <div className="fixed inset-0 z-50 overflow-y-auto bg-[#34292d]/45 px-4 py-6 sm:py-10">
+              <div className="mx-auto w-full max-w-5xl rounded-[28px] bg-white p-5 shadow-2xl sm:p-7">
+                <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#eee5e0] pb-5">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#9c173c]">Laboratório</p>
+                    <h2 className="mt-1 text-2xl font-bold text-[#433438]">Relatório dos lotes</h2>
+                    <p className="mt-1 text-sm text-[#817578]">Defina os filtros e gere um relatório completo dos lotes e pacientes vinculados.</p>
+                  </div>
+                  <button type="button" onClick={() => setReportOpen(false)} className="rounded-xl border border-[#eadfd9] px-3 py-2 text-sm font-semibold text-[#715f64] hover:bg-[#fff5f7]">Fechar</button>
+                </div>
+
+                <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <label className="text-sm font-semibold text-[#5d4c51]">Mês de criação
+                    <input type="month" value={reportMonth} onChange={(event) => setReportMonth(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]" />
+                  </label>
+                  <label className="text-sm font-semibold text-[#5d4c51]">Indicação
+                    <select value={reportIndication} onChange={(event) => setReportIndication(event.target.value as ReportIndication)} className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
+                      <option value="todas">Todas as indicações</option><option value="rinite">Rinite</option><option value="bacteriana">Bacteriana / Imunobacteriana</option><option value="misto">Misto</option>
+                    </select>
+                  </label>
+                  <label className="text-sm font-semibold text-[#5d4c51]">Status do lote
+                    <select value={reportStatus} onChange={(event) => setReportStatus(event.target.value as ReportStatus)} className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
+                      <option value="todos">Todos os status</option>
+                      {(["rascunho", "enviado", "em-producao", "pronto", "conferido"] as DemoBatchStatus[]).map((status) => <option key={status} value={status}>{batchStatusLabel(status)}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-sm font-semibold text-[#5d4c51]">Paciente ou CPF
+                    <input value={reportPatient} onChange={(event) => setReportPatient(event.target.value)} placeholder="Nome ou CPF" className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none placeholder:text-[#aa9da0] focus:border-[#b91142]" />
+                  </label>
+                  <label className="text-sm font-semibold text-[#5d4c51]">Tratamento
+                    <select value={reportTreatment} onChange={(event) => setReportTreatment(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
+                      <option value="todos">Todos os tratamentos</option>{reportTreatments.map((treatment) => <option key={treatment} value={treatment}>{treatment}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-sm font-semibold text-[#5d4c51]">Médico responsável
+                    <select value={reportDoctor} onChange={(event) => setReportDoctor(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
+                      <option value="todos">Todos os médicos</option>{reportDoctors.map((doctor) => <option key={doctor} value={doctor}>{doctor}</option>)}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[#fbf6f3] px-4 py-3">
+                  <p className="text-sm text-[#65565a]"><strong className="text-[#433438]">{reportBatches.length}</strong> lote(s) e <strong className="text-[#433438]">{reportRows.length}</strong> registro(s) encontrados.</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => { setReportMonth(""); setReportIndication("todas"); setReportStatus("todos"); setReportPatient(""); setReportTreatment("todos"); setReportDoctor("todos"); }} className="rounded-xl border border-[#e3d4cf] bg-white px-4 py-2.5 text-sm font-semibold text-[#725e64] hover:bg-[#fff5f7]">Limpar filtros</button>
+                    <button type="button" onClick={printBatchReport} className="rounded-xl bg-[#a3113a] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#8d0e33]">Gerar PDF / imprimir</button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
