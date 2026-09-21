@@ -75,6 +75,10 @@ function normalizeSearch(value: string) {
     .replace(/[.\-/]/g, "");
 }
 
+function normalizeDoctorKey(value: string) {
+  return normalizeSearch(value).replace(/^dra?\s+/, "").trim();
+}
+
 function escapeReportHtml(value: string | number) {
   return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
@@ -193,10 +197,16 @@ export default function LaboratorioPage() {
     () => Array.from(new Set(batches.flatMap((batch) => batch.items.map((item) => item.treatment)).filter(Boolean))).sort(),
     [batches],
   );
-  const reportDoctors = useMemo(
-    () => Array.from(new Set(batches.flatMap((batch) => batch.items.map((item) => item.doctor)).filter(Boolean))).sort(),
-    [batches],
-  );
+  const reportDoctors = useMemo(() => {
+    const doctors = new Map<string, string>();
+    batches.flatMap((batch) => batch.items.map((item) => item.doctor)).filter(Boolean).forEach((doctor) => {
+      const key = normalizeDoctorKey(doctor);
+      const current = doctors.get(key);
+      // Mantém a apresentação profissional quando houver registros antigos sem o prefixo.
+      if (!current || doctor.toLowerCase().startsWith("dr")) doctors.set(key, doctor);
+    });
+    return Array.from(doctors, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  }, [batches]);
   const reportBatches = useMemo(() => {
     const patientQuery = normalizeSearch(reportPatient);
     return batches.filter((batch) => {
@@ -206,7 +216,7 @@ export default function LaboratorioPage() {
       return batch.items.some((item) => {
         const matchesPatient = !patientQuery || normalizeSearch(`${item.patientName} ${item.patientCpf}`).includes(patientQuery);
         const matchesTreatment = reportTreatment === "todos" || item.treatment === reportTreatment;
-        const matchesDoctor = reportDoctor === "todos" || item.doctor === reportDoctor;
+        const matchesDoctor = reportDoctor === "todos" || normalizeDoctorKey(item.doctor) === reportDoctor;
         return matchesPatient && matchesTreatment && matchesDoctor;
       });
     });
@@ -217,7 +227,7 @@ export default function LaboratorioPage() {
     return reportBatches.flatMap((batch) => batch.items.filter((item) => {
       const matchesPatient = !patientQuery || normalizeSearch(`${item.patientName} ${item.patientCpf}`).includes(patientQuery);
       const matchesTreatment = reportTreatment === "todos" || item.treatment === reportTreatment;
-      const matchesDoctor = reportDoctor === "todos" || item.doctor === reportDoctor;
+      const matchesDoctor = reportDoctor === "todos" || normalizeDoctorKey(item.doctor) === reportDoctor;
       return matchesPatient && matchesTreatment && matchesDoctor;
     }).map((item) => ({ batch, item })));
   }, [reportBatches, reportDoctor, reportPatient, reportTreatment]);
@@ -556,7 +566,7 @@ export default function LaboratorioPage() {
                   </label>
                   <label className="text-sm font-semibold text-[#5d4c51]">Médico responsável
                     <select value={reportDoctor} onChange={(event) => setReportDoctor(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
-                      <option value="todos">Todos os médicos</option>{reportDoctors.map((doctor) => <option key={doctor} value={doctor}>{doctor}</option>)}
+                      <option value="todos">Todos os médicos</option>{reportDoctors.map((doctor) => <option key={doctor.value} value={doctor.value}>{doctor.label}</option>)}
                     </select>
                   </label>
                 </div>
