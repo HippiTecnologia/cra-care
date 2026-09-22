@@ -818,6 +818,7 @@ export default function MedicalPatientPage() {
                   </label>
                   <label className="text-sm text-[#544449]">Frequência
                     <select value={frequency} onChange={(event) => { setFrequency(event.target.value); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]">
+                      <option>todos os dias</option>
                       <option>3 vezes por semana</option>
                       <option>2 vezes por semana</option>
                       <option>1 vez por semana</option>
