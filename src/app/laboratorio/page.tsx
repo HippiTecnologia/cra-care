@@ -93,6 +93,12 @@ function indicationLabel(indication?: DemoBatch["indication"]) {
   return "Rinite";
 }
 
+function isRiniteBatch(batch: DemoBatch) {
+  if (batch.indication) return batch.indication === "rinite";
+  // Compatibilidade com lotes antigos, que ainda não guardavam a indicação.
+  return batch.items.every((item) => !/bacteriana|imunobacteriana/i.test(item.treatment));
+}
+
 export default function LaboratorioPage() {
   const router = useRouter();
   const [batches, setBatches] = useState<DemoBatch[]>([]);
@@ -126,7 +132,7 @@ export default function LaboratorioPage() {
         const workspace = await loadLaboratoryWorkspace();
         if (!active) return;
         setContext(workspace.context);
-        setBatches(workspace.batches.filter((batch) => batch.status !== "rascunho"));
+        setBatches(workspace.batches.filter((batch) => batch.status !== "rascunho" && isRiniteBatch(batch)));
         setPrescriptions(workspace.prescriptions);
         setLoaded(true);
       } catch (cause) {

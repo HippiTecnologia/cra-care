@@ -484,8 +484,24 @@ export default function SecretariaLotesPage() {
 
   async function sendBatch(batch: DemoBatch) {
     if (batch.items.length === 0) {
-      setError("Adicione pelo menos um paciente ou frasco antes de enviar o lote ao laboratório.");
+      setError("Adicione pelo menos um paciente ou frasco antes de preparar o lote.");
       setExpandedBatchId(batch.id);
+      return;
+    }
+
+    const isImmunobacterial = batch.indication === "bacteriana";
+    if (isImmunobacterial) {
+      await persistBatch({
+        ...batch,
+        status: "pronto",
+        laboratory: "Fluxo direto da secretaria",
+        sentAt: new Date().toISOString(),
+        productionFinishedAt: new Date().toISOString(),
+        productionNotes: batch.productionNotes || "Imunobacteriana liberada no fluxo direto da secretaria; não enviada ao laboratório.",
+      });
+      if (editingBatchId === batch.id) setEditingBatchId(null);
+      setMessage(`Lote ${batch.name ?? batch.code} de Imunobacteriana preparado para conferência direta e estoque.`);
+      setError("");
       return;
     }
 
@@ -1055,7 +1071,7 @@ export default function SecretariaLotesPage() {
                             </span>
                           </div>
                           <p className="mt-2 text-xs text-[#776b6e]">
-                            {batch.code} · Criado em {formatDate(batch.createdAt)} · {batch.laboratory}
+                            {batch.code} · Criado em {formatDate(batch.createdAt)} · {batch.indication === "bacteriana" ? "Fluxo direto da secretaria" : batch.laboratory}
                           </p>
                           <p className="mt-1 text-xs text-[#776b6e]">
                             {batch.items.length} {batch.orderType === "pronta-entrega" ? "fórmula(s)" : "paciente(s)"} · {bottleCount} frasco(s) · {(status ?? { description: "Status não informado" }).description}
@@ -1083,7 +1099,7 @@ export default function SecretariaLotesPage() {
                                 disabled={batch.items.length === 0}
                                 className="rounded-xl bg-[#a3113a] px-4 py-3 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45"
                               >
-                                Enviar ao laboratório
+                                {batch.indication === "bacteriana" ? "Preparar para conferência" : "Enviar ao laboratório"}
                               </button>
                             </>
                           )}
@@ -1190,7 +1206,7 @@ export default function SecretariaLotesPage() {
 
                           {batch.productionNotes && (
                             <p className="mt-4 rounded-xl bg-[#eef3ff] px-4 py-3 text-xs text-[#3c5da0]">
-                              <strong>Observações do laboratório:</strong> {batch.productionNotes}
+                              <strong>{batch.indication === "bacteriana" ? "Observações do lote:" : "Observações do laboratório:"}</strong> {batch.productionNotes}
                             </p>
                           )}
 
@@ -1204,7 +1220,7 @@ export default function SecretariaLotesPage() {
                                   {(batch.checkedPrescriptionIds ?? []).length}/{batch.items.length} item(ns) conferido(s)
                                 </span>
                               </div>
-                              {batch.laboratoryOkAt ? <p className="mt-2 rounded-xl bg-[#eaf8f3] px-3 py-2 text-xs font-semibold text-[#187157]">✓ OK do laboratório registrado por {batch.laboratoryOkBy} em {formatDate(batch.laboratoryOkAt)}</p> : <p className="mt-2 rounded-xl bg-[#fff8eb] px-3 py-2 text-xs font-semibold text-[#88642c]">Aguardando o OK do laboratório.</p>}
+                              {batch.indication === "bacteriana" ? <p className="mt-2 rounded-xl bg-[#eaf8f3] px-3 py-2 text-xs font-semibold text-[#187157]">✓ Imunobacteriana segue direto para conferência da secretaria, sem passagem pelo laboratório.</p> : batch.laboratoryOkAt ? <p className="mt-2 rounded-xl bg-[#eaf8f3] px-3 py-2 text-xs font-semibold text-[#187157]">✓ OK do laboratório registrado por {batch.laboratoryOkBy} em {formatDate(batch.laboratoryOkAt)}</p> : <p className="mt-2 rounded-xl bg-[#fff8eb] px-3 py-2 text-xs font-semibold text-[#88642c]">Aguardando o OK do laboratório.</p>}
 
                               <label className="mt-4 block text-xs font-semibold text-[#544449]">
                                 Responsável pela conferência
@@ -1235,10 +1251,10 @@ export default function SecretariaLotesPage() {
                               <button
                                 type="button"
                                 onClick={() => approveBatch(batch)}
-                                disabled={!batch.laboratoryOkAt || (batch.checkedPrescriptionIds ?? []).length !== batch.items.length}
+                                disabled={(batch.indication !== "bacteriana" && !batch.laboratoryOkAt) || (batch.checkedPrescriptionIds ?? []).length !== batch.items.length}
                                 className="mt-4 w-full rounded-xl bg-[#187157] px-4 py-3 text-sm font-semibold text-white hover:bg-[#115842] disabled:cursor-not-allowed disabled:opacity-45"
                               >
-                                {batch.laboratoryOkAt ? "Aprovar conferência e lançar no estoque" : "Aguardando OK do laboratório"}
+                                {batch.indication === "bacteriana" || batch.laboratoryOkAt ? "Aprovar conferência e lançar no estoque" : "Aguardando OK do laboratório"}
                               </button>
                             </div>
                           )}
@@ -1259,7 +1275,7 @@ export default function SecretariaLotesPage() {
 
                           {batch.sentAt && (
                             <p className="mt-4 text-xs text-[#776b6e]">
-                              Enviado ao laboratório em {formatDate(batch.sentAt)}.
+                              {batch.indication === "bacteriana" ? "Preparado diretamente pela secretaria em " : "Enviado ao laboratório em "}{formatDate(batch.sentAt)}.
                             </p>
                           )}
                         </div>

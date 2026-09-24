@@ -130,7 +130,7 @@ export async function loadSecretaryContext(): Promise<SecretaryContext> {
     .select("id, clinic_id, full_name, role")
     .eq("id", user.id)
     .single();
-  if (error || !data?.clinic_id || !["secretaria", "admin", "super_admin"].includes(data.role)) {
+  if (error || !data?.clinic_id || data.role !== "secretaria") {
     throw new Error("Este acesso não pertence à Secretaria.");
   }
   return { id: data.id, clinicId: data.clinic_id, fullName: data.full_name, role: data.role };
@@ -737,7 +737,7 @@ export async function confirmSecretaryBatch(
   patients: DemoPatientRecord[],
 ) {
   if (batch.status !== "pronto") throw new Error("Este lote já foi conferido ou ainda não está pronto.");
-  if (!batch.laboratoryOkAt || !batch.laboratoryOkBy) {
+  if (batch.indication !== "bacteriana" && (!batch.laboratoryOkAt || !batch.laboratoryOkBy)) {
     throw new Error("Aguarde o OK do laboratório antes de liberar o lote para estoque.");
   }
   const checkedIds = new Set(batch.checkedPrescriptionIds ?? []);
