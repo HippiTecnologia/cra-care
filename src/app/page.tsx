@@ -17,6 +17,14 @@ const roles: UserRole[] = [
   "Administrador",
 ];
 
+const profileRoleForLogin: Record<Exclude<UserRole, "Paciente">, string[]> = {
+  "Médico": ["medico"],
+  "Secretaria": ["secretaria"],
+  "Laboratório": ["laboratorio"],
+  "Enfermagem": ["enfermagem"],
+  "Administrador": ["admin", "super_admin"],
+};
+
 export default function Home() {
   const router = useRouter();
   const [selectedRole, setSelectedRole] = useState<UserRole>("Paciente");
@@ -112,6 +120,12 @@ export default function Home() {
       else window.localStorage.removeItem("cra-care-keep-signed-in");
       const { data: profile } = await supabase.from("profiles").select("role, must_change_password").eq("id", data.user.id).maybeSingle();
       if (profile) {
+        const allowedRoles = selectedRole === "Paciente" ? [] : profileRoleForLogin[selectedRole];
+        if (!allowedRoles.includes(profile.role)) {
+          await supabase.auth.signOut();
+          setMessage(`Este usuário pertence ao perfil ${profile.role === "admin" || profile.role === "super_admin" ? "Administrador" : profile.role === "secretaria" ? "Secretaria" : profile.role === "laboratorio" ? "Laboratório" : profile.role === "enfermagem" ? "Enfermagem" : "Médico"}. Selecione a aba correta para entrar.`);
+          return;
+        }
         if (profile.must_change_password && requiresPasswordChange(profile.role as AccountRole)) {
           router.push("/alterar-senha");
           return;
