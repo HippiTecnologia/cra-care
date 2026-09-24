@@ -29,7 +29,7 @@ export default function ChangePasswordPage() {
       if (error || !data.user) throw error;
       const { data: profile } = await supabase.from("profiles").update({ must_change_password: false }).eq("id", data.user.id).select("role").single();
       if (!profile) throw new Error("Perfil não encontrado.");
-      const destination = profile.role === "admin" || profile.role === "super_admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : "/medico";
+      const destination = profile.role === "super_admin" ? "/central" : profile.role === "admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : "/medico";
       if (profile.role === "admin" || profile.role === "super_admin") window.sessionStorage.setItem("cra-care-demo-admin-session", JSON.stringify({ signedInAt: new Date().toISOString() }));
       router.replace(destination);
     } catch {

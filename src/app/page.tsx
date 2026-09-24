@@ -47,7 +47,7 @@ export default function Home() {
         if (cancelled) return;
         if (profile) {
           if (profile.must_change_password && requiresPasswordChange(profile.role as AccountRole)) { router.replace("/alterar-senha"); return; }
-          const destination = profile.role === "admin" || profile.role === "super_admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : profile.role === "enfermagem" ? "/enfermagem" : "/medico";
+          const destination = profile.role === "super_admin" ? "/central" : profile.role === "admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : profile.role === "enfermagem" ? "/enfermagem" : "/medico";
           router.replace(destination);
           return;
         }
@@ -130,7 +130,7 @@ export default function Home() {
           router.push("/alterar-senha");
           return;
         }
-        const destination = profile.role === "admin" || profile.role === "super_admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : profile.role === "enfermagem" ? "/enfermagem" : "/medico";
+        const destination = profile.role === "super_admin" ? "/central" : profile.role === "admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : profile.role === "enfermagem" ? "/enfermagem" : "/medico";
         if (profile.role === "admin" || profile.role === "super_admin") window.sessionStorage.setItem("cra-care-demo-admin-session", JSON.stringify({ signedInAt: new Date().toISOString() }));
         router.push(destination);
         return;
