@@ -94,9 +94,14 @@ function indicationLabel(indication?: DemoBatch["indication"]) {
 }
 
 function isRiniteBatch(batch: DemoBatch) {
-  if (batch.indication) return batch.indication === "rinite";
-  // Compatibilidade com lotes antigos, que ainda não guardavam a indicação.
-  return batch.items.every((item) => !/bacteriana|imunobacteriana/i.test(item.treatment));
+  // A Imunobacteriana é sempre atendida por laboratório externo. A checagem
+  // pelos itens também protege os lotes antigos que foram salvos com a
+  // indicação incorreta ou sem indicação.
+  if (batch.items.some((item) => /bacteriana|imunobacteriana/i.test(item.treatment))) {
+    return false;
+  }
+
+  return batch.indication !== "bacteriana" && batch.indication !== "misto";
 }
 
 export default function LaboratorioPage() {

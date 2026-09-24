@@ -84,6 +84,21 @@ function parseMoney(value: string) {
   return Number(value.includes(",") ? value.replace(/\./g, "").replace(",", ".") : value);
 }
 
+function formatBillingDocument(value: string, type: "cpf" | "cnpj") {
+  const digits = value.replace(/\D/g, "").slice(0, type === "cnpj" ? 14 : 11);
+  if (type === "cnpj") {
+    return digits
+      .replace(/^(\d{2})(\d)/, "$1.$2")
+      .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+      .replace(/^(\d{2})\.(\d{3})\.(\d{3})(\d)/, "$1.$2.$3/$4")
+      .replace(/(\d{4})(\d)/, "$1-$2");
+  }
+  return digits
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+}
+
 export default function PatientRecordsPage() {
   const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
   const [portals, setPortals] = useState<Record<string, PatientPortalState>>({});
@@ -361,13 +376,14 @@ export default function PatientRecordsPage() {
               <Field label="Cidade"><input value={draft.city ?? ""} onChange={(event) => updateDraft("city", event.target.value)} className={inputClass} /></Field>
               <Field label="Estado"><input value={draft.state ?? ""} onChange={(event) => updateDraft("state", event.target.value)} maxLength={2} className={inputClass} /></Field>
               <Field label="Nome para nota fiscal"><input value={draft.billingName ?? ""} onChange={(event) => updateDraft("billingName", event.target.value)} className={inputClass} /></Field>
-              <Field label="CPF para nota fiscal"><input value={draft.billingCpf ?? ""} onChange={(event) => updateDraft("billingCpf", event.target.value)} className={inputClass} /></Field>
+              <Field label="Tipo de documento"><select value={draft.billingDocumentType ?? "cpf"} onChange={(event) => updateDraft("billingDocumentType", event.target.value as "cpf" | "cnpj")} className={inputClass}><option value="cpf">CPF</option><option value="cnpj">CNPJ</option></select></Field>
+              <Field label={`${draft.billingDocumentType === "cnpj" ? "CNPJ" : "CPF"} para nota fiscal`}><input inputMode="numeric" maxLength={draft.billingDocumentType === "cnpj" ? 18 : 14} value={draft.billingCpf ?? ""} onChange={(event) => updateDraft("billingCpf", formatBillingDocument(event.target.value, draft.billingDocumentType ?? "cpf"))} placeholder={draft.billingDocumentType === "cnpj" ? "00.000.000/0000-00" : "000.000.000-00"} className={inputClass} /></Field>
               <Field label="Situação do cadastro"><select value={draft.registrationStatus} onChange={(event) => updateDraft("registrationStatus", event.target.value as DemoPatientRecord["registrationStatus"])} className={inputClass}><option value="pending-secretary">Pendente da secretaria</option><option value="completed">Completo</option></select></Field>
               <Field label="Observações de entrega" wide><textarea rows={3} value={draft.deliveryNotes ?? ""} onChange={(event) => updateDraft("deliveryNotes", event.target.value)} className={textareaClass} /></Field>
               <Field label="Observações da secretaria" wide><textarea rows={4} value={draft.notes ?? ""} onChange={(event) => updateDraft("notes", event.target.value)} className={textareaClass} /></Field>
               <div className="flex justify-end sm:col-span-2"><button type="button" onClick={() => saveDraft("Dados pessoais")} className={primaryButtonClass}>Salvar dados pessoais</button></div>
             </div> : <div className="grid gap-4 text-sm sm:grid-cols-2">{[
-              ["Nascimento", formatDate(patient.birthDate)], ["Telefone", patient.phone || "Não informado"], ["E-mail", patient.email || "Não informado"], ["Médico responsável", patient.doctor], ["CEP", patient.zipCode || "Não informado"], ["Endereço", `${patient.street ?? patient.address ?? "Não informado"}, ${patient.addressNumber || "s/n"}`], ["Complemento", patient.addressComplement || "Não informado"], ["Bairro", patient.neighborhood || "Não informado"], ["Cidade/Estado", `${patient.city || "Não informada"}/${patient.state || "--"}`], ["Dados para nota fiscal", `${patient.billingName || patient.name} · ${patient.billingCpf || patient.cpf}`], ["Observações de entrega", patient.deliveryNotes || "Nenhuma"], ["Observações da secretaria", patient.notes || "Nenhuma"],
+              ["Nascimento", formatDate(patient.birthDate)], ["Telefone", patient.phone || "Não informado"], ["E-mail", patient.email || "Não informado"], ["Médico responsável", patient.doctor], ["CEP", patient.zipCode || "Não informado"], ["Endereço", `${patient.street ?? patient.address ?? "Não informado"}, ${patient.addressNumber || "s/n"}`], ["Complemento", patient.addressComplement || "Não informado"], ["Bairro", patient.neighborhood || "Não informado"], ["Cidade/Estado", `${patient.city || "Não informada"}/${patient.state || "--"}`], ["Dados para nota fiscal", `${patient.billingName || patient.name} · ${patient.billingDocumentType === "cnpj" ? "CNPJ" : "CPF"} ${patient.billingCpf || patient.cpf}`], ["Observações de entrega", patient.deliveryNotes || "Nenhuma"], ["Observações da secretaria", patient.notes || "Nenhuma"],
             ].map(([label, value]) => <DataCard key={label} label={label} value={value} />)}</div>}</div>}
 
             {tab === "tratamento" && <div className="mt-6 space-y-5">

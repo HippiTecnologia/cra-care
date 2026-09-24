@@ -65,6 +65,7 @@ type Patient = {
   deliveryNotes?: string;
   billingName?: string;
   billingCpf?: string;
+  billingDocumentType?: "cpf" | "cnpj";
   acquisitionMethod?: AcquisitionMethod;
   paymentMethod?: PaymentMethod;
   paymentInstallments?: number;
@@ -91,6 +92,7 @@ type NewPatientForm = {
   deliveryNotes: string;
   billingName: string;
   billingCpf: string;
+  billingDocumentType: "cpf" | "cnpj";
   doctor: string;
   treatment: string;
   startDate: string;
@@ -191,6 +193,7 @@ function createEmptyPatientForm(): NewPatientForm {
     deliveryNotes: "",
     billingName: "",
     billingCpf: "",
+    billingDocumentType: "cpf",
     doctor: "",
     treatment: "Imunoterapia para rinite",
     startDate: today,
@@ -217,6 +220,16 @@ function formatCpfInput(value: string) {
     .replace(/(\d{3})(\d)/, "$1.$2")
     .replace(/(\d{3})(\d)/, "$1.$2")
     .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+}
+
+function formatCnpjInput(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 14);
+
+  return digits
+    .replace(/^(\d{2})(\d)/, "$1.$2")
+    .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/^(\d{2})\.(\d{3})\.(\d{3})(\d)/, "$1.$2.$3/$4")
+    .replace(/(\d{4})(\d)/, "$1-$2");
 }
 
 function formatPhoneInput(value: string) {
@@ -251,6 +264,7 @@ function patientFromMedicalRecord(record: DemoPatientRecord): Patient {
     deliveryNotes: record.deliveryNotes ?? "",
     billingName: record.billingName ?? "",
     billingCpf: record.billingCpf ?? "",
+    billingDocumentType: record.billingDocumentType ?? "cpf",
     treatment: record.treatment ?? defaults.treatment,
     startDate: record.startDate ?? defaults.startDate,
     totalMonths: record.totalMonths ?? defaults.totalMonths,
@@ -478,6 +492,7 @@ export default function SecretariaPage() {
       deliveryNotes: patient.deliveryNotes ?? "",
       billingName: patient.billingName ?? patient.name,
       billingCpf: patient.billingCpf ?? patient.cpf,
+      billingDocumentType: patient.billingDocumentType ?? "cpf",
       doctor: patient.doctor,
       treatment: patient.treatment,
       startDate: patient.startDate,
@@ -572,9 +587,11 @@ export default function SecretariaPage() {
     }
 
     const billingCpf = newPatient.billingCpf || newPatient.cpf;
+    const billingDocumentType = newPatient.billingDocumentType;
+    const billingDocumentLength = billingDocumentType === "cnpj" ? 14 : 11;
 
-    if (billingCpf.replace(/\D/g, "").length !== 11) {
-      setFormError("Informe um CPF válido para os dados da nota fiscal.");
+    if (billingCpf.replace(/\D/g, "").length !== billingDocumentLength) {
+      setFormError(`Informe um ${billingDocumentType === "cnpj" ? "CNPJ" : "CPF"} válido para os dados da nota fiscal.`);
       return;
     }
 
@@ -613,6 +630,7 @@ export default function SecretariaPage() {
       deliveryNotes: newPatient.deliveryNotes.trim(),
       billingName: newPatient.billingName.trim() || newPatient.name.trim(),
       billingCpf,
+      billingDocumentType,
       acquisitionMethod: newPatient.acquisitionMethod,
       paymentMethod: newPatient.paymentMethod,
       paymentInstallments: newPatient.paymentMethod === "Cartão de crédito" ? Math.max(1, newPatient.paymentInstallments) : undefined,
@@ -1270,7 +1288,7 @@ export default function SecretariaPage() {
                 <p className="mt-1 text-xs text-[#817578]">
                   Se ficar em branco, serão utilizados os dados do paciente.
                 </p>
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div className="mt-4 grid gap-4 sm:grid-cols-3">
                   <label className="text-sm font-medium text-[#544449]">
                     Nome para nota fiscal
                     <input
@@ -1283,14 +1301,28 @@ export default function SecretariaPage() {
                     />
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
-                    CPF para nota fiscal
+                    Tipo de documento
+                    <select
+                      value={newPatient.billingDocumentType}
+                      onChange={(event) =>
+                        updateNewPatient("billingDocumentType", event.target.value as "cpf" | "cnpj")
+                      }
+                      className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]"
+                    >
+                      <option value="cpf">CPF</option>
+                      <option value="cnpj">CNPJ</option>
+                    </select>
+                  </label>
+                  <label className="text-sm font-medium text-[#544449]">
+                    {newPatient.billingDocumentType === "cnpj" ? "CNPJ" : "CPF"} para nota fiscal
                     <input
                       inputMode="numeric"
                       value={newPatient.billingCpf}
                       onChange={(event) =>
-                        updateNewPatient("billingCpf", formatCpfInput(event.target.value))
+                        updateNewPatient("billingCpf", newPatient.billingDocumentType === "cnpj" ? formatCnpjInput(event.target.value) : formatCpfInput(event.target.value))
                       }
-                      placeholder="000.000.000-00"
+                      maxLength={newPatient.billingDocumentType === "cnpj" ? 18 : 14}
+                      placeholder={newPatient.billingDocumentType === "cnpj" ? "00.000.000/0000-00" : "000.000.000-00"}
                       className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]"
                     />
                   </label>

@@ -235,6 +235,7 @@ function patientPayload(patient: DemoPatientRecord, existing: MedicalPatientRow)
       ...existingFinancial,
       billingName: patient.billingName ?? patient.name,
       billingCpf: patient.billingCpf ?? patient.cpf,
+      billingDocumentType: patient.billingDocumentType ?? text(existingFinancial.billingDocumentType, "cpf"),
       acquisitionMethod: patient.acquisitionMethod ?? "",
       agreedCondition: patient.agreedCondition ?? "",
       methodSnapshotId: patient.methodSnapshotId ?? text(existingFinancial.methodSnapshotId),

@@ -112,7 +112,7 @@ export default function MedicalPatientPage() {
   const [formulaPercentage, setFormulaPercentage] = useState("");
   const [formulas, setFormulas] = useState<PrescriptionFormula[]>([]);
   const [phase, setPhase] = useState(treatmentPhases[0]);
-  const [bottlesByTreatment, setBottlesByTreatment] = useState<Record<VaccineType, number>>({ rinite: 1, imunobacteriana: 1 });
+  const [bottlesByTreatment, setBottlesByTreatment] = useState<Record<VaccineType, number>>({ rinite: 1, imunobacteriana: 4 });
   const [durationMonths, setDurationMonths] = useState(36);
   const [drops, setDrops] = useState(2);
   const [frequency, setFrequency] = useState("3 vezes por semana");
@@ -261,7 +261,7 @@ export default function MedicalPatientPage() {
     setFormulaPercentage("");
     setSelectedFormula(availableFormulas[0]);
     setPhase(patient?.phase ?? treatmentPhases[0]);
-    setBottles(1);
+    setBottles(vaccineType === "imunobacteriana" ? 4 : 1);
     setDrops(vaccineType === "imunobacteriana" ? 4 : 2);
     setFrequency(vaccineType === "imunobacteriana" ? "todos os dias" : "3 vezes por semana");
     setCustomPosology(false);

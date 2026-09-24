@@ -152,6 +152,7 @@ export function mapMedicalPatient(
     deliveryNotes: stringValue(address, "deliveryNotes"),
     billingName: stringValue(financial, "billingName"),
     billingCpf: stringValue(financial, "billingCpf"),
+    billingDocumentType: stringValue(financial, "billingDocumentType") === "cnpj" || (stringValue(financial, "billingCpf") ?? "").replace(/\D/g, "").length === 14 ? "cnpj" : "cpf",
     treatment: stringValue(treatment, "name") ?? stringValue(treatment, "treatment"),
     startDate: stringValue(treatment, "startDate"),
     totalMonths: numberValue(treatment, "totalMonths"),

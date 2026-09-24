@@ -20,6 +20,7 @@ export type DemoPatientRecord = {
   deliveryNotes?: string;
   billingName?: string;
   billingCpf?: string;
+  billingDocumentType?: "cpf" | "cnpj";
   treatment?: string;
   startDate?: string;
   totalMonths?: number;
