@@ -121,20 +121,6 @@ function addMonths(value: string, months: number) {
   return base.toISOString().slice(0, 10);
 }
 
-function addDays(value: string, days: number) {
-  const base = value.includes("T") ? new Date(value) : new Date(`${value}T12:00:00`);
-  if (Number.isNaN(base.getTime())) return new Date(0).toISOString().slice(0, 10);
-  base.setDate(base.getDate() + days);
-  return base.toISOString().slice(0, 10);
-}
-
-function commissionDate(payment?: PatientPaymentRecord) {
-  if (!payment) return undefined;
-  const method = payment.method.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  const isCreditOrAsaas = (method.includes("cartao") && !method.includes("debito")) || method.includes("asaas");
-  return isCreditOrAsaas ? addDays(payment.paidAt, 30) : payment.paidAt.slice(0, 10);
-}
-
 function bottleCountForSale(sale: AdminSaleSnapshot) {
   if (sale.bottleCount) return sale.bottleCount;
   const normalized = `${sale.methodName} ${sale.treatment}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -144,28 +130,21 @@ function bottleCountForSale(sale: AdminSaleSnapshot) {
   return 1;
 }
 
-function normalizeFinancialText(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-}
-
 function createHonorariumForecast(sales: AdminSaleSnapshot[]): HonorariumForecast[] {
   return sales.filter((sale) => sale.status !== "cancelada").flatMap((sale) => {
     const bottles = bottleCountForSale(sale);
-    const payment = normalizeFinancialText(sale.paymentMethod);
-    const method = normalizeFinancialText(sale.methodName);
-    const creditOrAsaas = payment.includes("asaas") || (payment.includes("cartao") && !payment.includes("debito"));
-    const cashLike = sale.condition === "À vista" || payment.includes("pix") || payment.includes("dinheiro") || payment.includes("debito");
-    const make = (value: number, offsets: number[], rule: string) => offsets.map((offset, index) => ({ id: `${sale.id}-forecast-${index + 1}`, sale, value, dueAt: addMonths(sale.contractedAt, offset), rule }));
-
-    // Regras confirmadas pela Secretaria: os valores programados são do repasse médico.
-    if (method.includes("metodo 1.0") || method.includes("metodo 1.1")) return make(54, creditOrAsaas ? [1, 2, 3, 4, 5, 6] : [0, 1, 2, 3, 4, 5], creditOrAsaas ? "Método 1.0/1.1 · crédito/Asaas · 6x R$ 54" : "Método 1.0/1.1 · dinheiro/Pix/débito · 6x R$ 54");
-    if (bottles === 2 && creditOrAsaas) return make(54, [1, 2, 3, 4, 5, 6], "2 frascos · crédito/Asaas · 6x R$ 54");
-    if (bottles === 2 && cashLike) return make(162, [0, 3], "2 frascos · dinheiro/Pix/débito · 2x R$ 162");
-    if (bottles === 3 && creditOrAsaas) return make(34, [1, 2, 3, 4, 5, 6], "3 frascos · crédito/Asaas · 6x R$ 34");
-    if (bottles === 3 && cashLike) return make(68, [0, 2, 4], "3 frascos · à vista · R$ 68 no mês e a cada 2 meses");
-
-    const dueAt = sale.firstPaymentDueAt ?? addMonths(sale.contractedAt, 1);
-    return [{ id: `${sale.id}-forecast-manual`, sale, value: bottles * (sale.commissionPerBottleSnapshot ?? COMMISSION_PER_BOTTLE), dueAt, rule: "Quantidade fora das regras automáticas · conferir valor manualmente" }];
+    const installments = Math.max(1, sale.installments);
+    const totalCents = Math.round(bottles * (sale.commissionPerBottleSnapshot ?? COMMISSION_PER_BOTTLE) * 100);
+    const baseCents = Math.floor(totalCents / installments);
+    const remainder = totalCents - baseCents * installments;
+    const firstDueAt = sale.firstPaymentDueAt ?? addMonths(sale.contractedAt, 1);
+    return Array.from({ length: installments }, (_, index) => ({
+      id: `${sale.id}-forecast-${index + 1}`,
+      sale,
+      value: (baseCents + (index < remainder ? 1 : 0)) / 100,
+      dueAt: addMonths(firstDueAt, index),
+      rule: `${bottles} frasco(s) · honorário total dividido em ${installments} parcela(s)`,
+    }));
   });
 }
 
@@ -197,12 +176,11 @@ function createInstallments(
       const receivedValue = payment?.amount ?? 0;
       const bottleCount = bottleCountForSale(sale);
       const commissionPerBottle = sale.commissionPerBottleSnapshot ?? COMMISSION_PER_BOTTLE;
-      // Distribui frascos inteiros pelas parcelas: o honorário de cada frasco
-      // nasce na primeira parcela correspondente, sem dividir R$ 68 em frações.
-      const baseBottlesPerInstallment = Math.floor(bottleCount / count);
-      const bottleRemainder = bottleCount % count;
-      const installmentBottleCount = baseBottlesPerInstallment + (index < bottleRemainder ? 1 : 0);
-      const installmentCommission = installmentBottleCount * commissionPerBottle;
+      // O honorário total dos frascos acompanha as parcelas da venda, inclusive os centavos.
+      const totalCommissionCents = Math.round(bottleCount * commissionPerBottle * 100);
+      const baseCommissionCents = Math.floor(totalCommissionCents / count);
+      const commissionRemainder = totalCommissionCents - baseCommissionCents * count;
+      const installmentCommission = (baseCommissionCents + (index < commissionRemainder ? 1 : 0)) / 100;
       return {
         id: installmentId,
         sale,
@@ -211,10 +189,10 @@ function createInstallments(
         dueAt,
         payment,
         receivedValue,
-        commissionValue: installmentCommission,
+        commissionValue: commissionRecord?.commissionValue ?? installmentCommission,
         bottleCount,
         commissionPerBottle,
-        commissionAt: payment && installmentBottleCount > 0 ? commissionDate(payment) : undefined,
+        commissionAt: dueAt,
         commissionRecord,
         status,
         invoice: patientInvoices[index] ?? (payment ? patientInvoices.at(-1) : undefined),
@@ -369,18 +347,19 @@ export default function AdminPage() {
   });
   const reportRows = buildReportRows(reportType, filteredSales, filteredInstallments, filteredPatients, filteredInvoices, filteredCosts);
 
+  const currentDate = new Date().toISOString().slice(0, 10);
   const commissionMonths = useMemo(
-    () => Array.from(new Set(installments.flatMap((item) => item.commissionAt ? [monthKey(item.commissionAt)] : []))).sort((first, second) => second.localeCompare(first)),
-    [installments],
+    () => Array.from(new Set(installments.flatMap((item) => item.commissionAt && item.commissionAt <= currentDate ? [monthKey(item.commissionAt)] : []))).sort((first, second) => second.localeCompare(first)),
+    [currentDate, installments],
   );
   const selectedCommissionMonth = commissionMonths.includes(commissionMonth) ? commissionMonth : (commissionMonths[0] ?? "");
   const commissionInstallments = useMemo(() => installments.filter((item) => {
-    if (item.status !== "Recebida" || !item.commissionAt) return false;
+    if (!item.commissionAt || item.status === "Cancelada" || item.commissionAt > currentDate) return false;
     const matchesMonth = !selectedCommissionMonth || monthKey(item.commissionAt) === selectedCommissionMonth;
     const matchesDoctor = commissionDoctorFilter === "Todos" || item.sale.doctor === commissionDoctorFilter;
     const matchesStatus = commissionStatusFilter === "Todas" || (commissionStatusFilter === "Pagas" ? Boolean(item.commissionRecord) : !item.commissionRecord);
     return matchesMonth && matchesDoctor && matchesStatus;
-  }), [commissionDoctorFilter, commissionStatusFilter, installments, selectedCommissionMonth]);
+  }), [commissionDoctorFilter, commissionStatusFilter, currentDate, installments, selectedCommissionMonth]);
   const commissionAvailable = commissionInstallments.filter((item) => !item.commissionRecord).reduce((sum, item) => sum + item.commissionValue, 0);
   const commissionPaid = commissionInstallments.filter((item) => item.commissionRecord).reduce((sum, item) => sum + item.commissionValue, 0);
 
@@ -508,7 +487,7 @@ export default function AdminPage() {
   }
 
   async function markCommissionAsPaid(installment: InstallmentView) {
-    if (!installment.payment || !installment.commissionAt || installment.commissionRecord) return;
+    if (!installment.commissionAt || installment.commissionAt > new Date().toISOString().slice(0, 10) || installment.commissionRecord) return;
     if (!context) return setMessage("Sessão administrativa não identificada.");
     try {
       await markAdminCommissionPaid(context, {
@@ -517,10 +496,10 @@ export default function AdminPage() {
         patientId: installment.sale.patientId,
         patientName: installment.sale.patientName,
         doctor: installment.sale.doctor,
-        paymentId: installment.payment.id,
-        receivedAt: installment.payment.paidAt,
+        paymentId: installment.payment?.id,
+        receivedAt: installment.payment?.paidAt ?? installment.dueAt,
         accountingAt: installment.commissionAt,
-        receivedValue: installment.receivedValue,
+        receivedValue: installment.payment?.amount ?? installment.scheduledValue,
         commissionRate: installment.sale.commissionRateSnapshot,
         bottleCount: installment.bottleCount,
         commissionPerBottle: installment.commissionPerBottle,
@@ -613,8 +592,8 @@ export default function AdminPage() {
               </div>
               <div className="mt-4 rounded-2xl bg-[#fbf7f5] p-4"><p className="text-xs leading-5 text-[#66595d]">As parcelas recebidas aparecem automaticamente conforme os pagamentos reais registrados pela Secretaria. PIX e débito liberam o honorário no dia; cartão libera após 30 dias.</p></div>
             </Panel>
-            <div className="grid gap-4 sm:grid-cols-3"><Kpi label="Honorários disponíveis" value={formatMoney(commissionAvailable)} detail="Prontos para fechar no período" tone="wine" /><Kpi label="Honorários já pagos" value={formatMoney(commissionPaid)} detail="Baixados no período filtrado" tone="green" /><Kpi label="Parcelas no fechamento" value={String(commissionInstallments.length)} detail="Recebimentos sem duplicidade" tone="blue" /></div>
-            <Panel title={selectedCommissionMonth ? `Honorários de ${monthLabel(selectedCommissionMonth)}` : "Honorários por parcela recebida"} subtitle="Cada frasco gera o honorário contratado na primeira parcela correspondente; marque como pago ao realizar o repasse ao médico."><InstallmentTable installments={commissionInstallments} showCommission openInvoice={openInvoice} onMarkCommission={markCommissionAsPaid} onReverseCommission={reverseCommissionPayment} /></Panel>
+            <div className="grid gap-4 sm:grid-cols-3"><Kpi label="Honorários disponíveis" value={formatMoney(commissionAvailable)} detail="Vencidos ou com vencimento hoje" tone="wine" /><Kpi label="Honorários já pagos" value={formatMoney(commissionPaid)} detail="Baixados no período filtrado" tone="green" /><Kpi label="Parcelas no fechamento" value={String(commissionInstallments.length)} detail="Vencimentos sem duplicidade" tone="blue" /></div>
+            <Panel title={selectedCommissionMonth ? `Honorários de ${monthLabel(selectedCommissionMonth)}` : "Honorários por vencimento"} subtitle="O valor total dos frascos é dividido entre as parcelas da venda. Cada parte fica disponível na respectiva data de vencimento; marque como pago ao realizar o repasse ao médico."><InstallmentTable installments={commissionInstallments} showCommission openInvoice={openInvoice} onMarkCommission={markCommissionAsPaid} onReverseCommission={reverseCommissionPayment} /></Panel>
           </div>}
 
           {section === "parcelas" && <div className="mt-7 space-y-5"><Panel title="Venda → Parcela → Recebimento → Honorário → Nota fiscal" subtitle="Rastreabilidade financeira completa"><InstallmentTable installments={installments} showCommission openInvoice={openInvoice} /></Panel></div>}
