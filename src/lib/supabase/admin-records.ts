@@ -262,6 +262,7 @@ function bottlesForMethod(methodName: string) {
 
 function addMonthsToDate(value: string, months: number) {
   const date = new Date(value.includes("T") ? value : `${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10);
   const day = date.getDate();
   date.setDate(1);
   date.setMonth(date.getMonth() + months);

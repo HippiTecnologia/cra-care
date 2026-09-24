@@ -96,13 +96,18 @@ function formatDate(value?: string, includeTime = false) {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: includeTime && value.includes("T") ? "short" : undefined }).format(parsed);
 }
 
-function monthKey(value: string) {
-  return value.slice(0, 7);
+function monthKey(value?: string) {
+  if (!value) return "sem-data";
+  const parsed = value.includes("T") ? new Date(value) : new Date(`${value}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return "sem-data";
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function monthLabel(value: string) {
   const [year, month] = value.split("-").map(Number);
-  return new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric" }).format(new Date(year, month - 1, 1));
+  const parsed = new Date(year, month - 1, 1);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12 || Number.isNaN(parsed.getTime())) return "Data não informada";
+  return new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric" }).format(parsed);
 }
 
 function addMonths(value: string, months: number) {
