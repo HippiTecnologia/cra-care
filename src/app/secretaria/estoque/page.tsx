@@ -61,6 +61,10 @@ function normalizeSearch(value: string) {
     .replace(/[.\-/]/g, "");
 }
 
+function indicationForTreatment(treatment: string): "rinite" | "bacteriana" {
+  return /bacteriana|imunobacteriana/i.test(treatment) ? "bacteriana" : "rinite";
+}
+
 function escapeReportHtml(value: string | number | undefined) {
   return String(value ?? "—").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
@@ -77,6 +81,7 @@ export default function SecretariaEstoquePage() {
   const [batchFilter, setBatchFilter] = useState("todos");
   const [selectedStockIds, setSelectedStockIds] = useState<string[]>([]);
   const [assignmentPatientId, setAssignmentPatientId] = useState("");
+  const [assignmentPrescriptionId, setAssignmentPrescriptionId] = useState("");
   const [assignmentPaymentConfirmed, setAssignmentPaymentConfirmed] = useState(false);
   const [assignmentAsaasConfirmed, setAssignmentAsaasConfirmed] = useState(false);
   const [assignmentError, setAssignmentError] = useState("");
@@ -167,7 +172,11 @@ export default function SecretariaEstoquePage() {
   const selectedItem =
     filteredStock.find((item) => item.id === selectedItemId) ?? filteredStock[0];
   const assignmentPatient = patients.find((patient) => patient.id === assignmentPatientId);
-  const assignmentPrescription = assignmentPatient ? prescriptions.find((prescription) => prescription.patientId === assignmentPatient.id) : undefined;
+  const assignmentPrescriptionOptions = assignmentPatient
+    ? prescriptions.filter((prescription) => prescription.patientId === assignmentPatient.id && indicationForTreatment(prescription.treatment) === indicationForTreatment(selectedItem?.treatment ?? ""))
+    : [];
+  const assignmentPrescription = assignmentPrescriptionOptions.find((prescription) => prescription.id === assignmentPrescriptionId)
+    ?? assignmentPrescriptionOptions[0];
   const assignmentBilling = assignmentPatient ? getBillingRequirement(assignmentPatient) : undefined;
   const selectedPatient = selectedItem?.patientId ? patients.find((patient) => patient.id === selectedItem.patientId) : undefined;
   const availableBatches = Array.from(new Map(stock.map((item) => [item.batchId, batchNames[item.batchId] ?? item.batchCode])).entries());
@@ -277,6 +286,7 @@ export default function SecretariaEstoquePage() {
   function selectStockItem(item: DemoStockItem) {
     setSelectedItemId(item.id);
     setAssignmentPatientId("");
+    setAssignmentPrescriptionId("");
     setAssignmentPaymentConfirmed(false);
     setAssignmentAsaasConfirmed(false);
     setAssignmentError("");
@@ -669,14 +679,15 @@ export default function SecretariaEstoquePage() {
                     <div className="mt-6 rounded-2xl border border-[#e5daf1] bg-[#faf7ff] p-4">
                       <h3 className="text-sm font-bold text-[#7351a3]">Vincular a um paciente</h3>
                       <p className="mt-1 text-xs text-[#66595d]">A última receita do paciente será buscada automaticamente.</p>
-                      <select value={assignmentPatientId} onChange={(event) => { setAssignmentPatientId(event.target.value); setAssignmentPaymentConfirmed(false); setAssignmentAsaasConfirmed(false); setAssignmentError(""); }} className="mt-4 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]">
+                      <select value={assignmentPatientId} onChange={(event) => { setAssignmentPatientId(event.target.value); setAssignmentPrescriptionId(""); setAssignmentPaymentConfirmed(false); setAssignmentAsaasConfirmed(false); setAssignmentError(""); }} className="mt-4 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]">
                         <option value="">Selecione um paciente</option>
                         {patients.filter((patient) => patient.registrationStatus === "completed").map((patient) => <option key={patient.id} value={patient.id}>{patient.name} · {patient.cpf}</option>)}
                       </select>
 
                       {assignmentPatient && (
                         <div className="mt-4 rounded-xl bg-white p-3 text-xs text-[#66595d]">
-                          <p><strong>Última receita:</strong> {assignmentPrescription ? formatDate(assignmentPrescription.createdAt) : "Paciente sem receita cadastrada"}</p>
+                          <p><strong>Receita de {indicationForTreatment(selectedItem?.treatment ?? "") === "bacteriana" ? "Imunobacteriana" : "Rinite"}:</strong> {assignmentPrescription ? formatDate(assignmentPrescription.createdAt) : "Paciente sem receita desta indicação"}</p>
+                          {assignmentPrescriptionOptions.length > 1 && <label className="mt-3 block"><span className="font-semibold">Escolha a receita</span><select value={assignmentPrescription?.id ?? ""} onChange={(event) => setAssignmentPrescriptionId(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-[#e9dfda] bg-white px-2"><option value="">Receita mais recente</option>{assignmentPrescriptionOptions.map((prescription) => <option key={prescription.id} value={prescription.id}>{formatDate(prescription.createdAt)} · {prescription.phase}</option>)}</select></label>}
                           {assignmentPrescription && <p className="mt-2"><strong>Fase prescrita:</strong> {assignmentPrescription.phase}</p>}
                           {assignmentPrescription && <p className="mt-2"><strong>Composição:</strong> {assignmentPrescription.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ")}</p>}
                           {assignmentPrescription && assignmentPrescription.phase !== selectedItem.phase && <p className="mt-2 rounded-lg bg-[#fff4e4] p-2 text-[#966419]">A fase deste frasco é diferente da fase da última receita. Confira antes de prosseguir.</p>}

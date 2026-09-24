@@ -125,6 +125,11 @@ export default function SecretariaLotesPage() {
   const [conferenceNotes, setConferenceNotes] = useState("");
   const [orderType, setOrderType] = useState<"pedido-paciente" | "pronta-entrega">("pedido-paciente");
   const [batchIndication, setBatchIndication] = useState<BatchIndication>("rinite");
+  const [batchHistorySearch, setBatchHistorySearch] = useState("");
+  const [batchHistoryIndication, setBatchHistoryIndication] = useState<"todos" | BatchIndication>("todos");
+  const [batchHistoryMonth, setBatchHistoryMonth] = useState("");
+  const [externalReceivedDate, setExternalReceivedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [externalLaboratory, setExternalLaboratory] = useState("Laboratório externo");
   const [paymentConfirmations, setPaymentConfirmations] = useState<Record<string, { payment: boolean; asaas: boolean }>>({});
   const [readyItems, setReadyItems] = useState<DemoBatchItem[]>([]);
   const [readyFormula, setReadyFormula] = useState(availableFormulas[0]);
@@ -250,9 +255,13 @@ export default function SecretariaLotesPage() {
   const selectedItemCount = orderType === "pronta-entrega" ? readyItems.length : selectedPrescriptions.length;
   const openPatientBatches = batches.filter((batch) => batch.status === "rascunho" && batch.orderType !== "pronta-entrega");
 
-  const filteredBatches = batches.filter(
-    (batch) => filter === "todos" || batch.status === filter,
-  );
+  const filteredBatches = batches.filter((batch) => {
+    if (filter !== "todos" && batch.status !== filter) return false;
+    if (batchHistoryIndication !== "todos" && batch.indication !== batchHistoryIndication) return false;
+    if (batchHistoryMonth && !batch.createdAt.startsWith(batchHistoryMonth)) return false;
+    const searchValue = normalizeSearch(`${batch.name ?? ""} ${batch.code} ${batch.laboratory} ${batch.items.map((item) => `${item.patientName} ${item.patientCpf} ${item.doctor} ${item.treatment}`).join(" ")}`);
+    return !batchHistorySearch.trim() || searchValue.includes(normalizeSearch(batchHistorySearch));
+  });
 
   function togglePrescription(prescription: DemoPrescription) {
     const patient = patientById.get(prescription.patientId);
@@ -493,14 +502,14 @@ export default function SecretariaLotesPage() {
     if (isImmunobacterial) {
       await persistBatch({
         ...batch,
-        status: "pronto",
-        laboratory: "Fluxo direto da secretaria",
+        status: "enviado",
+        laboratory: externalLaboratory.trim() || "Laboratório externo",
         sentAt: new Date().toISOString(),
-        productionFinishedAt: new Date().toISOString(),
-        productionNotes: batch.productionNotes || "Imunobacteriana liberada no fluxo direto da secretaria; não enviada ao laboratório.",
+        externalLaboratory: externalLaboratory.trim() || "Laboratório externo",
+        productionNotes: batch.productionNotes || "Imunobacteriana encaminhada para produção em laboratório externo.",
       });
       if (editingBatchId === batch.id) setEditingBatchId(null);
-      setMessage(`Lote ${batch.name ?? batch.code} de Imunobacteriana preparado para conferência direta e estoque.`);
+      setMessage(`Lote ${batch.name ?? batch.code} de Imunobacteriana encaminhado ao laboratório externo. Registre o recebimento quando chegar.`);
       setError("");
       return;
     }
@@ -515,6 +524,24 @@ export default function SecretariaLotesPage() {
     setError("");
   }
 
+  async function receiveExternalBatch(batch: DemoBatch) {
+    if (!externalReceivedDate) {
+      setError("Informe a data de recebimento do laboratório externo.");
+      return;
+    }
+    await persistBatch({
+      ...batch,
+      status: "pronto",
+      laboratory: externalLaboratory.trim() || batch.externalLaboratory || batch.laboratory || "Laboratório externo",
+      externalLaboratory: externalLaboratory.trim() || batch.externalLaboratory || batch.laboratory || "Laboratório externo",
+      externalReceivedAt: `${externalReceivedDate}T12:00:00`,
+      productionFinishedAt: `${externalReceivedDate}T12:00:00`,
+      productionNotes: batch.productionNotes || "Imunobacteriana recebida de laboratório externo; aguardando conferência da secretaria.",
+    });
+    setError("");
+    setMessage(`Recebimento externo de ${batch.name ?? batch.code} registrado. Confira os itens para lançar no estoque.`);
+  }
+
   function openBatchDetails(batch: DemoBatch) {
     if (expandedBatchId === batch.id) {
       setExpandedBatchId(null);
@@ -524,6 +551,8 @@ export default function SecretariaLotesPage() {
     setExpandedBatchId(batch.id);
     setConferenceResponsible(batch.checkedBy ?? "Equipe da secretaria CRA");
     setConferenceNotes(batch.conferenceNotes ?? "");
+    setExternalReceivedDate((batch.externalReceivedAt ?? new Date().toISOString()).slice(0, 10));
+    setExternalLaboratory(batch.externalLaboratory ?? batch.laboratory ?? "Laboratório externo");
     setError("");
   }
 
@@ -1041,6 +1070,13 @@ export default function SecretariaLotesPage() {
               </select>
             </div>
 
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <input value={batchHistorySearch} onChange={(event) => setBatchHistorySearch(event.target.value)} placeholder="Paciente, CPF, lote, médico..." className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]" />
+              <select value={batchHistoryIndication} onChange={(event) => setBatchHistoryIndication(event.target.value as "todos" | BatchIndication)} className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]"><option value="todos">Todas as indicações</option><option value="rinite">Rinite</option><option value="bacteriana">Imunobacteriana</option></select>
+              <input type="month" value={batchHistoryMonth} onChange={(event) => setBatchHistoryMonth(event.target.value)} className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]" />
+              <button type="button" onClick={printBatchReport} className="rounded-xl border border-[#eadfd9] px-4 py-3 text-xs font-semibold text-[#a3113a]">Gerar relatório filtrado</button>
+            </div>
+
             <div className="mt-6 space-y-4">
               {filteredBatches.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-6 py-12 text-center">
@@ -1071,7 +1107,7 @@ export default function SecretariaLotesPage() {
                             </span>
                           </div>
                           <p className="mt-2 text-xs text-[#776b6e]">
-                            {batch.code} · Criado em {formatDate(batch.createdAt)} · {batch.indication === "bacteriana" ? "Fluxo direto da secretaria" : batch.laboratory}
+                            {batch.code} · Criado em {formatDate(batch.createdAt)} · {batch.indication === "bacteriana" ? (batch.externalLaboratory ?? batch.laboratory ?? "Laboratório externo") : batch.laboratory}
                           </p>
                           <p className="mt-1 text-xs text-[#776b6e]">
                             {batch.items.length} {batch.orderType === "pronta-entrega" ? "fórmula(s)" : "paciente(s)"} · {bottleCount} frasco(s) · {(status ?? { description: "Status não informado" }).description}
@@ -1099,7 +1135,7 @@ export default function SecretariaLotesPage() {
                                 disabled={batch.items.length === 0}
                                 className="rounded-xl bg-[#a3113a] px-4 py-3 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45"
                               >
-                                {batch.indication === "bacteriana" ? "Preparar para conferência" : "Enviar ao laboratório"}
+                                {batch.indication === "bacteriana" ? "Enviar ao laboratório externo" : "Enviar ao laboratório"}
                               </button>
                             </>
                           )}
@@ -1204,6 +1240,18 @@ export default function SecretariaLotesPage() {
                             })}
                           </div>
 
+                          {batch.status === "enviado" && batch.indication === "bacteriana" && (
+                            <div className="mt-5 rounded-2xl border border-[#d9e4f5] bg-[#f5f8ff] p-4 sm:p-5">
+                              <h4 className="text-sm font-bold text-[#3c5da0]">Recebimento da Imunobacteriana</h4>
+                              <p className="mt-1 text-xs leading-5 text-[#5f6f8f]">Quando o lote chegar do laboratório externo, registre a data. Depois ele seguirá para a conferência e o estoque.</p>
+                              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                                <label className="text-xs font-semibold text-[#544449]">Laboratório externo<input value={externalLaboratory} onChange={(event) => setExternalLaboratory(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#d9e0eb] bg-white px-3 text-sm font-normal outline-none focus:border-[#3c5da0]" /></label>
+                                <label className="text-xs font-semibold text-[#544449]">Data de recebimento<input type="date" value={externalReceivedDate} onChange={(event) => setExternalReceivedDate(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#d9e0eb] bg-white px-3 text-sm font-normal outline-none focus:border-[#3c5da0]" /></label>
+                              </div>
+                              <button type="button" onClick={() => void receiveExternalBatch(batch)} className="mt-4 rounded-xl bg-[#3c5da0] px-4 py-3 text-xs font-semibold text-white">Registrar recebimento externo</button>
+                            </div>
+                          )}
+
                           {batch.productionNotes && (
                             <p className="mt-4 rounded-xl bg-[#eef3ff] px-4 py-3 text-xs text-[#3c5da0]">
                               <strong>{batch.indication === "bacteriana" ? "Observações do lote:" : "Observações do laboratório:"}</strong> {batch.productionNotes}
@@ -1220,7 +1268,7 @@ export default function SecretariaLotesPage() {
                                   {(batch.checkedPrescriptionIds ?? []).length}/{batch.items.length} item(ns) conferido(s)
                                 </span>
                               </div>
-                              {batch.indication === "bacteriana" ? <p className="mt-2 rounded-xl bg-[#eaf8f3] px-3 py-2 text-xs font-semibold text-[#187157]">✓ Imunobacteriana segue direto para conferência da secretaria, sem passagem pelo laboratório.</p> : batch.laboratoryOkAt ? <p className="mt-2 rounded-xl bg-[#eaf8f3] px-3 py-2 text-xs font-semibold text-[#187157]">✓ OK do laboratório registrado por {batch.laboratoryOkBy} em {formatDate(batch.laboratoryOkAt)}</p> : <p className="mt-2 rounded-xl bg-[#fff8eb] px-3 py-2 text-xs font-semibold text-[#88642c]">Aguardando o OK do laboratório.</p>}
+                              {batch.indication === "bacteriana" ? <p className="mt-2 rounded-xl bg-[#eaf8f3] px-3 py-2 text-xs font-semibold text-[#187157]">✓ Recebida de {batch.externalLaboratory ?? batch.laboratory} em {formatDate(batch.externalReceivedAt ?? batch.createdAt)}. Confira os itens antes de lançar no estoque.</p> : batch.laboratoryOkAt ? <p className="mt-2 rounded-xl bg-[#eaf8f3] px-3 py-2 text-xs font-semibold text-[#187157]">✓ OK do laboratório registrado por {batch.laboratoryOkBy} em {formatDate(batch.laboratoryOkAt)}</p> : <p className="mt-2 rounded-xl bg-[#fff8eb] px-3 py-2 text-xs font-semibold text-[#88642c]">Aguardando o OK do laboratório.</p>}
 
                               <label className="mt-4 block text-xs font-semibold text-[#544449]">
                                 Responsável pela conferência
@@ -1251,10 +1299,10 @@ export default function SecretariaLotesPage() {
                               <button
                                 type="button"
                                 onClick={() => approveBatch(batch)}
-                                disabled={(batch.indication !== "bacteriana" && !batch.laboratoryOkAt) || (batch.checkedPrescriptionIds ?? []).length !== batch.items.length}
+                                disabled={(batch.indication === "bacteriana" ? !batch.externalReceivedAt : !batch.laboratoryOkAt) || (batch.checkedPrescriptionIds ?? []).length !== batch.items.length}
                                 className="mt-4 w-full rounded-xl bg-[#187157] px-4 py-3 text-sm font-semibold text-white hover:bg-[#115842] disabled:cursor-not-allowed disabled:opacity-45"
                               >
-                                {batch.indication === "bacteriana" || batch.laboratoryOkAt ? "Aprovar conferência e lançar no estoque" : "Aguardando OK do laboratório"}
+                                {batch.indication === "bacteriana" ? (batch.externalReceivedAt ? "Aprovar conferência e lançar no estoque" : "Aguardando recebimento externo") : batch.laboratoryOkAt ? "Aprovar conferência e lançar no estoque" : "Aguardando OK do laboratório"}
                               </button>
                             </div>
                           )}
@@ -1275,7 +1323,7 @@ export default function SecretariaLotesPage() {
 
                           {batch.sentAt && (
                             <p className="mt-4 text-xs text-[#776b6e]">
-                              {batch.indication === "bacteriana" ? "Preparado diretamente pela secretaria em " : "Enviado ao laboratório em "}{formatDate(batch.sentAt)}.
+                              {batch.indication === "bacteriana" ? "Enviado ao laboratório externo em " : "Enviado ao laboratório em "}{formatDate(batch.sentAt)}.
                             </p>
                           )}
                         </div>

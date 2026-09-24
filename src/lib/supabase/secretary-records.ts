@@ -386,6 +386,8 @@ function bottleFromRow(row: Record<string, unknown>): PatientBottle {
   return {
     id: text(row.id),
     number: number(row.bottle_number),
+    prescriptionId: text(row.prescription_id) || undefined,
+    treatment: text(objectValue(row.metadata).treatment) || undefined,
     receivedAt: text(row.received_at) || undefined,
     startedAt: text(row.started_at) || text(row.received_at),
     finishedAt: text(row.completed_at) || undefined,
@@ -446,6 +448,18 @@ export async function loadSecretaryPortals(patientIds: string[]) {
       weekdays: Array.isArray(reminders.weekdays) ? reminders.weekdays.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6) : [1, 3, 5],
       time: text(reminders.time, "09:00"),
     };
+    const byTreatment = objectValue(reminders.byTreatment);
+    const treatmentReminders: NonNullable<PatientPortalState["treatmentReminders"]> = {};
+    for (const track of ["rinite", "imunobacteriana"] as const) {
+      const trackReminder = objectValue(byTreatment[track]);
+      if (!Object.keys(trackReminder).length) continue;
+      treatmentReminders[track] = {
+        enabled: trackReminder.enabled === true,
+        weekdays: Array.isArray(trackReminder.weekdays) ? trackReminder.weekdays.map(Number).filter((day: number) => Number.isInteger(day) && day >= 0 && day <= 6) : [1, 3, 5],
+        time: text(trackReminder.time, "09:00"),
+      };
+    }
+    result[patientId].treatmentReminders = treatmentReminders;
     result[patientId].dayOverrides = objectValue(row.day_overrides) as PatientPortalState["dayOverrides"];
     result[patientId].readNotificationIds = Array.isArray(row.read_notification_ids) ? row.read_notification_ids.map(String) : [];
     result[patientId].manualNotifications = Array.isArray(row.manual_notifications)
@@ -633,6 +647,8 @@ export async function saveSecretaryBatch(context: SecretaryContext, batch: DemoB
     conferenceNotes: savedBatch.conferenceNotes,
     laboratoryOkAt: savedBatch.laboratoryOkAt,
     laboratoryOkBy: savedBatch.laboratoryOkBy,
+    externalReceivedAt: savedBatch.externalReceivedAt,
+    externalLaboratory: savedBatch.externalLaboratory,
     orderType: savedBatch.orderType,
     indication: savedBatch.indication,
   };
@@ -737,6 +753,9 @@ export async function confirmSecretaryBatch(
   patients: DemoPatientRecord[],
 ) {
   if (batch.status !== "pronto") throw new Error("Este lote já foi conferido ou ainda não está pronto.");
+  if (batch.indication === "bacteriana" && !batch.externalReceivedAt) {
+    throw new Error("Registre a data de recebimento do laboratório externo antes de lançar a Imunobacteriana no estoque.");
+  }
   if (batch.indication !== "bacteriana" && (!batch.laboratoryOkAt || !batch.laboratoryOkBy)) {
     throw new Error("Aguarde o OK do laboratório antes de liberar o lote para estoque.");
   }
@@ -745,7 +764,9 @@ export async function confirmSecretaryBatch(
     throw new Error("Confira todos os itens antes de liberar o lote para estoque.");
   }
   if (!checkedBy.trim()) throw new Error("Informe o responsável pela conferência do lote.");
-  const receivedAt = new Date().toISOString();
+  // Para Imunobacteriana, registra a data real de chegada do laboratório
+  // externo; nos demais fluxos vale o momento da conferência.
+  const receivedAt = batch.externalReceivedAt ?? new Date().toISOString();
   const stockItems: DemoStockItem[] = [];
   for (const item of batch.items) {
     const patient = patients.find((candidate) => candidate.id === item.patientId);

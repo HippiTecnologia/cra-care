@@ -25,6 +25,15 @@ import { getSupabaseClient } from "../../lib/supabase/client";
 import { currentRelease } from "../../lib/release-notes";
 
 type PatientSection = "inicio" | "frasco" | "alertas" | "calendario" | "receitas" | "notas" | "notas-fiscais" | "termo";
+type TreatmentTrack = "rinite" | "imunobacteriana";
+
+function treatmentTrack(value?: string): TreatmentTrack {
+  return /bacteriana|imunobacteriana/i.test(value ?? "") ? "imunobacteriana" : "rinite";
+}
+
+function treatmentTrackLabel(track: TreatmentTrack) {
+  return track === "imunobacteriana" ? "Imunobacteriana" : "Rinite";
+}
 
 const navigation: { id: PatientSection; icon: string; label: string; short: string }[] = [
   { id: "inicio", icon: "⌂", label: "Página inicial", short: "Início" },
@@ -70,6 +79,10 @@ function dateKey(date: Date) {
   const day = String(date.getDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
+}
+
+function dayOverrideKey(bottleId: string, date: string) {
+  return `${bottleId}:${date}`;
 }
 
 function parseDate(value: string) {
@@ -244,6 +257,7 @@ export default function PatientPortalPage() {
   const [assessmentNotes, setAssessmentNotes] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
   const [showReleaseNotes, setShowReleaseNotes] = useState(false);
+  const [activeTreatment, setActiveTreatment] = useState<TreatmentTrack>("rinite");
 
   useEffect(() => {
     let active = true;
@@ -251,9 +265,13 @@ export default function PatientPortalPage() {
       if (!active) return;
       setPatient(workspace.patient);
       setPortal(workspace.portal);
-      setReminderDraft(workspace.portal.reminders);
       setPrescriptions(workspace.prescriptions);
       setInvoices(workspace.invoices);
+      const hasRinite = workspace.prescriptions.some((prescription) => treatmentTrack(prescription.treatment) === "rinite")
+        || workspace.portal.bottles.some((bottle) => treatmentTrack(bottle.treatment) === "rinite");
+      const initialTreatment: TreatmentTrack = hasRinite ? "rinite" : "imunobacteriana";
+      if (!hasRinite) setActiveTreatment(initialTreatment);
+      setReminderDraft(workspace.portal.treatmentReminders?.[initialTreatment] ?? workspace.portal.reminders);
       setLoaded(true);
     }).catch(() => {
       if (!active) return;
@@ -271,33 +289,47 @@ export default function PatientPortalPage() {
   }, []);
 
   const safePortal = portal ?? createDefaultPortalState(patient?.id ?? "");
+  const prescriptionById = useMemo(
+    () => new Map(prescriptions.map((prescription) => [prescription.id, prescription])),
+    [prescriptions],
+  );
+  const bottleTreatment = (bottle: PatientBottle) => treatmentTrack(
+    bottle.treatment ?? prescriptionById.get(bottle.prescriptionId ?? "")?.treatment ?? patient?.treatment,
+  );
+  const treatmentTracks = Array.from(new Set([
+    ...prescriptions.map((prescription) => treatmentTrack(prescription.treatment)),
+    ...safePortal.bottles.map(bottleTreatment),
+  ])) as TreatmentTrack[];
+  const activeReminders = safePortal.treatmentReminders?.[activeTreatment] ?? safePortal.reminders;
+  const trackBottles = safePortal.bottles
+    .filter((bottle) => bottleTreatment(bottle) === activeTreatment)
+    .sort((first, second) => first.number - second.number);
   const bottleHistory = patient
-    ? buildBottleHistory(patient, safePortal, [])
+    ? buildBottleHistory(patient, { ...safePortal, bottles: trackBottles }, [])
     : [];
-  const currentBottle = safePortal.bottles.find((bottle) => bottle.status === "em-uso");
-  const lastBottle = safePortal.bottles[0];
-  const startedBottleCount = safePortal.bottles.filter((bottle) => bottle.status !== "recebido").length;
-  const receivedBottleCount = Math.max(patient?.bottlesReceived ?? 0, safePortal.bottles.length);
+  const currentBottle = trackBottles.find((bottle) => bottle.status === "em-uso");
+  const lastBottle = trackBottles.at(-1);
+  const startedBottleCount = trackBottles.filter((bottle) => bottle.status !== "recebido").length;
+  const receivedBottleCount = trackBottles.length;
   const waitingBottleCount = Math.max(0, receivedBottleCount - startedBottleCount);
-  const latestAssessment = safePortal.assessments[0];
-  const firstBottle = safePortal.bottles.find((bottle) => bottle.number === 1);
+  const latestAssessment = safePortal.assessments.find((assessment) => trackBottles.some((bottle) => bottle.id === assessment.bottleId));
+  const firstBottle = trackBottles[0];
   const nextAssessmentAt = latestAssessment
     ? new Date(new Date(latestAssessment.createdAt).getTime() + 60 * 24 * 60 * 60 * 1000)
     : null;
   const pendingAssessmentBottle = patient && firstBottle && firstBottle.status !== "recebido" && (!nextAssessmentAt || nextAssessmentAt <= new Date())
     ? { id: firstBottle.id, number: firstBottle.number }
     : null;
-  const latestPrescription = prescriptions[0];
+  const latestPrescription = prescriptions.find((prescription) => treatmentTrack(prescription.treatment) === activeTreatment);
   const prescribedBottleCount = Math.max(0, Number(latestPrescription?.bottles ?? 0));
-  const nextAssignedBottle = safePortal.bottles.filter((bottle) => bottle.status === "recebido").sort((first, second) => first.number - second.number)[0];
-  const previousAssignedBottle = nextAssignedBottle && nextAssignedBottle.number > 1
-    ? safePortal.bottles.find((bottle) => bottle.number === nextAssignedBottle.number - 1)
-    : undefined;
+  const nextAssignedBottle = trackBottles.find((bottle) => bottle.status === "recebido");
+  const nextBottleIndex = nextAssignedBottle ? trackBottles.findIndex((bottle) => bottle.id === nextAssignedBottle.id) : -1;
+  const previousAssignedBottle = nextBottleIndex > 0 ? trackBottles[nextBottleIndex - 1] : undefined;
   const canStartAssignedBottle = Boolean(nextAssignedBottle && (!previousAssignedBottle || previousAssignedBottle.status === "finalizado"));
   const currentBottleRecords = safePortal.useRecords.filter(
     (record) => record.bottleId === currentBottle?.id,
   );
-  const scheduledDays = countScheduledDays(currentBottle, safePortal.reminders);
+  const scheduledDays = countScheduledDays(currentBottle, activeReminders);
   const regularity = scheduledDays
     ? Math.min(100, Math.round((currentBottleRecords.length / scheduledDays) * 100))
     : currentBottleRecords.length > 0
@@ -314,8 +346,8 @@ export default function PatientPortalPage() {
       return {
         date: key,
         label: weekdays[current.getDay()].short,
-        used: safePortal.useRecords.some((record) => record.date === key),
-        scheduled: safePortal.reminders.weekdays.includes(current.getDay()),
+        used: currentBottleRecords.some((record) => record.date === key),
+        scheduled: activeReminders.weekdays.includes(current.getDay()),
       };
     });
 
@@ -368,7 +400,7 @@ export default function PatientPortalPage() {
     if (
       !patient ||
       !portal?.signedAt ||
-      !portal.reminders.enabled ||
+      !activeReminders.enabled ||
       !currentBottle ||
       permission !== "granted"
     ) {
@@ -382,8 +414,8 @@ export default function PatientPortalPage() {
       const notifiedKey = `cra-care-reminder-${patient.id}-${dateKey(current)}-${time}`;
 
       if (
-        !portal.reminders.weekdays.includes(current.getDay()) ||
-        portal.reminders.time !== time ||
+        !activeReminders.weekdays.includes(current.getDay()) ||
+        activeReminders.time !== time ||
         window.sessionStorage.getItem(notifiedKey) ||
         sendingReminder
       ) {
@@ -409,7 +441,7 @@ export default function PatientPortalPage() {
     const interval = window.setInterval(() => void checkReminder(), 15_000);
 
     return () => window.clearInterval(interval);
-  }, [currentBottle, patient, permission, portal]);
+  }, [activeReminders, currentBottle, patient, permission, portal]);
 
   function updatePortal(next: PatientPortalState) {
     setPortal(next);
@@ -457,7 +489,7 @@ export default function PatientPortalPage() {
       return;
     }
 
-    const startedPrescribedBottles = portal.bottles.filter((candidate) => candidate.status !== "recebido").length;
+    const startedPrescribedBottles = trackBottles.filter((candidate) => candidate.status !== "recebido").length;
     if (startedPrescribedBottles >= prescribedBottleCount) {
       setMessage(`Você já iniciou os ${prescribedBottleCount} frascos prescritos pelo médico.`);
       return;
@@ -465,13 +497,14 @@ export default function PatientPortalPage() {
 
     // O portal nunca cria frascos. Eles precisam ser vinculados ao paciente
     // pela Secretaria/estoque antes de o paciente poder iniciar o uso.
-    const receivedBottle = portal.bottles.filter((candidate) => candidate.status === "recebido").sort((first, second) => first.number - second.number)[0];
+    const receivedBottle = trackBottles.find((candidate) => candidate.status === "recebido");
     if (!receivedBottle) {
       setMessage("Ainda não há um novo frasco atribuído ao seu tratamento. Aguarde a Secretaria liberar o próximo frasco.");
       return;
     }
-    if (receivedBottle.number > 1) {
-      const previousBottle = portal.bottles.find((candidate) => candidate.number === receivedBottle.number - 1);
+    const receivedIndex = trackBottles.findIndex((candidate) => candidate.id === receivedBottle.id);
+    if (receivedIndex > 0) {
+      const previousBottle = trackBottles[receivedIndex - 1];
       if (!previousBottle || previousBottle.status !== "finalizado") {
         setMessage("Finalize o frasco anterior antes de iniciar o próximo.");
         return;
@@ -482,7 +515,7 @@ export default function PatientPortalPage() {
 
     updatePortal({ ...portal, bottles });
     setShowFinishForm(false);
-    setMessage(`Frasco ${bottle.number} iniciado! Agora você já pode registrar seus dias de uso.`);
+    setMessage(`Frasco ${bottle.number} de ${treatmentTrackLabel(activeTreatment)} iniciado! Agora você já pode registrar seus dias de uso.`);
     setSection("frasco");
   }
 
@@ -497,12 +530,12 @@ export default function PatientPortalPage() {
       return;
     }
 
-    const matchingBottle = portal.bottles.find((bottle) =>
+    const matchingBottle = trackBottles.find((bottle) =>
       date >= bottle.startedAt && (!bottle.finishedAt || date <= bottle.finishedAt),
     ) ?? currentBottle;
-    const existing = portal.useRecords.find((record) => record.date === date);
+    const existing = portal.useRecords.find((record) => record.bottleId === matchingBottle.id && record.date === date);
     const dayOverrides = { ...portal.dayOverrides };
-    delete dayOverrides[date];
+    delete dayOverrides[dayOverrideKey(matchingBottle.id, date)];
 
     if (existing) {
       updatePortal({
@@ -544,8 +577,8 @@ export default function PatientPortalPage() {
 
     updatePortal({
       ...portal,
-      useRecords: portal.useRecords.filter((record) => record.date !== date),
-      dayOverrides: { ...portal.dayOverrides, [date]: status },
+      useRecords: portal.useRecords.filter((record) => !(record.bottleId === currentBottle.id && record.date === date)),
+      dayOverrides: { ...portal.dayOverrides, [dayOverrideKey(currentBottle.id, date)]: status },
     });
     setMessage(`${formatDate(date)} marcado como ${status === "off" ? "dia OFF" : "não registrado"}.`);
   }
@@ -640,7 +673,11 @@ export default function PatientPortalPage() {
       }
     }
 
-    updatePortal({ ...portal, reminders: reminderDraft });
+    updatePortal({
+      ...portal,
+      reminders: reminderDraft,
+      treatmentReminders: { ...portal.treatmentReminders, [activeTreatment]: reminderDraft },
+    });
     setMessage(
       reminderDraft.enabled
         ? "Lembretes e notificações no celular ativados neste dispositivo."
@@ -778,10 +815,10 @@ export default function PatientPortalPage() {
     ...Array.from({ length: firstWeekday }, () => null),
     ...Array.from({ length: monthDayCount }, (_, index) => new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), index + 1)),
   ];
-  const selectedRecord = portal.useRecords.find((record) => record.date === selectedDate);
-  const selectedDayOverride = portal.dayOverrides?.[selectedDate];
+  const selectedRecord = portal.useRecords.find((record) => record.bottleId === currentBottle?.id && record.date === selectedDate);
+  const selectedDayOverride = currentBottle ? portal.dayOverrides?.[dayOverrideKey(currentBottle.id, selectedDate)] : undefined;
   const selectedWeekday = parseDate(selectedDate).getDay();
-  const selectedScheduled = portal.reminders.weekdays.includes(selectedWeekday);
+  const selectedScheduled = activeReminders.weekdays.includes(selectedWeekday);
   const milestone = currentBottleRecords.length >= 30
     ? { emoji: "🌷", text: "Você chegou a uma nova etapa do seu tratamento. Para manter tudo certinho e evitar interrupções, pode ser um bom momento para solicitar o próximo frasco." }
     : currentBottleRecords.length >= 20
@@ -792,9 +829,9 @@ export default function PatientPortalPage() {
         const day = parseDate(currentBottle.startedAt);
         day.setDate(day.getDate() + index);
         const key = dateKey(day);
-        const scheduled = portal.reminders.weekdays.includes(day.getDay());
-        const recorded = portal.useRecords.some((record) => record.date === key);
-        const override = portal.dayOverrides?.[key];
+        const scheduled = activeReminders.weekdays.includes(day.getDay());
+        const recorded = currentBottleRecords.some((record) => record.date === key);
+        const override = currentBottle ? portal.dayOverrides?.[dayOverrideKey(currentBottle.id, key)] : undefined;
         return scheduled && !recorded && override !== "off";
       }).filter(Boolean).length
     : 0;
@@ -803,8 +840,8 @@ export default function PatientPortalPage() {
     { id: currentRelease.id, icon: currentRelease.icon, title: currentRelease.title, text: currentRelease.summary },
     ...(portal.manualNotifications ?? []),
     ...automaticNotifications,
-    ...(currentBottle && portal.reminders.enabled && portal.reminders.weekdays.includes(new Date().getDay()) && !todayRecord
-      ? [{ id: `reminder-${today}-${portal.reminders.time}`, icon: "💊", title: "Uso programado para hoje", text: `Seu lembrete está configurado para ${portal.reminders.time}. Registre o uso quando realizar o tratamento.` }]
+    ...(currentBottle && activeReminders.enabled && activeReminders.weekdays.includes(new Date().getDay()) && !todayRecord
+      ? [{ id: `reminder-${activeTreatment}-${today}-${activeReminders.time}`, icon: "💊", title: `Uso de ${treatmentTrackLabel(activeTreatment)} programado para hoje`, text: `Seu lembrete está configurado para ${activeReminders.time}. Registre o uso quando realizar o tratamento.` }]
       : []),
     ...(missedDays > 0
       ? [{ id: `missed-${currentBottle?.id}-${missedDays}`, icon: "📅", title: `${missedDays} ${missedDays === 1 ? "dia precisa" : "dias precisam"} de atenção`, text: "Confira o calendário e atualize os dias que ficaram sem registro." }]
@@ -889,11 +926,29 @@ export default function PatientPortalPage() {
               </div>
             )}
 
+            {treatmentTracks.length > 1 && (
+              <div className="mb-5 rounded-2xl border border-[#eadfd9] bg-white p-3 shadow-sm">
+                <p className="px-1 text-xs font-semibold text-[#766b6e]">Acompanhar tratamento</p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {treatmentTracks.map((track) => (
+                    <button
+                      key={track}
+                      type="button"
+                      onClick={() => { setActiveTreatment(track); setReminderDraft(safePortal.treatmentReminders?.[track] ?? safePortal.reminders); setShowFinishForm(false); }}
+                      className={`rounded-xl px-3 py-3 text-sm font-semibold ${activeTreatment === track ? "bg-[#a3113a] text-white" : "bg-[#f7f2ef] text-[#65585c]"}`}
+                    >
+                      {treatmentTrackLabel(track)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {section === "inicio" && (
               <div className="space-y-5">
                 <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Seu tratamento</p><h2 className="mt-2 text-xl font-bold text-[#433438]">{patient.treatment ?? "Acompanhamento CRA"}</h2><p className="mt-2 text-sm text-[#817578]">{latestPrescription?.posology ?? "Siga a orientação da sua equipe médica."}</p></div>
+                    <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Seu tratamento</p><h2 className="mt-2 text-xl font-bold text-[#433438]">{latestPrescription?.treatment ?? treatmentTrackLabel(activeTreatment)}</h2><p className="mt-2 text-sm text-[#817578]">{latestPrescription?.posology ?? "Siga a orientação da sua equipe médica."}</p></div>
                     <span className="self-start rounded-full bg-[#edf8f3] px-3 py-1.5 text-xs font-semibold text-[#187157]">{currentBottle ? `Frasco ${currentBottle.number} em uso` : "Pronto para começar"}</span>
                   </div>
                   {currentBottle && <button type="button" onClick={() => toggleUse(today)} className={`mt-5 w-full rounded-2xl px-4 py-3.5 text-sm font-semibold sm:w-auto ${todayRecord ? "bg-[#edf8f3] text-[#187157]" : "bg-[#a3113a] text-white"}`}>{todayRecord ? "✓ Uso de hoje registrado" : "Registrar uso de hoje"}</button>}
@@ -908,7 +963,7 @@ export default function PatientPortalPage() {
                     { label: "Frascos iniciados", value: String(startedBottleCount), detail: "Registrados no portal" },
                     { label: "Aguardando início", value: String(waitingBottleCount), detail: "Recebidos e ainda fechados" },
                     { label: "Frasco atual", value: currentBottle ? `#${currentBottle.number}` : "—" },
-                    { label: "Uso correto", value: `${regularity}%`, detail: `${portal.useRecords.length} dia(s) registrado(s)` },
+                    { label: "Uso correto", value: `${regularity}%`, detail: `${currentBottleRecords.length} dia(s) registrado(s)` },
                   ].map((item) => <article key={item.label} className="rounded-[22px] border border-[#eee5e0] bg-white p-4 shadow-sm"><p className="text-xs text-[#817578]">{item.label}</p><p className="mt-3 text-2xl font-bold text-[#a3113a]">{item.value}</p>{item.detail && <p className="mt-2 text-[11px] leading-4 text-[#817578]">{item.detail}</p>}</article>)}
                 </div>
 
@@ -932,7 +987,7 @@ export default function PatientPortalPage() {
                 <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Acompanhamento do tratamento</p>
                   <h2 className="mt-2 text-2xl font-bold text-[#433438]">Meu frasco</h2>
-                  <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{[{ label: "Recebidos", value: receivedBottleCount }, { label: "Iniciados", value: startedBottleCount }, { label: "Concluídos", value: safePortal.bottles.filter((bottle) => bottle.status === "finalizado").length }, { label: "Aguardando início", value: waitingBottleCount }].map((item) => <div key={item.label} className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">{item.label}</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{item.value}</p></div>)}</div>
+                  <p className="mt-3 text-sm font-semibold text-[#86203b]">{treatmentTrackLabel(activeTreatment)}</p><div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{[{ label: "Recebidos", value: receivedBottleCount }, { label: "Iniciados", value: startedBottleCount }, { label: "Concluídos", value: trackBottles.filter((bottle) => bottle.status === "finalizado").length }, { label: "Aguardando início", value: waitingBottleCount }].map((item) => <div key={item.label} className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">{item.label}</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{item.value}</p></div>)}</div>
                   {currentBottle ? <><div className="mt-6 rounded-[24px] bg-gradient-to-br from-[#fff3f5] to-[#faf5f1] p-5"><div className="flex items-center justify-between gap-3"><span className="text-3xl">💊</span><span className="rounded-full bg-[#eaf8f3] px-3 py-1 text-xs font-semibold text-[#187157]">Em uso</span></div><h3 className="mt-4 text-xl font-bold text-[#86203b]">Frasco {currentBottle.number}</h3><p className="mt-2 text-sm text-[#66595d]">Iniciado em {formatDate(currentBottle.startedAt)}</p><p className="mt-1 text-sm text-[#66595d]">Fase: {latestPrescription?.phase ?? patient.phase ?? "A definir"}</p><p className="mt-1 text-sm text-[#66595d]">{latestPrescription?.posology ?? `${patient.drops ?? 6} gotas, conforme orientação médica.`}</p></div><div className="mt-5 grid grid-cols-2 gap-3"><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Dias registrados</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{currentBottleRecords.length}</p></div><div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Regularidade</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{regularity}%</p></div></div><button type="button" onClick={() => toggleUse(today)} className={`mt-5 w-full rounded-2xl px-4 py-3.5 text-sm font-semibold ${todayRecord ? "bg-[#edf8f3] text-[#187157]" : "bg-[#a3113a] text-white"}`}>{todayRecord ? "✓ Uso de hoje registrado" : "Registrar uso de hoje"}</button><button type="button" onClick={() => setShowFinishForm(!showFinishForm)} className="mt-3 w-full rounded-2xl border border-[#eadfd9] px-4 py-3.5 text-sm font-semibold text-[#a3113a]">Finalizar frasco</button>{showFinishForm && <div className="mt-4 rounded-2xl border border-[#eee5e0] bg-[#fcfaf8] p-4"><label className="block text-sm font-semibold text-[#544449]">Data de finalização<input type="date" min={currentBottle.startedAt} max={today} value={finishDate} onChange={(event) => setFinishDate(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal" /></label><button type="button" onClick={finishBottle} className="mt-4 w-full rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white">Confirmar finalização</button></div>}</> : <div className="mt-6 rounded-[24px] border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-10 text-center"><p className="text-3xl">💊</p><h3 className="mt-4 text-lg font-bold text-[#433438]">{lastBottle ? "Próximo frasco" : "Vamos começar o seu acompanhamento?"}</h3><p className="mt-2 text-sm leading-6 text-[#817578]">{lastBottle ? "O próximo frasco só pode ser iniciado após a finalização do anterior e quando estiver atribuído pela equipe." : "O primeiro frasco será liberado assim que for atribuído pela equipe."}</p><button type="button" onClick={startBottle} disabled={Boolean(pendingAssessmentBottle) || !latestPrescription || prescribedBottleCount < 1 || startedBottleCount >= prescribedBottleCount || !canStartAssignedBottle} className="mt-5 rounded-2xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-45">{lastBottle ? "Iniciar próximo frasco" : "Iniciar frasco"}</button></div>}
                 </article>
 
@@ -979,7 +1034,7 @@ export default function PatientPortalPage() {
                 <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Histórico do tratamento</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">Calendário geral</h2>
                   <div className="mt-6 flex items-center justify-between"><button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="rounded-xl bg-[#f7f2ef] px-4 py-2 text-[#a3113a]">←</button><p className="text-sm font-bold capitalize text-[#433438]">{monthLabel}</p><button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="rounded-xl bg-[#f7f2ef] px-4 py-2 text-[#a3113a]">→</button></div>
-                  <div className="mt-5 grid grid-cols-7 gap-1 text-center sm:gap-2">{weekdays.map((day) => <span key={day.value} className="py-2 text-[11px] font-semibold text-[#817578]">{day.short.slice(0, 1)}</span>)}{calendarDays.map((day, index) => { if (!day) return <span key={`blank-${index}`} />; const key = dateKey(day); const record = portal.useRecords.find((item) => item.date === key); const override = portal.dayOverrides?.[key]; const scheduled = portal.reminders.weekdays.includes(day.getDay()); const withinTreatment = Boolean(currentBottle && key <= today); const missed = override === "nao-registrado" || (!record && override !== "off" && scheduled && withinTreatment && key < today); const selected = selectedDate === key; return <button key={key} type="button" onClick={() => setSelectedDate(key)} className={`flex aspect-square items-center justify-center rounded-xl text-xs font-semibold sm:text-sm ${selected ? "ring-2 ring-[#a3113a] ring-offset-2" : ""} ${record ? "bg-[#dff3e8] text-[#187157]" : override === "off" ? "bg-[#f0ebe8] text-[#716569]" : missed ? "bg-[#ffe6e8] text-[#a73a46]" : scheduled && withinTreatment ? "bg-[#fff2f3] text-[#a3113a]" : "bg-[#f8f5f2] text-[#716569]"}`}>{day.getDate()}</button>; })}</div>
+                <div className="mt-5 grid grid-cols-7 gap-1 text-center sm:gap-2">{weekdays.map((day) => <span key={day.value} className="py-2 text-[11px] font-semibold text-[#817578]">{day.short.slice(0, 1)}</span>)}{calendarDays.map((day, index) => { if (!day) return <span key={`blank-${index}`} />; const key = dateKey(day); const record = portal.useRecords.find((item) => item.bottleId === currentBottle?.id && item.date === key); const override = currentBottle ? portal.dayOverrides?.[dayOverrideKey(currentBottle.id, key)] : undefined; const scheduled = activeReminders.weekdays.includes(day.getDay()); const withinTreatment = Boolean(currentBottle && key <= today); const missed = override === "nao-registrado" || (!record && override !== "off" && scheduled && withinTreatment && key < today); const selected = selectedDate === key; return <button key={key} type="button" onClick={() => setSelectedDate(key)} className={`flex aspect-square items-center justify-center rounded-xl text-xs font-semibold sm:text-sm ${selected ? "ring-2 ring-[#a3113a] ring-offset-2" : ""} ${record ? "bg-[#dff3e8] text-[#187157]" : override === "off" ? "bg-[#f0ebe8] text-[#716569]" : missed ? "bg-[#ffe6e8] text-[#a73a46]" : scheduled && withinTreatment ? "bg-[#fff2f3] text-[#a3113a]" : "bg-[#f8f5f2] text-[#716569]"}`}>{day.getDate()}</button>; })}</div>
                   <div className="mt-6 flex flex-wrap gap-4 text-xs text-[#66595d]"><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[#dff3e8]" />Uso realizado</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[#f0ebe8]" />Dia OFF</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[#ffe6e8]" />Não registrado</span></div>
                 </article>
                 <article className="rounded-[24px] border border-[#eee5e0] bg-white p-5 shadow-sm">

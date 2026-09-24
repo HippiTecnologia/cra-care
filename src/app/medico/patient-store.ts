@@ -172,6 +172,9 @@ export type DemoBatch = {
   conferenceNotes?: string;
   laboratoryOkAt?: string;
   laboratoryOkBy?: string;
+  /** Recebimento de Imunobacteriana produzida por laboratório externo. */
+  externalReceivedAt?: string;
+  externalLaboratory?: string;
   orderType?: "pedido-paciente" | "pronta-entrega";
   indication?: "rinite" | "bacteriana" | "misto";
   status: DemoBatchStatus;

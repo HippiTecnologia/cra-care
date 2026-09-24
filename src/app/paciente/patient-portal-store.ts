@@ -1,6 +1,9 @@
 export type PatientBottle = {
   id: string;
   number: number;
+  /** Receita que originou o frasco; preserva trilhas simultâneas de tratamento. */
+  prescriptionId?: string;
+  treatment?: string;
   receivedAt?: string;
   startedAt: string;
   finishedAt?: string;
@@ -44,6 +47,8 @@ export type PatientReminderSettings = {
   time: string;
 };
 
+export type PatientTreatmentReminders = Partial<Record<"rinite" | "imunobacteriana", PatientReminderSettings>>;
+
 export type PatientManualNotification = {
   id: string;
   icon: string;
@@ -63,6 +68,7 @@ export type PatientPortalState = {
   dayOverrides?: Record<string, "off" | "nao-registrado">;
   assessments: PatientAssessment[];
   reminders: PatientReminderSettings;
+  treatmentReminders?: PatientTreatmentReminders;
   readNotificationIds?: string[];
   manualNotifications?: PatientManualNotification[];
   /** Correções administrativas no histórico, sempre acompanhadas do motivo. */

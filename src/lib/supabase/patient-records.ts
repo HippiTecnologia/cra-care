@@ -10,6 +10,7 @@ import type {
   PatientPortalState,
   PatientReminderSettings,
   PatientManualNotification,
+  PatientTreatmentReminders,
 } from "../../app/paciente/patient-portal-store";
 import { createDefaultPortalState } from "../../app/paciente/patient-portal-store";
 import { mapMedicalPatient, type MedicalPatientRow } from "./medical-records";
@@ -75,6 +76,15 @@ function validReminderSettings(value: unknown): PatientReminderSettings {
   };
 }
 
+function treatmentRemindersFromValue(value: unknown): PatientTreatmentReminders {
+  const record = objectValue(value);
+  const result: PatientTreatmentReminders = {};
+  for (const track of ["rinite", "imunobacteriana"] as const) {
+    if (Object.keys(objectValue(record[track])).length) result[track] = validReminderSettings(record[track]);
+  }
+  return result;
+}
+
 function prescriptionFromRow(row: Record<string, unknown>): DemoPrescription {
   const content = objectValue(row.content);
   const formulas = Array.isArray(content.formulas)
@@ -115,6 +125,8 @@ function bottleFromRow(row: Record<string, unknown>): PatientBottle {
   return {
     id: text(row.id),
     number: number(row.bottle_number, 1),
+    prescriptionId: text(row.prescription_id) || undefined,
+    treatment: text(objectValue(row.metadata).treatment) || undefined,
     receivedAt: text(row.received_at) || undefined,
     startedAt: startedAt ?? text(row.received_at, text(row.created_at)),
     finishedAt: completedAt,
@@ -204,6 +216,7 @@ export async function loadPatientWorkspace(): Promise<PatientWorkspace> {
   const settings = (settingsResult.data ?? null) as Record<string, unknown> | null;
   if (settings) {
     portal.reminders = validReminderSettings(settings.reminders);
+    portal.treatmentReminders = treatmentRemindersFromValue(objectValue(settings.reminders).byTreatment);
     portal.dayOverrides = objectValue(settings.day_overrides) as PatientPortalState["dayOverrides"];
     portal.readNotificationIds = Array.isArray(settings.read_notification_ids)
       ? settings.read_notification_ids.map(String)
@@ -237,7 +250,7 @@ async function savePortalSettings(context: PatientContext, state: PatientPortalS
   const { error } = await getSupabaseClient().from("patient_portal_settings").upsert({
     patient_id: context.patientId,
     clinic_id: context.clinicId,
-    reminders: state.reminders,
+    reminders: { ...state.reminders, byTreatment: state.treatmentReminders ?? {} },
     day_overrides: state.dayOverrides ?? {},
     read_notification_ids: state.readNotificationIds ?? [],
     manual_notifications: state.manualNotifications ?? [],
@@ -287,7 +300,9 @@ async function savePortalUses(context: PatientContext, state: PatientPortalState
       registered_at: record.registeredAt || new Date().toISOString(),
       drops: record.drops,
     };
-    const { error } = await supabase.from("patient_use_records").upsert(payload, { onConflict: "patient_id,use_date" });
+    // Cada registro já possui UUID estável; isso evita que Rinite e
+    // Imunobacteriana se sobrescrevam quando usadas no mesmo dia.
+    const { error } = await supabase.from("patient_use_records").upsert(payload, { onConflict: "id" });
     if (error) throw error;
   }
 }
