@@ -178,7 +178,10 @@ export default function MedicalPatientPage() {
         setPortal(workspace.portal);
         if (workspace.patient) {
           setPhase(workspace.patient.phase ?? treatmentPhases[0]);
-          setDrops(workspace.patient.drops ?? 6);
+          // A receita nova abre sempre no padrão da Rinite. A dose do último
+          // tratamento do paciente não pode alterar essa configuração inicial.
+          setDrops(2);
+          setFrequency("3 vezes por semana");
         }
       } catch {
         if (active) setError("Não foi possível carregar o prontuário real deste paciente.");

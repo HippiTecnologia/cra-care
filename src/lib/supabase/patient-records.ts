@@ -102,7 +102,7 @@ function prescriptionFromRow(row: Record<string, unknown>): DemoPrescription {
     treatment: text(content.treatment, "Imunoterapia para rinite"),
     phase: text(content.phase),
     bottles: number(content.bottles, 1),
-    drops: number(content.drops, 6),
+    drops: number(content.drops, 2),
     frequency: text(content.frequency, "3 vezes por semana"),
     posology: text(content.posology),
     formulas,
