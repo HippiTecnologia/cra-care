@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "crypto";
 import { authEmailForPatientCpf, authEmailForUsername, doctorInitialPassword, patientInitialPassword, requiresPasswordChange } from "../../../lib/auth/credentials";
 import { getSupabaseAdminClient } from "../../../lib/supabase/admin";
 
 type StaffRole = "admin" | "secretaria" | "medico" | "laboratorio" | "enfermagem";
 type ManagedRole = Exclude<StaffRole, "admin">;
+
+function createTemporaryPassword() {
+  return `CRA-${randomBytes(9).toString("base64url")}!`;
+}
 
 function unauthorized(message = "Acesso não autorizado.") { return NextResponse.json({ error: message }, { status: 401 }); }
 
@@ -14,7 +19,7 @@ async function actor(request: NextRequest) {
   const { data: user } = await admin.auth.getUser(token);
   if (!user.user) return null;
   const { data: profile } = await admin.from("profiles").select("id, clinic_id, role").eq("id", user.user.id).maybeSingle();
-  return profile?.clinic_id && ["admin", "super_admin", "secretaria"].includes(profile.role)
+  return profile?.clinic_id && ["admin", "secretaria"].includes(profile.role)
     ? { ...profile, clinic_id: profile.clinic_id }
     : null;
 }
@@ -78,7 +83,9 @@ export async function PUT(request: NextRequest) {
     if (!account) return NextResponse.json({ error: "Acesso não encontrado nesta clínica." }, { status: 404 });
     const admin = getSupabaseAdminClient();
     const role = account.kind === "profile" ? account.role as StaffRole : "paciente";
-    const temporaryPassword = account.kind === "patient" ? patientInitialPassword(account.birth_date) : role === "medico" ? doctorInitialPassword(account.crm ?? "") : String(body.temporaryPassword || "1234");
+    // Senhas existentes nunca podem ser lidas: o provedor as mantém em hash.
+    // Ao atender alguém, a Secretaria gera uma senha temporária nova.
+    const temporaryPassword = createTemporaryPassword();
     const update = account.kind === "patient"
       ? { email: authEmailForPatientCpf(String(account.cpf).replace(/\D/g, "")), password: temporaryPassword, user_metadata: { username: String(account.cpf).replace(/\D/g, ""), role: "paciente" }, ban_duration: "none" as const }
       : { password: temporaryPassword, ban_duration: "none" as const };

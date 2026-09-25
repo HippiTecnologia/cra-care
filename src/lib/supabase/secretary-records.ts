@@ -249,7 +249,8 @@ function patientPayload(patient: DemoPatientRecord, existing: MedicalPatientRow)
       paymentStatus: patient.paymentStatus ?? text(existingFinancial.paymentStatus, "A definir"),
       asaasReference: patient.asaasReference ?? text(existingFinancial.asaasReference),
       notes: patient.financialNotes ?? text(existingFinancial.notes),
-    },
+      treatmentPayments: patient.treatmentPayments ?? existingFinancial.treatmentPayments,
+    } as unknown as Record<string, string | number>,
     updated_at: new Date().toISOString(),
   };
 }

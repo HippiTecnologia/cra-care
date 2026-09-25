@@ -53,10 +53,22 @@ export type DemoPatientRecord = {
   paymentStatus?: "A definir" | "Pendente" | "Em dia" | "Vencido" | "Cancelado";
   asaasReference?: string;
   financialNotes?: string;
+  /** Valores separados quando o paciente realiza os dois tratamentos. */
+  treatmentPayments?: TreatmentPayment[];
   medicalRecord?: MedicalRecord;
   payments?: PatientPaymentRecord[];
   notes?: string;
   abandonmentReason?: string;
+};
+
+export type TreatmentPayment = {
+  treatment: "Rinite" | "Imunobacteriana";
+  contractValue?: number;
+  installments?: number;
+  installmentValue?: number;
+  paymentMethod?: string;
+  dueDate?: string;
+  agreedCondition?: "À vista" | "Parcelado";
 };
 
 export type MedicalRecord = {

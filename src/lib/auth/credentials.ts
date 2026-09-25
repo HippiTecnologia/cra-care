@@ -57,5 +57,7 @@ export function doctorInitialPassword(crm: string) {
 }
 
 export function requiresPasswordChange(role: AccountRole) {
-  return role === "secretaria" || role === "admin";
+  // Todo acesso da equipe recebe uma senha temporária e precisa trocá-la no
+  // primeiro uso. Pacientes mantêm o fluxo próprio, vinculado ao CPF.
+  return role !== "paciente";
 }

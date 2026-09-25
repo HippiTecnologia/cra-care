@@ -432,6 +432,7 @@ export default function PatientRecordsPage() {
           </section> : <section className="rounded-3xl border border-[#eee5e0] bg-white p-12 text-center text-sm text-[#817578]">Selecione um paciente para abrir o cadastro completo.</section>}
         </div>
       </div>
+      {tab === "financeiro" && editing && draft && <TreatmentPaymentEditor patient={draft} prescriptions={prescriptions} onChange={(update) => setDraft((current) => current ? update(current) : current)} />}
       {editingBottle && <div className="fixed inset-0 z-[100] flex items-end bg-[#29151b]/55 p-3 sm:items-center sm:justify-center"><div role="dialog" aria-modal="true" className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl sm:p-7"><div className="flex items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-wide text-[#a3113a]">Ajuste administrativo</p><h2 className="mt-1 text-xl font-bold">Frasco {editingBottle}</h2></div><button type="button" onClick={() => setEditingBottle(null)} className="rounded-full bg-[#f7f1ee] px-3 py-2">×</button></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Data de recebimento"><input type="date" value={bottleDraft.receivedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, receivedAt: event.target.value }))} className={inputClass} /></Field><Field label="Data de início"><input type="date" value={bottleDraft.startedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, startedAt: event.target.value }))} className={inputClass} /></Field><Field label="Data de conclusão"><input type="date" value={bottleDraft.finishedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, finishedAt: event.target.value }))} className={inputClass} /></Field><Field label="Status"><select value={bottleDraft.status} onChange={(event) => setBottleDraft((item) => ({ ...item, status: event.target.value as typeof item.status }))} className={inputClass}><option value="recebido">Recebido</option><option value="em-uso">Em uso</option><option value="finalizado">Concluído</option></select></Field><Field label="Motivo do ajuste *" wide><textarea rows={3} value={bottleReason} onChange={(event) => setBottleReason(event.target.value)} placeholder="Ex.: paciente iniciou em outra data." className={textareaClass} /></Field></div><div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><button type="button" onClick={() => setEditingBottle(null)} className="rounded-xl border border-[#e6dbd6] px-4 py-3 text-sm font-semibold">Cancelar</button><button type="button" onClick={saveBottleAdjustment} className={primaryButtonClass}>Salvar ajuste</button></div></div></div>}
     </main>
   );
@@ -455,4 +456,29 @@ function Info({ title, children }: { title: string; children: ReactNode }) {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return <div className="rounded-2xl bg-[#fbf7f5] p-5"><p className="text-xs text-[#817578]">{label}</p><p className="mt-2 text-xl font-bold text-[#a3113a]">{value}</p></div>;
+}
+
+function TreatmentPaymentEditor({ patient, prescriptions, onChange }: {
+  patient: DemoPatientRecord;
+  prescriptions: DemoPrescription[];
+  onChange: (update: (current: DemoPatientRecord) => DemoPatientRecord) => void;
+}) {
+  const treatments = Array.from(new Set(prescriptions.map((prescription) => /bacteriana|imunobacteriana/i.test(prescription.treatment) ? "Imunobacteriana" : "Rinite")));
+  if (treatments.length < 2) return null;
+
+  function updatePayment(treatment: string, field: "contractValue" | "installments" | "installmentValue" | "paymentMethod" | "dueDate", value: string | number) {
+    onChange((current) => {
+      const payments = [...(current.treatmentPayments ?? [])];
+      const index = payments.findIndex((payment) => payment.treatment === treatment);
+      const previous = index >= 0 ? payments[index] : { treatment: treatment as "Rinite" | "Imunobacteriana", paymentMethod: current.paymentMethod, dueDate: current.paymentDueDate, agreedCondition: current.agreedCondition };
+      const next = { ...previous, [field]: value };
+      if (field === "contractValue") next.installmentValue = Number(value) / Math.max(1, next.installments ?? 1);
+      if (field === "installments") next.installmentValue = (next.contractValue ?? 0) / Math.max(1, Number(value));
+      if (field === "installmentValue") next.contractValue = Number(value) * Math.max(1, next.installments ?? 1);
+      if (index >= 0) payments[index] = next; else payments.push(next);
+      return { ...current, treatmentPayments: payments };
+    });
+  }
+
+  return <section className="mx-auto mt-6 max-w-6xl rounded-3xl border border-[#eadfd9] bg-white p-5 shadow-sm"><p className="text-xs font-bold uppercase tracking-[.14em] text-[#a3113a]">Dois tratamentos</p><h3 className="mt-2 text-xl font-bold">Valores separados para o termo</h3><p className="mt-1 text-sm text-[#817578]">Preencha cada indicação. O termo do paciente exibirá os dois valores e parcelamentos com identificação correta.</p><div className="mt-5 grid gap-4 lg:grid-cols-2">{treatments.map((treatment) => { const payment = patient.treatmentPayments?.find((item) => item.treatment === treatment); return <article key={treatment} className="rounded-2xl bg-[#fbf7f5] p-4"><h4 className="font-bold text-[#86203b]">{treatment}</h4><div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label="Valor total (R$)"><input type="number" min={0} step="0.01" value={payment?.contractValue ?? ""} onChange={(event) => updatePayment(treatment, "contractValue", Number(event.target.value))} className={inputClass} /></Field><Field label="Parcelas"><input type="number" min={1} value={payment?.installments ?? 1} onChange={(event) => updatePayment(treatment, "installments", Math.max(1, Number(event.target.value)))} className={inputClass} /></Field><Field label="Valor por parcela"><input type="number" min={0} step="0.01" value={payment?.installmentValue ?? ""} onChange={(event) => updatePayment(treatment, "installmentValue", Number(event.target.value))} className={inputClass} /></Field><Field label="Vencimento"><input type="date" value={payment?.dueDate ?? ""} onChange={(event) => updatePayment(treatment, "dueDate", event.target.value)} className={inputClass} /></Field><Field label="Forma de pagamento" wide><input value={payment?.paymentMethod ?? ""} onChange={(event) => updatePayment(treatment, "paymentMethod", event.target.value)} placeholder="Ex.: Cartão de crédito" className={inputClass} /></Field></div></article>; })}</div></section>;
 }

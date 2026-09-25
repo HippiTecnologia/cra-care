@@ -177,6 +177,19 @@ export function mapMedicalPatient(
     paymentStatus: validPaymentStatus(stringValue(financial, "paymentStatus")),
     asaasReference: stringValue(financial, "asaasReference"),
     financialNotes: stringValue(financial, "notes") ?? stringValue(financial, "financialNotes"),
+    treatmentPayments: Array.isArray(financial.treatmentPayments)
+      ? financial.treatmentPayments
+        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+        .map((item) => ({
+          treatment: /bacteriana|imunobacteriana/i.test(stringValue(item, "treatment") ?? "") ? "Imunobacteriana" as const : "Rinite" as const,
+          contractValue: numberValue(item, "contractValue"),
+          installments: numberValue(item, "installments"),
+          installmentValue: numberValue(item, "installmentValue"),
+          paymentMethod: stringValue(item, "paymentMethod"),
+          dueDate: stringValue(item, "dueDate"),
+          agreedCondition: stringValue(item, "agreedCondition") === "À vista" ? "À vista" as const : "Parcelado" as const,
+        }))
+      : undefined,
     medicalRecord: (() => {
       const record = recordValue(treatment.medicalRecord);
       return Object.keys(record).length ? {

@@ -140,7 +140,7 @@ function openPrintableDocument(title: string, sections: { heading: string; text:
   return true;
 }
 
-function contractSections(patient: DemoPatientRecord, portal: PatientPortalState) {
+function contractSections(patient: DemoPatientRecord, portal: PatientPortalState, prescriptions: DemoPrescription[] = []) {
   const contractValue = patient.contractValue;
   const installments = Math.max(1, patient.paymentInstallments ?? 1);
   const installmentValue = patient.installmentValue ?? (contractValue ? contractValue / installments : undefined);
@@ -161,6 +161,24 @@ function contractSections(patient: DemoPatientRecord, portal: PatientPortalState
     }
     return "O método de aquisição, os valores e as condições exibidos neste termo correspondem ao cadastro confirmado pela Secretaria.";
   })();
+  const treatments = Array.from(new Set([
+    ...prescriptions.map((prescription) => treatmentTrack(prescription.treatment)),
+    ...(patient.treatment ? [treatmentTrack(patient.treatment)] : []),
+    ...(patient.treatmentPayments ?? []).map((payment) => treatmentTrack(payment.treatment)),
+  ]));
+  const hasImunobacteriana = treatments.includes("imunobacteriana");
+  const treatmentPaymentText = (label: string, payment?: NonNullable<DemoPatientRecord["treatmentPayments"]>[number]) => {
+    const value = payment?.contractValue;
+    const count = Math.max(1, payment?.installments ?? 1);
+    const perInstallment = payment?.installmentValue ?? (value ? value / count : undefined);
+    const details = count > 1
+      ? `${payment?.paymentMethod ?? "Forma não informada"} · ${count}x de ${formatContractMoney(perInstallment)}${payment?.dueDate ? ` · primeira cobrança em ${formatDate(payment.dueDate)}` : ""}`
+      : payment?.paymentMethod ?? "Forma não informada";
+    return `${label}\nValor total contratado: ${formatContractMoney(value)}.\nForma de pagamento: ${details}.\nCondição escolhida: ${payment?.agreedCondition ?? "Não informada"}.`;
+  };
+  const financialText = patient.treatmentPayments?.length
+    ? patient.treatmentPayments.map((payment) => treatmentPaymentText(`Tratamento: ${payment.treatment}`, payment)).join("\n\n")
+    : `Tratamento: ${treatments.length === 1 ? treatmentTrackLabel(treatments[0]) : "Tratamentos vinculados"}.\nValor total contratado: ${formatContractMoney(contractValue)}.\nMétodo de aquisição: ${patient.acquisitionMethod ?? "Não informado"}.\nForma de pagamento: ${paymentDetails}.\nCondição escolhida: ${patient.agreedCondition ?? "Não informada"}.`;
   return [
     {
       heading: "Identificação do paciente",
@@ -178,9 +196,13 @@ function contractSections(patient: DemoPatientRecord, portal: PatientPortalState
       heading: "Orientações para o uso da vacina",
       text: "• A alimentação pode ser realizada normalmente antes da aplicação. Após escovar os dentes, aguarde 20 minutos.\n• Siga corretamente a quantidade de gotas por dia, conforme a tabela ou a orientação do médico ou da enfermagem.\n• Aplique a vacina em frente ao espelho, embaixo da língua.\n• Mantenha as gotas embaixo da língua, na região vestibular, por aproximadamente 2 minutos e depois engula.\n• É normal sentir leve formigamento ou dormência na língua.\n• Após a aplicação, permaneça em jejum por 45 minutos, sem ingerir alimentos, água ou outros líquidos.\n• A vacina pode ser aplicada pela manhã ou à noite.\n• Mantenha a vacina sempre refrigerada.\n• Em viagens, a vacina pode permanecer fora da geladeira por no máximo 4 dias e deve ser transportada com cuidado, em mala ou caixa de isopor climatizada.",
     },
+    ...(hasImunobacteriana ? [{
+      heading: "Modo de usar — Imunobacteriana",
+      text: "✨ Orientações de uso:\n💧 Aplicar na região vestibular todos os dias: criança, 2 gotas; adulto, 4 gotas.\n🪥 Escovar os dentes e aguardar 20 minutos antes da aplicação.\n👄 Manter o líquido na região vestibular por 2 minutos e depois engolir.\n🚫 Após a aplicação, manter jejum, inclusive de água, por no mínimo 40 minutos.",
+    }] : []),
     {
       heading: "Valores, pagamento e cancelamento",
-      text: `Tratamento Imunoterápico (Alérgeno Específico) — orientação e planejamento técnico.\nValor total contratado: ${formatContractMoney(contractValue)}.\nMétodo de aquisição: ${patient.acquisitionMethod ?? "Não informado"}.\nForma de pagamento: ${paymentDetails}.\nCondição escolhida: ${patient.agreedCondition ?? "Não informada"}.\n\n${acquisitionGuidance}\n\nO paciente poderá cancelar o tratamento a qualquer momento, conforme as condições registradas e acordadas com a equipe responsável.`,
+      text: `${financialText}\n\n${acquisitionGuidance}\n\nO paciente poderá cancelar o tratamento a qualquer momento, conforme as condições registradas e acordadas com a equipe responsável.`,
     },
     {
       heading: "Possíveis efeitos adversos e crises de rinite",
@@ -359,7 +381,14 @@ export default function PatientPortalPage() {
       date: new Date().toISOString(),
       author: "Equipe CRA",
     };
-    const notes = [guidanceNote, ...prescriptions.flatMap((prescription) => {
+    const imunobacterianaGuidance = treatmentTracks.includes("imunobacteriana") ? [{
+      id: "imunobacteriana-use-guidance",
+      title: "Modo de usar — Imunobacteriana",
+      text: "✨ Orientações de uso:\n💧 Aplicar na região vestibular todos os dias: criança, 2 gotas; adulto, 4 gotas.\n🪥 Escovar os dentes e aguardar 20 minutos antes da aplicação.\n👄 Manter o líquido na região vestibular por 2 minutos e depois engolir.\n🚫 Após a aplicação, manter jejum, inclusive de água, por no mínimo 40 minutos.",
+      date: new Date().toISOString(),
+      author: "Equipe CRA",
+    }] : [];
+    const notes = [guidanceNote, ...imunobacterianaGuidance, ...prescriptions.flatMap((prescription) => {
       const entries = [
         {
           id: `${prescription.id}-posology`,
@@ -394,7 +423,7 @@ export default function PatientPortalPage() {
     }
 
     return notes;
-  }, [patient, prescriptions]);
+  }, [patient, prescriptions, treatmentTracks]);
 
   useEffect(() => {
     if (
@@ -688,7 +717,7 @@ export default function PatientPortalPage() {
   function downloadTerm() {
     if (!patient || !portal) return;
 
-    if (!openPrintableDocument("Termo de adesão — Imunoterapia Alérgeno Específica (IAE)", contractSections(patient, portal))) {
+    if (!openPrintableDocument("Termo de adesão — Imunoterapia Alérgeno Específica (IAE)", contractSections(patient, portal, prescriptions))) {
       setMessage("Permita a abertura de janelas para visualizar e salvar o termo em PDF.");
     }
   }
@@ -772,7 +801,7 @@ export default function PatientPortalPage() {
 
           <div className="px-6 py-7 sm:px-10 sm:py-9">
             <div className="max-h-[340px] space-y-5 overflow-y-auto rounded-2xl border border-[#eee5e0] bg-[#fcfaf8] p-5 sm:p-6">
-              {contractSections(patient, portal).slice(0, -1).map((item) => (
+              {contractSections(patient, portal, prescriptions).slice(0, -1).map((item) => (
                 <section key={item.heading}>
                   <h2 className="text-sm font-bold text-[#86203b]">{item.heading}</h2>
                   <p className="mt-2 whitespace-pre-line text-sm leading-7 text-[#65585c]">{item.text}</p>
@@ -1097,7 +1126,7 @@ export default function PatientPortalPage() {
               <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Documento do tratamento</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">Termo de adesão — Imunoterapia Alérgeno Específica (IAE)</h2></div><span className="self-start rounded-full bg-[#edf8f3] px-3 py-1.5 text-xs font-semibold text-[#187157]">✓ Assinado</span></div>
                 <div className="mt-5 rounded-2xl bg-[#edf8f3] p-4 text-sm text-[#187157]"><p className="font-semibold">Documento assinado por {portal.signedName}</p><p className="mt-2 text-xs">CPF {portal.signedCpf} · {formatDate(portal.signedAt, true)}</p></div>
-                <div className="mt-6 space-y-5">{contractSections(patient, portal).map((item) => <section key={item.heading} className="rounded-2xl bg-[#fcfaf8] p-4"><h3 className="text-sm font-bold text-[#86203b]">{item.heading}</h3><p className="mt-2 whitespace-pre-line text-sm leading-7 text-[#65585c]">{item.text}</p></section>)}</div>
+                <div className="mt-6 space-y-5">{contractSections(patient, portal, prescriptions).map((item) => <section key={item.heading} className="rounded-2xl bg-[#fcfaf8] p-4"><h3 className="text-sm font-bold text-[#86203b]">{item.heading}</h3><p className="mt-2 whitespace-pre-line text-sm leading-7 text-[#65585c]">{item.text}</p></section>)}</div>
                 <button type="button" onClick={downloadTerm} className="mt-6 w-full rounded-2xl bg-[#a3113a] px-4 py-3.5 text-sm font-semibold text-white sm:w-auto sm:px-6">Baixar termo em PDF</button>
               </article>
             )}

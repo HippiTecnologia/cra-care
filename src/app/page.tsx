@@ -22,7 +22,7 @@ const profileRoleForLogin: Record<Exclude<UserRole, "Paciente">, string[]> = {
   "Secretaria": ["secretaria"],
   "Laboratório": ["laboratorio"],
   "Enfermagem": ["enfermagem"],
-  "Administrador": ["admin", "super_admin"],
+  "Administrador": ["admin"],
 };
 
 export default function Home() {
@@ -31,23 +31,29 @@ export default function Home() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberDevice, setRememberDevice] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     async function restoreRememberedAccess() {
-      if (window.localStorage.getItem("cra-care-keep-signed-in") !== "true") return;
       try {
         const supabase = getSupabaseClient();
-        const { data: { user } } = await supabase.auth.getUser();
+        // A sessão já fica armazenada com segurança pelo Supabase. Restaurar
+        // sempre evita que o usuário seja deslogado ao atualizar a página.
+        const { data: { session } } = await supabase.auth.getSession();
+        const user = session?.user;
         if (!user || cancelled) return;
         const { data: profile } = await supabase.from("profiles").select("role, must_change_password").eq("id", user.id).maybeSingle();
         if (cancelled) return;
         if (profile) {
+          if (profile.role === "super_admin") {
+            await supabase.auth.signOut();
+            router.replace("/");
+            return;
+          }
           if (profile.must_change_password && requiresPasswordChange(profile.role as AccountRole)) { router.replace("/alterar-senha"); return; }
-          const destination = profile.role === "super_admin" ? "/central" : profile.role === "admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : profile.role === "enfermagem" ? "/enfermagem" : "/medico";
+          const destination = profile.role === "admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : profile.role === "enfermagem" ? "/enfermagem" : "/medico";
           router.replace(destination);
           return;
         }
@@ -116,10 +122,13 @@ export default function Home() {
         headers: { "content-type": "application/json", authorization: `Bearer ${data.session?.access_token ?? ""}` },
         body: JSON.stringify({ event: "success" }),
       });
-      if (rememberDevice) window.localStorage.setItem("cra-care-keep-signed-in", "true");
-      else window.localStorage.removeItem("cra-care-keep-signed-in");
       const { data: profile } = await supabase.from("profiles").select("role, must_change_password").eq("id", data.user.id).maybeSingle();
       if (profile) {
+        if (profile.role === "super_admin") {
+          await supabase.auth.signOut();
+          setMessage("Este acesso é exclusivo do Hippi ADM.");
+          return;
+        }
         const allowedRoles = selectedRole === "Paciente" ? [] : profileRoleForLogin[selectedRole];
         if (!allowedRoles.includes(profile.role)) {
           await supabase.auth.signOut();
@@ -130,8 +139,8 @@ export default function Home() {
           router.push("/alterar-senha");
           return;
         }
-        const destination = profile.role === "super_admin" ? "/central" : profile.role === "admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : profile.role === "enfermagem" ? "/enfermagem" : "/medico";
-        if (profile.role === "admin" || profile.role === "super_admin") window.sessionStorage.setItem("cra-care-demo-admin-session", JSON.stringify({ signedInAt: new Date().toISOString() }));
+        const destination = profile.role === "admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : profile.role === "enfermagem" ? "/enfermagem" : "/medico";
+        if (profile.role === "admin") window.sessionStorage.setItem("cra-care-demo-admin-session", JSON.stringify({ signedInAt: new Date().toISOString() }));
         router.push(destination);
         return;
       }
@@ -323,16 +332,7 @@ export default function Home() {
                 </div>
               </div>
 
-              <label className="flex cursor-pointer items-center gap-3 text-sm text-[#766b6e]">
-                <input
-                  type="checkbox"
-                  checked={rememberDevice}
-                  onChange={(event) => setRememberDevice(event.target.checked)}
-                  className="h-4 w-4 rounded border-[#d9c8c3] accent-[#a3113a]"
-                />
-
-                Manter conectado neste dispositivo
-              </label>
+              <p className="text-xs leading-5 text-[#766b6e]">Sua sessão permanece ativa neste dispositivo mesmo ao atualizar a página. Para sair, use a opção de sair do menu.</p>
 
               <button
                 type="submit"

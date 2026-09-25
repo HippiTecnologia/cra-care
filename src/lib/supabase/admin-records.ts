@@ -111,7 +111,7 @@ export async function loadAdminContext(): Promise<AdminContext> {
     .select("id, clinic_id, full_name, role")
     .eq("id", user.id)
     .single();
-  if (error || !data?.clinic_id || !["admin", "super_admin"].includes(data.role)) {
+  if (error || !data?.clinic_id || data.role !== "admin") {
     throw new Error("Este acesso não pertence ao perfil Administrador.");
   }
   const fullName = data.full_name === "Patricia Martinski" ? "Patricia Trudes" : data.full_name;
