@@ -83,9 +83,12 @@ export async function PUT(request: NextRequest) {
     if (!account) return NextResponse.json({ error: "Acesso não encontrado nesta clínica." }, { status: 404 });
     const admin = getSupabaseAdminClient();
     const role = account.kind === "profile" ? account.role as StaffRole : "paciente";
-    // Senhas existentes nunca podem ser lidas: o provedor as mantém em hash.
-    // Ao atender alguém, a Secretaria gera uma senha temporária nova.
-    const temporaryPassword = createTemporaryPassword();
+    // A senha anterior nunca é recuperada. Para pacientes, a redefinição volta
+    // ao padrão automático da clínica: data de nascimento (ddmmaaaa). Para a
+    // equipe, é gerada uma senha temporária forte.
+    const temporaryPassword = account.kind === "patient"
+      ? patientInitialPassword(account.birth_date)
+      : createTemporaryPassword();
     const update = account.kind === "patient"
       ? { email: authEmailForPatientCpf(String(account.cpf).replace(/\D/g, "")), password: temporaryPassword, user_metadata: { username: String(account.cpf).replace(/\D/g, ""), role: "paciente" }, ban_duration: "none" as const }
       : { password: temporaryPassword, ban_duration: "none" as const };

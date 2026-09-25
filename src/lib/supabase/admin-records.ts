@@ -351,12 +351,20 @@ export async function synchronizeAdminSales(
     const patient = patients.find((item) => item.id === sale.patientId);
     if (!patient) continue;
     const status = saleStatus(patient);
+    const selectedMethod = methodForPatient(patient, methods);
+    const condition = patient.agreedCondition ?? sale.condition;
+    const installments = condition === "À vista"
+      ? 1
+      : Math.max(1, patient.paymentInstallments ?? selectedMethod?.maxInstallments ?? sale.installments);
+    const contractedValue = patient.contractValue && patient.contractValue > 0 ? patient.contractValue : sale.contractedValue;
+    const paymentMethod = patient.paymentMethod ?? sale.paymentMethod;
+    const firstPaymentDueAt = patient.paymentDueDate ?? sale.firstPaymentDueAt;
     const commissionPerBottleSnapshot = sale.commissionPerBottleSnapshot === 64
       ? COMMISSION_PER_BOTTLE
       : sale.commissionPerBottleSnapshot;
     const treatment = treatmentLabel(patient);
-    if (status !== sale.status || commissionPerBottleSnapshot !== sale.commissionPerBottleSnapshot || treatment !== sale.treatment) {
-      const updated = { ...sale, status, treatment, commissionPerBottleSnapshot };
+    if (status !== sale.status || treatment !== sale.treatment || installments !== sale.installments || contractedValue !== sale.contractedValue || condition !== sale.condition || paymentMethod !== sale.paymentMethod || firstPaymentDueAt !== sale.firstPaymentDueAt || commissionPerBottleSnapshot !== sale.commissionPerBottleSnapshot) {
+      const updated = { ...sale, status, treatment, condition, installments, contractedValue, paymentMethod, firstPaymentDueAt, commissionPerBottleSnapshot };
       const { error } = await supabase.from("admin_sales").update({
         status,
         snapshot: updated,
