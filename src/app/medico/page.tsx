@@ -180,7 +180,7 @@ export default function MedicoPage() {
               Evolução
             </button>
             <Link
-              href="/"
+              href="/sair"
               className="block rounded-2xl px-4 py-3 text-sm text-white/80 hover:bg-white/10"
             >
               Sair
@@ -210,7 +210,7 @@ export default function MedicoPage() {
                 <p className="text-sm font-semibold">{loggedDoctor}</p>
                 <p className="text-xs text-[#877b7e]">{doctor?.specialty ?? "Carregando perfil..."}</p>
               </div>
-              <Link href="/" className="ml-2 rounded-xl border border-[#eadfd9] px-3 py-2 text-xs font-semibold text-[#a3113a] hover:bg-[#fff5f7]">
+              <Link href="/sair" className="ml-2 rounded-xl border border-[#eadfd9] px-3 py-2 text-xs font-semibold text-[#a3113a] hover:bg-[#fff5f7]">
                 Sair
               </Link>
             </div>

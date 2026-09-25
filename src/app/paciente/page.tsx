@@ -790,7 +790,7 @@ export default function PatientPortalPage() {
           <header className="bg-gradient-to-br from-[#bf1545] via-[#a3113a] to-[#740a28] px-6 py-7 text-white sm:px-10">
             <div className="flex items-center justify-between gap-4">
               <Image src="/logo-cra-branca.png" alt="CRA - Centro de Rinite e Alergia" width={160} height={108} priority className="h-auto w-28" />
-              <Link href="/" className="rounded-xl border border-white/25 bg-white/10 px-4 py-2 text-xs font-semibold text-white hover:bg-white/20">Sair</Link>
+              <Link href="/sair" className="rounded-xl border border-white/25 bg-white/10 px-4 py-2 text-xs font-semibold text-white hover:bg-white/20">Sair</Link>
             </div>
             <p className="mt-6 text-xs font-semibold uppercase tracking-[0.16em] text-white/75">Primeiro acesso · etapa obrigatória</p>
             <h1 className="mt-2 text-2xl font-bold sm:text-3xl">Termo de adesão — Imunoterapia Alérgeno Específica (IAE)</h1>

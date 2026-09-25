@@ -401,7 +401,7 @@ export default function SecretariaEstoquePage() {
                 {item}
               </span>
             ))}
-            <Link href="/" className="block rounded-2xl px-4 py-3 text-sm font-semibold text-white/85 hover:bg-white/10">
+            <Link href="/sair" className="block rounded-2xl px-4 py-3 text-sm font-semibold text-white/85 hover:bg-white/10">
               Sair
             </Link>
           </nav>
@@ -434,7 +434,7 @@ export default function SecretariaEstoquePage() {
               >
                 ← Conferir lotes recebidos
               </Link>
-              <Link href="/" className="rounded-2xl border border-[#eadfd9] bg-white px-4 py-3 text-sm font-semibold text-[#a3113a] shadow-sm hover:bg-[#fff8f8]">
+              <Link href="/sair" className="rounded-2xl border border-[#eadfd9] bg-white px-4 py-3 text-sm font-semibold text-[#a3113a] shadow-sm hover:bg-[#fff8f8]">
                 Sair
               </Link>
             </div>

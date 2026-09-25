@@ -111,7 +111,7 @@ export default function SecretariaNotificationsPage() {
             <Link href="/secretaria/estoque" className="block rounded-2xl px-4 py-3 text-sm text-white/80 hover:bg-white/10">Vacinas em estoque</Link>
             <Link href="/secretaria/notificacoes" className="block rounded-2xl bg-white/15 px-4 py-3 text-sm font-semibold">Notificações aos pacientes</Link>
             <Link href="/secretaria/configuracoes" className="block rounded-2xl px-4 py-3 text-sm text-white/80 hover:bg-white/10">Configurações</Link>
-            <Link href="/" className="block rounded-2xl px-4 py-3 text-sm font-semibold text-white/85 hover:bg-white/10">Sair</Link>
+            <Link href="/sair" className="block rounded-2xl px-4 py-3 text-sm font-semibold text-white/85 hover:bg-white/10">Sair</Link>
           </nav>
         </aside>
 
