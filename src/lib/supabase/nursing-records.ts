@@ -16,7 +16,8 @@ export async function loadNursingWorkspace() {
   const patientTable = supabase.from("patients") as any;
   const reportTable = supabase.from("nursing_reports") as any;
   const [patientsResult, doctorsResult, reportsResult] = await Promise.all([
-    patientTable.select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)").eq("nursing_profile_id", user.id).order("created_at", { ascending: false }),
+    // A Enfermagem e o médico usam a mesma carteira de pacientes da clínica.
+    patientTable.select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)").eq("clinic_id", clinicId).order("created_at", { ascending: false }),
     supabase.from("profiles").select("id, full_name").eq("clinic_id", clinicId).eq("role", "medico").order("full_name"),
     reportTable.select("id, patient_id, report_type, content, created_at").eq("nurse_profile_id", user.id).order("created_at", { ascending: false }),
   ]);
@@ -28,6 +29,7 @@ export async function loadNursingWorkspace() {
 }
 
 export async function createNursingPatient(profile: NursingProfile, input: { name: string; cpf: string; birthDate: string; phone?: string; doctorId?: string }) {
+  if (!input.doctorId) throw new Error("Selecione o médico responsável antes de salvar a paciente.");
   const { data, error } = await (getSupabaseClient().from("patients") as any).insert({ clinic_id: profile.clinicId, nursing_profile_id: profile.id, doctor_profile_id: input.doctorId || null, full_name: input.name.trim(), cpf: input.cpf.replace(/\D/g, ""), birth_date: input.birthDate, phone: input.phone?.trim() || null, status: "laudo", address: {}, treatment: {}, financial: {} }).select("id").single();
   if (error) throw error;
   return data.id as string;

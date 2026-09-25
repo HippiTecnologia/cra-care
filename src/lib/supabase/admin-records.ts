@@ -265,6 +265,46 @@ function treatmentLabel(patient: DemoPatientRecord) {
   return Array.from(labels).join(" + ");
 }
 
+type PrescriptionSummary = {
+  bottleCount: number;
+  treatment: string;
+};
+
+function prescriptionTreatment(value: unknown) {
+  const normalized = text(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (normalized.includes("imunobacteriana") || normalized.includes("bacteriana")) return "Imunobacteriana";
+  if (normalized.includes("rinite")) return "Rinite";
+  return "";
+}
+
+function summarizePrescriptions(rows: Record<string, unknown>[]) {
+  const summaries = new Map<string, PrescriptionSummary>();
+  const seenTreatments = new Set<string>();
+
+  // A consulta já chega da mais recente para a mais antiga. Para cada paciente,
+  // vale a última receita de cada tratamento, sem somar receitas antigas.
+  for (const row of rows) {
+    const patientId = text(row.patient_id);
+    if (!patientId) continue;
+    const content = objectValue(row.content);
+    const treatment = prescriptionTreatment(content.treatment);
+    const treatmentKey = treatment || "receita";
+    const key = `${patientId}:${treatmentKey}`;
+    if (seenTreatments.has(key)) continue;
+    seenTreatments.add(key);
+
+    const bottles = Math.max(1, number(content.bottles, 1));
+    const current = summaries.get(patientId);
+    const labels = new Set((current?.treatment ?? "").split(" + ").filter(Boolean));
+    if (treatment) labels.add(treatment);
+    summaries.set(patientId, {
+      bottleCount: (current?.bottleCount ?? 0) + bottles,
+      treatment: Array.from(labels).join(" + "),
+    });
+  }
+  return summaries;
+}
+
 function bottlesForMethod(methodName: string) {
   const normalized = methodName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   if (normalized.includes("por frasco")) return 1;
@@ -343,6 +383,7 @@ export async function synchronizeAdminSales(
   patients: DemoPatientRecord[],
   methods: AdminTreatmentMethod[],
   doctors: AdminDoctor[],
+  prescriptionSummaries = new Map<string, PrescriptionSummary>(),
 ) {
   const supabase = getSupabaseClient();
   const existing = await loadAdminSales(context);
@@ -362,12 +403,14 @@ export async function synchronizeAdminSales(
     const contractedValue = patient.contractValue && patient.contractValue > 0 ? patient.contractValue : sale.contractedValue;
     const paymentMethod = patient.paymentMethod ?? sale.paymentMethod;
     const firstPaymentDueAt = patient.paymentDueDate ?? sale.firstPaymentDueAt;
+    const prescribed = prescriptionSummaries.get(patient.id);
+    const bottleCount = prescribed?.bottleCount ?? sale.bottleCount ?? bottlesForMethod(patient.acquisitionMethod ?? selectedMethod?.name ?? "");
     const commissionPerBottleSnapshot = sale.commissionPerBottleSnapshot === 64
       ? COMMISSION_PER_BOTTLE
       : sale.commissionPerBottleSnapshot;
-    const treatment = treatmentLabel(patient);
-    if (status !== sale.status || treatment !== sale.treatment || installments !== sale.installments || contractedValue !== sale.contractedValue || condition !== sale.condition || paymentMethod !== sale.paymentMethod || firstPaymentDueAt !== sale.firstPaymentDueAt || commissionPerBottleSnapshot !== sale.commissionPerBottleSnapshot) {
-      const updated = { ...sale, status, treatment, condition, installments, contractedValue, paymentMethod, firstPaymentDueAt, commissionPerBottleSnapshot };
+    const treatment = prescribed?.treatment || treatmentLabel(patient);
+    if (status !== sale.status || treatment !== sale.treatment || installments !== sale.installments || contractedValue !== sale.contractedValue || condition !== sale.condition || paymentMethod !== sale.paymentMethod || firstPaymentDueAt !== sale.firstPaymentDueAt || bottleCount !== sale.bottleCount || commissionPerBottleSnapshot !== sale.commissionPerBottleSnapshot) {
+      const updated = { ...sale, status, treatment, condition, installments, contractedValue, paymentMethod, firstPaymentDueAt, bottleCount, commissionPerBottleSnapshot };
       const { error } = await supabase.from("admin_sales").update({
         status,
         snapshot: updated,
@@ -390,6 +433,7 @@ export async function synchronizeAdminSales(
     const defaultValue = condition === "À vista" && selectedMethod.cashValue ? selectedMethod.cashValue : listValue;
     const contractedValue = patient.contractValue && patient.contractValue > 0 ? patient.contractValue : defaultValue;
     const doctor = doctors.find((item) => item.name === patient.doctor);
+    const prescribed = prescriptionSummaries.get(patient.id);
     const installments = condition === "À vista" ? 1 : Math.max(1, patient.paymentInstallments ?? selectedMethod.maxInstallments);
     const id = crypto.randomUUID();
     const sale: AdminSaleSnapshot = {
@@ -398,7 +442,7 @@ export async function synchronizeAdminSales(
       patientName: patient.name,
       patientCpf: patient.cpf,
       doctor: patient.doctor,
-      treatment: treatmentLabel(patient),
+      treatment: prescribed?.treatment || treatmentLabel(patient),
       contractedAt: patient.startDate ?? patient.createdAt,
       methodId: selectedMethod.id,
       methodName: patient.acquisitionMethod ?? selectedMethod.name,
@@ -411,7 +455,7 @@ export async function synchronizeAdminSales(
       paymentMethod: patient.paymentMethod ?? selectedMethod.paymentMethod,
       firstPaymentDueAt: patient.paymentDueDate ?? addMonthsToDate(patient.startDate ?? patient.createdAt, 1),
       commissionRateSnapshot: doctor?.commissionRate ?? 0,
-      bottleCount: bottlesForMethod(patient.acquisitionMethod ?? selectedMethod.name),
+      bottleCount: prescribed?.bottleCount ?? bottlesForMethod(patient.acquisitionMethod ?? selectedMethod.name),
       commissionPerBottleSnapshot: doctor?.commissionPerBottle ?? COMMISSION_PER_BOTTLE,
       status: saleStatus(patient),
     };
@@ -511,18 +555,27 @@ export async function loadAdminAudit(context: AdminContext) {
 export async function loadAdminWorkspace(): Promise<AdminWorkspace> {
   const context = await loadAdminContext();
   const patientWorkspace = await loadSecretaryPatients(context);
-  const [methods, costs, doctors, commissions, invoices] = await Promise.all([
+  const [methods, costs, doctors, commissions, invoices, prescriptionResult] = await Promise.all([
     loadAdminMethods(context),
     loadAdminCosts(context),
     loadAdminDoctors(context),
     loadAdminCommissions(context),
     loadSecretaryInvoices(context),
+    // A tipagem gerada do Supabase ainda não inclui a tabela de receitas.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (getSupabaseClient().from("prescriptions") as any).select("patient_id, content, created_at").eq("clinic_id", context.clinicId).order("created_at", { ascending: false }),
   ]);
-  const sales = await synchronizeAdminSales(context, patientWorkspace.patients, methods, doctors);
+  if (prescriptionResult.error) throw prescriptionResult.error;
+  const prescriptionSummaries = summarizePrescriptions((prescriptionResult.data ?? []) as Record<string, unknown>[]);
+  const patients = patientWorkspace.patients.map((patient) => {
+    const summary = prescriptionSummaries.get(patient.id);
+    return summary?.treatment ? { ...patient, treatment: summary.treatment } : patient;
+  });
+  const sales = await synchronizeAdminSales(context, patients, methods, doctors, prescriptionSummaries);
   const audit = await loadAdminAudit(context);
   return {
     context,
-    patients: patientWorkspace.patients,
+    patients,
     methods,
     costs,
     doctors,
