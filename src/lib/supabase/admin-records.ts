@@ -252,6 +252,16 @@ function saleStatus(patient: DemoPatientRecord): AdminSaleSnapshot["status"] {
   return "ativa";
 }
 
+function treatmentLabel(patient: DemoPatientRecord) {
+  const labels = new Set<string>();
+  const raw = patient.treatment ?? "";
+  if (/rinite/i.test(raw)) labels.add("Rinite");
+  if (/bacteriana|imunobacteriana/i.test(raw)) labels.add("Imunobacteriana");
+  for (const payment of patient.treatmentPayments ?? []) labels.add(payment.treatment);
+  if (!labels.size && raw.trim()) return raw;
+  return Array.from(labels).join(" + ") || "Tratamento não informado";
+}
+
 function bottlesForMethod(methodName: string) {
   const normalized = methodName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   if (normalized.includes("por frasco")) return 1;
@@ -344,8 +354,9 @@ export async function synchronizeAdminSales(
     const commissionPerBottleSnapshot = sale.commissionPerBottleSnapshot === 64
       ? COMMISSION_PER_BOTTLE
       : sale.commissionPerBottleSnapshot;
-    if (status !== sale.status || commissionPerBottleSnapshot !== sale.commissionPerBottleSnapshot) {
-      const updated = { ...sale, status, commissionPerBottleSnapshot };
+    const treatment = treatmentLabel(patient);
+    if (status !== sale.status || commissionPerBottleSnapshot !== sale.commissionPerBottleSnapshot || treatment !== sale.treatment) {
+      const updated = { ...sale, status, treatment, commissionPerBottleSnapshot };
       const { error } = await supabase.from("admin_sales").update({
         status,
         snapshot: updated,
@@ -376,7 +387,7 @@ export async function synchronizeAdminSales(
       patientName: patient.name,
       patientCpf: patient.cpf,
       doctor: patient.doctor,
-      treatment: patient.treatment ?? "Tratamento não informado",
+      treatment: treatmentLabel(patient),
       contractedAt: patient.startDate ?? patient.createdAt,
       methodId: selectedMethod.id,
       methodName: patient.acquisitionMethod ?? selectedMethod.name,
