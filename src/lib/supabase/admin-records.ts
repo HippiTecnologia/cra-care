@@ -259,7 +259,10 @@ function treatmentLabel(patient: DemoPatientRecord) {
   if (/bacteriana|imunobacteriana/i.test(raw)) labels.add("Imunobacteriana");
   for (const payment of patient.treatmentPayments ?? []) labels.add(payment.treatment);
   if (!labels.size && raw.trim()) return raw;
-  return Array.from(labels).join(" + ") || "Tratamento não informado";
+  // A operação original do CRA Care é Rinite; registros antigos sem o campo
+  // treatment pertencem a essa indicação, exceto os marcados como bacteriana.
+  if (!labels.size) return patient.status === "bacteriana" ? "Imunobacteriana" : "Rinite";
+  return Array.from(labels).join(" + ");
 }
 
 function bottlesForMethod(methodName: string) {

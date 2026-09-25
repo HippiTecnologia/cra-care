@@ -170,7 +170,9 @@ export function mapMedicalPatient(
     methodSnapshotVersion: numberValue(financial, "methodSnapshotVersion"),
     discountAmount: numberValue(financial, "discountAmount"),
     paymentMethod: stringValue(financial, "paymentMethod"),
-    paymentInstallments: numberValue(financial, "installments") ?? numberValue(financial, "paymentInstallments"),
+    // Cadastros mais antigos podem usar paymentInstallments; o valor 0 não
+    // representa uma parcela válida e não pode sobrescrever o número real.
+    paymentInstallments: numberValue(financial, "installments") || numberValue(financial, "paymentInstallments") || undefined,
     installmentValue: numberValue(financial, "installmentValue"),
     contractValue: numberValue(financial, "contractValue"),
     paymentDueDate: stringValue(financial, "dueDate") ?? stringValue(financial, "paymentDueDate"),
