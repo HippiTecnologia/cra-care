@@ -5,6 +5,8 @@ export type DemoPatientRecord = {
   cpf: string;
   birthDate: string;
   doctor: string;
+  /** Perfil médico que acompanha o tratamento; vazio enquanto aguarda assumir. */
+  doctorId?: string;
   createdAt: string;
   registrationStatus: "pending-secretary" | "completed";
   phone?: string;

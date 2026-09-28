@@ -313,6 +313,13 @@ function bottlesForMethod(methodName: string) {
   return 1;
 }
 
+function installmentsFromPayments(patient: DemoPatientRecord) {
+  return Math.max(1, ...(patient.payments ?? []).map((payment) => Math.max(
+    Number(payment.installments ?? 0),
+    Number(payment.installmentNumber ?? 0),
+  )));
+}
+
 function addMonthsToDate(value: string, months: number) {
   const date = new Date(value.includes("T") ? value : `${value}T12:00:00`);
   if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10);
@@ -399,7 +406,7 @@ export async function synchronizeAdminSales(
     const condition = patient.agreedCondition ?? sale.condition;
     const installments = condition === "À vista"
       ? 1
-      : Math.max(1, patient.paymentInstallments ?? selectedMethod?.maxInstallments ?? sale.installments);
+      : Math.max(1, patient.paymentInstallments ?? 0, installmentsFromPayments(patient), selectedMethod?.maxInstallments ?? 0, sale.installments);
     const contractedValue = patient.contractValue && patient.contractValue > 0 ? patient.contractValue : sale.contractedValue;
     const paymentMethod = patient.paymentMethod ?? sale.paymentMethod;
     const firstPaymentDueAt = patient.paymentDueDate ?? sale.firstPaymentDueAt;
@@ -434,7 +441,7 @@ export async function synchronizeAdminSales(
     const contractedValue = patient.contractValue && patient.contractValue > 0 ? patient.contractValue : defaultValue;
     const doctor = doctors.find((item) => item.name === patient.doctor);
     const prescribed = prescriptionSummaries.get(patient.id);
-    const installments = condition === "À vista" ? 1 : Math.max(1, patient.paymentInstallments ?? selectedMethod.maxInstallments);
+    const installments = condition === "À vista" ? 1 : Math.max(1, patient.paymentInstallments ?? 0, installmentsFromPayments(patient), selectedMethod.maxInstallments);
     const id = crypto.randomUUID();
     const sale: AdminSaleSnapshot = {
       id,

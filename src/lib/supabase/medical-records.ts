@@ -138,6 +138,7 @@ export function mapMedicalPatient(
     cpf: row.cpf,
     birthDate: row.birth_date,
     doctor: doctorName,
+    doctorId: row.doctor_profile_id ?? undefined,
     createdAt: row.created_at,
     registrationStatus,
     phone: row.phone ?? undefined,
@@ -286,6 +287,37 @@ export async function loadDoctorPatients(doctor: MedicalDoctorProfile) {
   return ((data ?? []) as unknown as MedicalPatientRow[]).map((row) =>
     mapMedicalPatient(row, doctor.fullName),
   );
+}
+
+function normalizedSearch(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+/** Busca pontual na clínica. A carteira principal continua contendo só os pacientes assumidos pelo médico. */
+export async function searchClinicPatients(doctor: MedicalDoctorProfile, query: string) {
+  const term = normalizedSearch(query);
+  if (term.length < 3) return [] as DemoPatientRecord[];
+  // A migration 019 libera somente esta consulta de clínica para médicos autenticados.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (getSupabaseClient().from("patients") as any)
+    .select("id, clinic_id, auth_user_id, username, full_name, cpf, birth_date, phone, email, status, doctor_profile_id, address, treatment, financial, created_at, profiles!patients_doctor_profile_id_fkey(full_name)")
+    .eq("clinic_id", doctor.clinicId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as (MedicalPatientRow & { profiles?: { full_name?: string } | null })[])
+    .filter((patient) => normalizedSearch(`${patient.full_name} ${patient.cpf}`).includes(term))
+    .map((patient) => mapMedicalPatient(patient, patient.profiles?.full_name ?? "Equipe médica CRA Care"));
+}
+
+/** Assume o acompanhamento clínico sem alterar os demais dados do paciente. */
+export async function assumeDoctorPatient(doctor: MedicalDoctorProfile, patientId: string) {
+  const normalizedPatientId = normalizePatientId(patientId);
+  if (!normalizedPatientId) throw new Error("ID de paciente inválido.");
+  // A função no Supabase restringe esta ação à atribuição do próprio médico logado.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (getSupabaseClient() as any).rpc("assume_patient_care", { target_patient_id: normalizedPatientId });
+  if (error || !data) throw error ?? new Error("Não foi possível assumir o acompanhamento.");
+  return mapMedicalPatient(data as MedicalPatientRow, doctor.fullName);
 }
 
 export async function loadDoctorPortalStates(
@@ -550,7 +582,7 @@ export async function loadMedicalPatientWorkspace(patientId: string) {
 
   const { data: patientData, error: patientError } = await supabase
     .from("patients").select("*").eq("id", normalizedPatientId)
-    .eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id).maybeSingle();
+    .eq("clinic_id", doctor.clinicId).maybeSingle();
   if (patientError) throw patientError;
   if (!patientData) return { doctor, patient: null, prescriptions: [], clinicalRecords: [], nursingReports: [] as NursingReport[], portal: createDefaultPortalState(normalizedPatientId) };
 

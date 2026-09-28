@@ -7,9 +7,11 @@ import type { DemoPatientRecord } from "./patient-store";
 import { createDefaultPortalState, type PatientPortalState } from "../paciente/patient-portal-store";
 import {
   createDoctorPatient,
+  assumeDoctorPatient,
   loadCurrentDoctorProfile,
   loadDoctorPatients,
   loadDoctorPortalStates,
+  searchClinicPatients,
   type MedicalDoctorProfile,
 } from "../../lib/supabase/medical-records";
 
@@ -47,6 +49,8 @@ export default function MedicoPage() {
   const [birthDate, setBirthDate] = useState("");
   const [phone, setPhone] = useState("");
   const [search, setSearch] = useState("");
+  const [clinicMatches, setClinicMatches] = useState<DemoPatientRecord[]>([]);
+  const [searchingClinic, setSearchingClinic] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [section, setSection] = useState<DoctorSection>("dashboard");
@@ -153,6 +157,36 @@ export default function MedicoPage() {
     }
   }
 
+  async function searchClinic() {
+    if (!doctor) return;
+    if (search.trim().replace(/\D/g, "").length < 3 && search.trim().length < 3) {
+      setMessage("Informe ao menos três letras do nome ou números do CPF para pesquisar na clínica.");
+      return;
+    }
+    setSearchingClinic(true);
+    try {
+      const found = await searchClinicPatients(doctor, search);
+      setClinicMatches(found);
+      setMessage(found.length ? `${found.length} paciente(s) encontrado(s) na clínica.` : "Nenhum paciente encontrado na clínica.");
+    } catch {
+      setMessage("Não foi possível pesquisar os pacientes da clínica agora.");
+    } finally {
+      setSearchingClinic(false);
+    }
+  }
+
+  async function assumePatient(patient: DemoPatientRecord) {
+    if (!doctor) return;
+    try {
+      const assigned = await assumeDoctorPatient(doctor, patient.id);
+      setRecords((current) => current.some((item) => item.id === assigned.id) ? current.map((item) => item.id === assigned.id ? assigned : item) : [assigned, ...current]);
+      setClinicMatches((current) => current.map((item) => item.id === assigned.id ? assigned : item));
+      setMessage(`${assigned.name} agora está na sua carteira de acompanhamento.`);
+    } catch {
+      setMessage("Não foi possível assumir este acompanhamento agora.");
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#f8f5f2] text-[#34292d]">
       <div className="min-h-screen lg:grid lg:grid-cols-[285px_minmax(0,1fr)]">
@@ -248,10 +282,18 @@ export default function MedicoPage() {
               <div className="flex flex-col gap-3 sm:flex-row">
                 <input
                   value={search}
-                  onChange={(event) => setSearch(event.target.value)}
+                  onChange={(event) => { setSearch(event.target.value); setClinicMatches([]); }}
                   placeholder="Buscar por nome ou CPF"
                   className="h-12 rounded-xl border border-[#e9dfda] px-4 text-sm outline-none focus:border-[#b91142]"
                 />
+                <button
+                  type="button"
+                  onClick={() => void searchClinic()}
+                  disabled={searchingClinic}
+                  className="h-12 rounded-xl border border-[#a3113a] px-4 text-sm font-semibold text-[#a3113a] disabled:opacity-50"
+                >
+                  {searchingClinic ? "Pesquisando..." : "Pesquisar na clínica"}
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -274,6 +316,10 @@ export default function MedicoPage() {
             <div className="mt-5 flex flex-wrap gap-2">{([{ id: "todos", label: "Todos" }, ...statusMetrics.map((item) => ({ id: item.id, label: item.label })), { id: "tentar-novamente", label: "Tentar novamente" }] as { id: DoctorPatientFilter; label: string }[]).map((item) => <button key={item.id} type="button" onClick={() => setPatientFilter(item.id)} className={`rounded-full px-4 py-2 text-xs font-semibold ${patientFilter === item.id ? "bg-[#a3113a] text-white" : "bg-[#f6efec] text-[#716569]"}`}>{item.label} ({countByStatus(item.id)})</button>)}</div>
 
             <div className="mt-6 space-y-3">
+              {clinicMatches.map((patient) => {
+                const isMine = patient.doctorId === doctor?.id;
+                return <article key={`clinic-${patient.id}`} className="flex flex-col gap-4 rounded-2xl border border-[#d9c8d0] bg-[#fff7fa] p-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-wide text-[#a3113a]">Resultado da clínica</p><h3 className="mt-1 text-sm font-bold text-[#403237]">{patient.name}</h3><p className="mt-1 text-xs text-[#776b6e]">CPF: {patient.cpf} · Acompanhamento atual: {patient.doctor || "Equipe médica"}</p></div><div className="flex flex-wrap items-center gap-3"><Link href={`/medico/paciente/${patient.id}`} className="rounded-xl border border-[#e3d4d9] bg-white px-4 py-2 text-xs font-semibold text-[#a3113a]">Visualizar</Link>{!isMine && <button type="button" onClick={() => void assumePatient(patient)} className="rounded-xl bg-[#a3113a] px-4 py-2 text-xs font-semibold text-white">Assumir acompanhamento</button>}</div></article>;
+              })}
               {visiblePatients.map((patient) => (
                 <article
                   key={patient.id}

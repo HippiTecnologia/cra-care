@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { getSupabaseClient } from "./client";
 
-export type NursingProfile = { id: string; clinicId: string; fullName: string };
+export type NursingProfile = { id: string; clinicId: string; fullName: string; coren?: string };
 export type NursingPatient = { id: string; name: string; cpf: string; birthDate: string; phone?: string; doctorId?: string; doctorName: string; createdAt: string };
 export type NursingDoctor = { id: string; fullName: string };
 
@@ -9,7 +9,7 @@ export async function loadNursingWorkspace() {
   const supabase = getSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Sessão não encontrada.");
-  const { data: profile, error } = await supabase.from("profiles").select("id, clinic_id, full_name, role").eq("id", user.id).single();
+  const { data: profile, error } = await supabase.from("profiles").select("id, clinic_id, full_name, crm, role").eq("id", user.id).single();
   if (error || !profile || profile.role !== "enfermagem") throw error ?? new Error("Perfil de enfermagem não encontrado.");
   if (!profile.clinic_id) throw new Error("Clínica não encontrada para este acesso.");
   const clinicId = profile.clinic_id;
@@ -25,12 +25,11 @@ export async function loadNursingWorkspace() {
   if (doctorsResult.error) throw doctorsResult.error;
   if (reportsResult.error) throw reportsResult.error;
   const patients = (patientsResult.data ?? []).map((item: any): NursingPatient => ({ id: item.id, name: item.full_name, cpf: item.cpf, birthDate: item.birth_date, phone: item.phone ?? undefined, doctorId: item.doctor_profile_id ?? undefined, doctorName: item.profiles?.full_name ?? "Não vinculado", createdAt: item.created_at }));
-  return { profile: { id: profile.id, clinicId, fullName: profile.full_name } as NursingProfile, patients, doctors: (doctorsResult.data ?? []).map((doctor) => ({ id: doctor.id, fullName: doctor.full_name })), reports: reportsResult.data ?? [] };
+  return { profile: { id: profile.id, clinicId, fullName: profile.full_name, coren: profile.crm ?? undefined } as NursingProfile, patients, doctors: (doctorsResult.data ?? []).map((doctor) => ({ id: doctor.id, fullName: doctor.full_name })), reports: reportsResult.data ?? [] };
 }
 
 export async function createNursingPatient(profile: NursingProfile, input: { name: string; cpf: string; birthDate: string; phone?: string; doctorId?: string }) {
-  if (!input.doctorId) throw new Error("Selecione o médico responsável antes de salvar a paciente.");
-  const { data, error } = await (getSupabaseClient().from("patients") as any).insert({ clinic_id: profile.clinicId, nursing_profile_id: profile.id, doctor_profile_id: input.doctorId || null, full_name: input.name.trim(), cpf: input.cpf.replace(/\D/g, ""), birth_date: input.birthDate, phone: input.phone?.trim() || null, status: "laudo", address: {}, treatment: {}, financial: {} }).select("id").single();
+  const { data, error } = await (getSupabaseClient().from("patients") as any).insert({ clinic_id: profile.clinicId, nursing_profile_id: profile.id, doctor_profile_id: null, full_name: input.name.trim(), cpf: input.cpf.replace(/\D/g, ""), birth_date: input.birthDate, phone: input.phone?.trim() || null, status: "laudo", address: {}, treatment: {}, financial: {} }).select("id").single();
   if (error) throw error;
   return data.id as string;
 }
