@@ -710,7 +710,7 @@ export async function createMedicalPrescription(
   if (currentPatientError || !currentPatient) throw currentPatientError ?? new Error("Paciente não encontrado.");
   const treatment = {
     ...recordValue(currentPatient.treatment),
-    ...(patient.treatment ? { name: patient.treatment } : {}),
+    name: prescription.treatment,
     phase: prescription.phase,
     drops: prescription.drops,
   };

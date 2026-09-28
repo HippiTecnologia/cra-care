@@ -417,6 +417,7 @@ export default function MedicoPage() {
                 <input
                   required
                   inputMode="numeric"
+                  maxLength={14}
                   value={cpf}
                   onChange={(event) => {
                     setCpf(formatCpf(event.target.value));

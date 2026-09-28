@@ -107,6 +107,14 @@ function normalizeName(value: string) {
     .replace(/\s+/g, " ");
 }
 
+function formatCpf(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  return digits
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+}
+
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (character) => {
     const replacements: Record<string, string> = {
@@ -816,7 +824,7 @@ export default function PatientPortalPage() {
               </label>
               <label className="text-sm font-semibold text-[#544449]">
                 CPF
-                <input value={signatureCpf} onChange={(event) => { setSignatureCpf(event.target.value); setSignatureError(""); }} inputMode="numeric" placeholder="000.000.000-00" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 text-sm font-normal outline-none focus:border-[#b91142]" />
+                <input value={signatureCpf} onChange={(event) => { setSignatureCpf(formatCpf(event.target.value)); setSignatureError(""); }} inputMode="numeric" maxLength={14} placeholder="000.000.000-00" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 text-sm font-normal outline-none focus:border-[#b91142]" />
               </label>
             </div>
 

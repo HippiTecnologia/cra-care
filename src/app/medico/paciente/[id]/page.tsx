@@ -16,6 +16,7 @@ import type {
 } from "../../patient-store";
 import type { PatientPortalState } from "../../../paciente/patient-portal-store";
 import {
+  assumeDoctorPatient,
   createMedicalPrescription,
   createClinicalRecord,
   completeMedicalPatientTreatment,
@@ -60,6 +61,14 @@ function formatDate(value?: string) {
     : new Date(`${value}T12:00:00`);
 
   return date.toLocaleDateString("pt-BR");
+}
+
+function formatCpf(value: string) {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  return digits
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
 }
 
 function escapeHtml(value: string | number) {
@@ -314,9 +323,12 @@ export default function MedicalPatientPage() {
     };
 
     try {
-      const updatedPatient = await updateMedicalPatientTreatmentDuration(doctor, patient.id, durationMonths);
+      const activePatient = patient.doctorId === doctor.id
+        ? patient
+        : await assumeDoctorPatient(doctor, patient.id);
+      const updatedPatient = await updateMedicalPatientTreatmentDuration(doctor, activePatient.id, durationMonths);
       setPatient(updatedPatient);
-      const saved = await createMedicalPrescription(doctor, patient, prescription);
+      const saved = await createMedicalPrescription(doctor, updatedPatient, prescription);
       setPrescriptions((current) => [saved, ...current]);
       setPatient((current) => current ? {
         ...current,
@@ -334,7 +346,8 @@ export default function MedicalPatientPage() {
       setFormulas([]);
       setFormulaPercentage("");
       setNotes("");
-    } catch {
+    } catch (cause) {
+      console.error("Erro ao salvar receita", cause);
       setError("Não foi possível salvar a receita no prontuário. Tente novamente.");
     }
   }
@@ -669,7 +682,7 @@ export default function MedicalPatientPage() {
             <h2 className="text-lg font-bold text-[#433438]">Editar dados do paciente</h2>
             <div className="mt-5 grid gap-4 md:grid-cols-3">
               <label className="text-sm font-semibold text-[#544449]">Nome completo<input value={patientDataDraft.name} onChange={(event) => setPatientDataDraft((current) => ({ ...current, name: event.target.value }))} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /></label>
-              <label className="text-sm font-semibold text-[#544449]">CPF<input value={patientDataDraft.cpf} onChange={(event) => setPatientDataDraft((current) => ({ ...current, cpf: event.target.value }))} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /></label>
+              <label className="text-sm font-semibold text-[#544449]">CPF<input inputMode="numeric" maxLength={14} value={patientDataDraft.cpf} onChange={(event) => setPatientDataDraft((current) => ({ ...current, cpf: formatCpf(event.target.value) }))} placeholder="000.000.000-00" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /></label>
               <label className="text-sm font-semibold text-[#544449]">Data de nascimento<input type="date" value={patientDataDraft.birthDate} onChange={(event) => setPatientDataDraft((current) => ({ ...current, birthDate: event.target.value }))} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /></label>
             </div>
             <button type="button" onClick={() => void savePatientBasics()} disabled={patientSaving} className="mt-5 rounded-xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{patientSaving ? "Salvando..." : "Salvar dados"}</button>
