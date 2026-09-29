@@ -273,10 +273,7 @@ function patientFromMedicalRecord(record: DemoPatientRecord): Patient {
     drops: record.drops ?? defaults.drops,
     phase: record.phase ?? defaults.phase,
     delivery: record.delivery ?? defaults.delivery,
-    status: record.treatment?.toLowerCase().includes("bacteriana") &&
-      (!record.status || ["ativo", "tentar-novamente", "em-conversa"].includes(record.status))
-      ? "bacteriana"
-      : record.status ?? "em-conversa",
+    status: record.status ?? "em-conversa",
     acquisitionMethod: record.acquisitionMethod ?? defaults.acquisitionMethod,
     paymentMethod: record.paymentMethod ?? defaults.paymentMethod,
     paymentInstallments: record.paymentInstallments ?? 1,

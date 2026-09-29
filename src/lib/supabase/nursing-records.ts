@@ -3,7 +3,7 @@ import { getSupabaseClient } from "./client";
 
 export type NursingProfile = { id: string; clinicId: string; fullName: string; coren?: string };
 export type NursingPatient = { id: string; name: string; cpf: string; birthDate: string; phone?: string; doctorId?: string; doctorName: string; createdAt: string };
-export type NursingDoctor = { id: string; fullName: string };
+export type NursingDoctor = { id: string; fullName: string; crm?: string };
 
 export async function loadNursingWorkspace() {
   const supabase = getSupabaseClient();
@@ -18,14 +18,14 @@ export async function loadNursingWorkspace() {
   const [patientsResult, doctorsResult, reportsResult] = await Promise.all([
     // A Enfermagem e o médico usam a mesma carteira de pacientes da clínica.
     patientTable.select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)").eq("clinic_id", clinicId).order("created_at", { ascending: false }),
-    supabase.from("profiles").select("id, full_name").eq("clinic_id", clinicId).eq("role", "medico").order("full_name"),
+    supabase.from("profiles").select("id, full_name, crm").eq("clinic_id", clinicId).eq("role", "medico").order("full_name"),
     reportTable.select("id, patient_id, report_type, content, created_at").eq("nurse_profile_id", user.id).order("created_at", { ascending: false }),
   ]);
   if (patientsResult.error) throw patientsResult.error;
   if (doctorsResult.error) throw doctorsResult.error;
   if (reportsResult.error) throw reportsResult.error;
   const patients = (patientsResult.data ?? []).map((item: any): NursingPatient => ({ id: item.id, name: item.full_name, cpf: item.cpf, birthDate: item.birth_date, phone: item.phone ?? undefined, doctorId: item.doctor_profile_id ?? undefined, doctorName: item.profiles?.full_name ?? "Não vinculado", createdAt: item.created_at }));
-  return { profile: { id: profile.id, clinicId, fullName: profile.full_name, coren: profile.crm ?? undefined } as NursingProfile, patients, doctors: (doctorsResult.data ?? []).map((doctor) => ({ id: doctor.id, fullName: doctor.full_name })), reports: reportsResult.data ?? [] };
+  return { profile: { id: profile.id, clinicId, fullName: profile.full_name, coren: profile.crm ?? undefined } as NursingProfile, patients, doctors: (doctorsResult.data ?? []).map((doctor) => ({ id: doctor.id, fullName: doctor.full_name, crm: doctor.crm ?? undefined })), reports: reportsResult.data ?? [] };
 }
 
 export async function createNursingPatient(profile: NursingProfile, input: { name: string; cpf: string; birthDate: string; phone?: string; doctorId?: string }) {
@@ -39,9 +39,9 @@ export async function createNursingReport(profile: NursingProfile, input: { pati
   if (error) throw error;
 }
 
-export async function updateNursingReport(profile: NursingProfile, reportId: string, content: Record<string, unknown>) {
+export async function updateNursingReport(profile: NursingProfile, reportId: string, content: Record<string, unknown>, doctorId?: string) {
   const { error } = await (getSupabaseClient().from("nursing_reports") as any)
-    .update({ content })
+    .update({ content, doctor_profile_id: doctorId ?? null })
     .eq("id", reportId)
     .eq("clinic_id", profile.clinicId)
     .eq("nurse_profile_id", profile.id);
