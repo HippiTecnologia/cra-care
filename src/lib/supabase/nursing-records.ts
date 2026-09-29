@@ -1,16 +1,27 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { getSupabaseClient } from "./client";
 
-export type NursingProfile = { id: string; clinicId: string; fullName: string; coren?: string };
+export type NursingProfile = { id: string; clinicId: string; fullName: string; coren?: string; role: "enfermagem" | "medico" };
 export type NursingPatient = { id: string; name: string; cpf: string; birthDate: string; phone?: string; doctorId?: string; doctorName: string; createdAt: string };
 export type NursingDoctor = { id: string; fullName: string; crm?: string };
+
+function normalizeName(value: string) {
+  return value.toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function doctorCanAccessNursing(name: string) {
+  const normalized = normalizeName(name);
+  return normalized.includes("alessandra") && normalized.includes("bitencourt")
+    || normalized.includes("patricia") && (normalized.includes("martinski") || normalized.includes("trudes"));
+}
 
 export async function loadNursingWorkspace() {
   const supabase = getSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Sessão não encontrada.");
   const { data: profile, error } = await supabase.from("profiles").select("id, clinic_id, full_name, crm, role").eq("id", user.id).single();
-  if (error || !profile || profile.role !== "enfermagem") throw error ?? new Error("Perfil de enfermagem não encontrado.");
+  const allowedDoctor = profile?.role === "medico" && doctorCanAccessNursing(profile.full_name);
+  if (error || !profile || (profile.role !== "enfermagem" && !allowedDoctor)) throw error ?? new Error("Este perfil não possui acesso à área de Enfermagem.");
   if (!profile.clinic_id) throw new Error("Clínica não encontrada para este acesso.");
   const clinicId = profile.clinic_id;
   const patientTable = supabase.from("patients") as any;
@@ -19,13 +30,13 @@ export async function loadNursingWorkspace() {
     // A Enfermagem e o médico usam a mesma carteira de pacientes da clínica.
     patientTable.select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)").eq("clinic_id", clinicId).order("created_at", { ascending: false }),
     supabase.from("profiles").select("id, full_name, crm").eq("clinic_id", clinicId).eq("role", "medico").order("full_name"),
-    reportTable.select("id, patient_id, report_type, content, created_at").eq("nurse_profile_id", user.id).order("created_at", { ascending: false }),
+    reportTable.select("id, patient_id, report_type, content, created_at").eq("clinic_id", clinicId).order("created_at", { ascending: false }),
   ]);
   if (patientsResult.error) throw patientsResult.error;
   if (doctorsResult.error) throw doctorsResult.error;
   if (reportsResult.error) throw reportsResult.error;
   const patients = (patientsResult.data ?? []).map((item: any): NursingPatient => ({ id: item.id, name: item.full_name, cpf: item.cpf, birthDate: item.birth_date, phone: item.phone ?? undefined, doctorId: item.doctor_profile_id ?? undefined, doctorName: item.profiles?.full_name ?? "Não vinculado", createdAt: item.created_at }));
-  return { profile: { id: profile.id, clinicId, fullName: profile.full_name, coren: profile.crm ?? undefined } as NursingProfile, patients, doctors: (doctorsResult.data ?? []).map((doctor) => ({ id: doctor.id, fullName: doctor.full_name, crm: doctor.crm ?? undefined })), reports: reportsResult.data ?? [] };
+  return { profile: { id: profile.id, clinicId, fullName: profile.full_name, coren: profile.crm ?? undefined, role: profile.role as "enfermagem" | "medico" } as NursingProfile, patients, doctors: (doctorsResult.data ?? []).map((doctor) => ({ id: doctor.id, fullName: doctor.full_name, crm: doctor.crm ?? undefined })), reports: reportsResult.data ?? [] };
 }
 
 export async function createNursingPatient(profile: NursingProfile, input: { name: string; cpf: string; birthDate: string; phone?: string; doctorId?: string }) {
@@ -43,8 +54,7 @@ export async function updateNursingReport(profile: NursingProfile, reportId: str
   const { error } = await (getSupabaseClient().from("nursing_reports") as any)
     .update({ content, doctor_profile_id: doctorId ?? null })
     .eq("id", reportId)
-    .eq("clinic_id", profile.clinicId)
-    .eq("nurse_profile_id", profile.id);
+    .eq("clinic_id", profile.clinicId);
   if (error) throw error;
 }
 

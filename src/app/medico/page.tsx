@@ -40,6 +40,12 @@ function initials(value: string) {
     .join("") || "DR";
 }
 
+function canAccessNursingArea(name: string) {
+  const normalized = name.toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return normalized.includes("alessandra") && normalized.includes("bitencourt")
+    || normalized.includes("patricia") && (normalized.includes("martinski") || normalized.includes("trudes"));
+}
+
 export default function MedicoPage() {
   const [records, setRecords] = useState<DemoPatientRecord[]>([]);
   const [doctor, setDoctor] = useState<MedicalDoctorProfile | null>(null);
@@ -78,6 +84,7 @@ export default function MedicoPage() {
   }, []);
 
   const loggedDoctor = doctor?.fullName ?? "Médico";
+  const nursingAreaAllowed = doctor ? canAccessNursingArea(doctor.fullName) : false;
   const allDoctorPatients = records;
 
   const visiblePatients = useMemo(() => {
@@ -213,6 +220,7 @@ export default function MedicoPage() {
             <button type="button" onClick={() => setSection("evolucao")} className={`w-full rounded-2xl px-4 py-3 text-left text-sm ${section === "evolucao" ? "bg-white/15 font-semibold" : "text-white/80 hover:bg-white/10"}`}>
               Evolução
             </button>
+            {nursingAreaAllowed && <Link href="/enfermagem" className="block rounded-2xl px-4 py-3 text-sm text-white/80 hover:bg-white/10">Área de Enfermagem</Link>}
             <Link
               href="/sair"
               className="block rounded-2xl px-4 py-3 text-sm text-white/80 hover:bg-white/10"

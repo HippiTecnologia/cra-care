@@ -207,15 +207,27 @@ export default function SecretariaLotesPage() {
     const bottleNumbers = Array.from({ length: Math.max(1, Math.trunc(prescription.bottles)) }, (_, index) => nextBottleNumber + index);
     const renewalBottle = bottleNumbers.find((number) => number > 3 && (number - 1) % 3 === 0);
     const recurringAsaas = acquisitionMethod === "Recorrente — ASAAS";
-    const paymentRequired = !recurringAsaas && (acquisitionMethod === "Por frasco" || Boolean(renewalBottle));
-    const asaasRequired = recurringAsaas || (paymentRequired && paymentMethod === "Asaas");
-    const explanation = recurringAsaas
-      ? "Pagamento recorrente: confirme no ASAAS se a cobrança está em dia."
-      : acquisitionMethod === "Por frasco"
-        ? "Cada novo frasco precisa de pagamento confirmado."
-        : paymentRequired
-          ? `Novo pagamento necessário: o pedido inclui o ${renewalBottle}º frasco.`
-          : `Frasco ${nextBottleNumber} incluído no pagamento do tratamento.`;
+    const isImmunobacterial = track === "Imunobacteriana";
+    const prescriptionPaymentConfirmed = batches.some((batch) => batch.items.some((item) =>
+      item.prescriptionId === prescription.id && Boolean(item.paymentConfirmedAt || item.asaasConfirmedAt),
+    ));
+    const paymentRequired = isImmunobacterial
+      ? !prescriptionPaymentConfirmed && !recurringAsaas
+      : !recurringAsaas && (acquisitionMethod === "Por frasco" || Boolean(renewalBottle));
+    const asaasRequired = isImmunobacterial
+      ? !prescriptionPaymentConfirmed && (recurringAsaas || paymentMethod === "Asaas")
+      : recurringAsaas || (paymentRequired && paymentMethod === "Asaas");
+    const explanation = isImmunobacterial
+      ? prescriptionPaymentConfirmed
+        ? `Pagamento já confirmado para esta receita. Os ${prescription.bottles} frasco(s) permanecem liberados sem nova cobrança.`
+        : `Pagamento primário desta receita: uma confirmação libera todos os ${prescription.bottles} frasco(s). Uma nova cobrança ocorrerá somente com uma nova receita.`
+      : recurringAsaas
+        ? "Pagamento recorrente: confirme no ASAAS se a cobrança está em dia."
+        : acquisitionMethod === "Por frasco"
+          ? "Cada novo frasco precisa de pagamento confirmado."
+          : paymentRequired
+            ? `Novo pagamento necessário: o pedido inclui o ${renewalBottle}º frasco.`
+            : `Frasco ${nextBottleNumber} incluído no pagamento do tratamento.`;
     return { track, financialConfigured, acquisitionMethod, paymentMethod, paymentStatus: trackFinancial?.paymentStatus ?? (legacyFinancialAllowed ? patient.paymentStatus : undefined), nextBottleNumber, paymentRequired, asaasRequired, explanation };
   }
 
@@ -268,7 +280,7 @@ export default function SecretariaLotesPage() {
     ? readyItems.reduce((total, item) => total + item.bottles, 0)
     : selectedPrescriptions.reduce((total, prescription) => total + prescription.bottles, 0);
   const selectedItemCount = orderType === "pronta-entrega" ? readyItems.length : selectedPrescriptions.length;
-  const openPatientBatches = batches.filter((batch) => batch.status === "rascunho" && batch.orderType !== "pronta-entrega");
+  const openPatientBatches = batches.filter((batch) => batch.status === "rascunho" && batch.orderType !== "pronta-entrega" && batch.indication === batchIndication);
 
   const filteredBatches = batches.filter((batch) => {
     if (filter !== "todos" && batch.status !== filter) return false;
@@ -306,7 +318,13 @@ export default function SecretariaLotesPage() {
   }
 
   function chooseBatchIndication(indication: BatchIndication) {
+    if (editingBatch && editingBatch.indication !== indication) {
+      setEditingBatchId(null);
+      setBatchName(defaultBatchName());
+      setNotes("");
+    }
     setBatchIndication(indication);
+    setLaboratory(indication === "bacteriana" ? "Laboratório externo" : "Laboratório CRA");
     setSelectedIds([]);
     setReadyItems([]);
     setReadyFormulaPercentage("");
@@ -460,7 +478,11 @@ export default function SecretariaLotesPage() {
       setError("A receita selecionada pertence a outro tratamento e não pode entrar neste lote.");
       return;
     }
-    await persistBatch({ ...editingBatch, items: [...editingBatch.items, ...items] });
+    await persistBatch({
+      ...editingBatch,
+      laboratory: editingBatch.indication === "bacteriana" ? "Laboratório externo" : editingBatch.laboratory,
+      items: [...editingBatch.items, ...items],
+    });
     setSelectedIds([]);
     setPaymentConfirmations({});
     setExpandedBatchId(editingBatch.id);
@@ -487,7 +509,7 @@ export default function SecretariaLotesPage() {
     setBatchName(batch.name ?? defaultBatchName());
     setOrderType(batch.orderType ?? "pedido-paciente");
     setBatchIndication(batch.indication === "bacteriana" ? "bacteriana" : "rinite");
-    setLaboratory(batch.laboratory);
+    setLaboratory(batch.indication === "bacteriana" ? "Laboratório externo" : batch.laboratory);
     setSearch("");
     setError("");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1034,11 +1056,11 @@ export default function SecretariaLotesPage() {
                     return (
                       <div key={prescription.id} className={`rounded-2xl border p-4 ${billing.paymentStatus === "Vencido" ? "border-[#f0bcc5] bg-[#fff2f3]" : billing.paymentRequired ? "border-[#f0dfc0] bg-[#fff9ef]" : "border-[#d7e9df] bg-[#f5fbf7]"}`}>
                         <p className="text-xs font-bold text-[#433438]">{patient.name}</p>
-                        <p className="mt-1 text-xs text-[#66595d]">{billing.acquisitionMethod} · {billing.nextBottleNumber}º frasco</p>
+                        <p className="mt-1 text-xs text-[#66595d]">{billing.acquisitionMethod} · {billing.track === "Imunobacteriana" ? `receita com ${prescription.bottles} frasco(s)` : `${billing.nextBottleNumber}º frasco`}</p>
                         <p className={`mt-2 text-xs font-bold ${billing.paymentStatus === "Vencido" ? "text-[#a3113a]" : "text-[#187157]"}`}>{billing.paymentStatus === "Vencido" ? `● ${indicationLabel(indicationForTreatment(prescription.treatment))} INADIMPLENTE — não liberar até regularizar` : `● ${indicationLabel(indicationForTreatment(prescription.treatment))} EM DIA`}</p>
                         <p className={`mt-2 text-xs font-semibold ${billing.paymentRequired ? "text-[#966419]" : "text-[#187157]"}`}>{billing.explanation}</p>
                         {billing.paymentRequired && (
-                          <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-[#544449]"><input type="checkbox" checked={confirmation.payment} onChange={(event) => setPaymentConfirmations((current) => ({ ...current, [prescription.id]: { ...confirmation, payment: event.target.checked } }))} className="mt-0.5 accent-[#a3113a]" />Confirmo que a cobrança deste frasco foi realizada e paga.</label>
+                          <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-[#544449]"><input type="checkbox" checked={confirmation.payment} onChange={(event) => setPaymentConfirmations((current) => ({ ...current, [prescription.id]: { ...confirmation, payment: event.target.checked } }))} className="mt-0.5 accent-[#a3113a]" />{billing.track === "Imunobacteriana" ? "Confirmo o pagamento primário desta receita inteira." : "Confirmo que a cobrança deste frasco foi realizada e paga."}</label>
                         )}
                         {billing.asaasRequired && (
                           <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl bg-[#eef3ff] p-3 text-xs text-[#3c5da0]"><input type="checkbox" checked={confirmation.asaas} onChange={(event) => setPaymentConfirmations((current) => ({ ...current, [prescription.id]: { ...confirmation, asaas: event.target.checked } }))} className="mt-0.5 accent-[#3c5da0]" /><span><strong>Confirmar no ASAAS se o pagamento está em dia.</strong><br />Verifiquei diretamente no ASAAS e o pagamento está regular.</span></label>
@@ -1053,8 +1075,9 @@ export default function SecretariaLotesPage() {
                 Laboratório responsável
                 <input
                   value={laboratory}
+                  readOnly={batchIndication === "bacteriana"}
                   onChange={(event) => setLaboratory(event.target.value)}
-                  className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]"
+                  className={`mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none ${batchIndication === "bacteriana" ? "bg-[#f7f4f2]" : "focus:border-[#b91142]"}`}
                 />
               </label>
 
