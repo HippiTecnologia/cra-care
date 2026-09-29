@@ -206,7 +206,7 @@ function contractSections(patient: DemoPatientRecord, portal: PatientPortalState
     },
     ...(hasImunobacteriana ? [{
       heading: "Modo de usar — Imunobacteriana",
-      text: "✨ Orientações de uso:\n💧 Aplicar na região vestibular todos os dias: criança, 2 gotas; adulto, 4 gotas.\n🪥 Escovar os dentes e aguardar 20 minutos antes da aplicação.\n👄 Manter o líquido na região vestibular por 2 minutos e depois engolir.\n🚫 Após a aplicação, manter jejum, inclusive de água, por no mínimo 40 minutos.",
+      text: "Orientações de uso:\n• Aplicar na região vestibular todos os dias: criança, 2 gotas; adulto, 4 gotas.\n• Escovar os dentes e aguardar 20 minutos antes da aplicação.\n• Manter o líquido na região vestibular por 2 minutos e depois engolir.\n• Após a aplicação, manter jejum, inclusive de água, por no mínimo 40 minutos.",
     }] : []),
     {
       heading: "Valores, pagamento e cancelamento",

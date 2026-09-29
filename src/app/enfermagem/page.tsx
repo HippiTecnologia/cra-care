@@ -29,7 +29,8 @@ function normalizePersonName(value: string) {
 
 function doctorAllowedForReport(doctor: NursingDoctor, reportType: ReportType) {
   const name = normalizePersonName(doctor.fullName);
-  if (reportType === "prick_test") return name.includes("sergio") && name.includes("maniglia");
+  const crm = (doctor.crm ?? "").replace(/\D/g, "");
+  if (reportType === "prick_test") return crm === "20762" || (name.includes("sergio") && name.includes("maniglia"));
   return name.includes("alessandra") || (name.includes("patricia") && (name.includes("martinski") || name.includes("trudes")));
 }
 
