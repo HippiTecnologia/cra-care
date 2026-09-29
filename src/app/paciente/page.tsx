@@ -254,6 +254,49 @@ function AssessmentQuestion<T extends string>({ title, options, value, onChange 
   return <fieldset className="mt-6"><legend className="text-sm font-bold leading-6 text-[#544449]">{title}</legend><div className="mt-3 space-y-2">{options.map(([optionValue, label]) => <button key={optionValue} type="button" onClick={() => onChange(optionValue)} className={`w-full rounded-2xl border px-4 py-3 text-left text-sm ${value === optionValue ? "border-[#b91142] bg-[#fff5f7] font-semibold text-[#a3113a]" : "border-[#eee6e2] text-[#544449]"}`}>{label}</button>)}</div></fieldset>;
 }
 
+type ImmunobacterialAssessment = {
+  viralUpper: string;
+  bacterialUpper: string;
+  viralLower: string;
+  bacterialLower: string;
+  seriousComplications: string;
+  recurrentOrResistant: string;
+  absentDays: string;
+  antibiotics: string;
+  observations: string;
+};
+
+const emptyImmunobacterialAssessment = (): ImmunobacterialAssessment => ({
+  viralUpper: "",
+  bacterialUpper: "",
+  viralLower: "",
+  bacterialLower: "",
+  seriousComplications: "",
+  recurrentOrResistant: "",
+  absentDays: "",
+  antibiotics: "",
+  observations: "",
+});
+
+const immunobacterialFrequencyQuestions: { key: keyof Pick<ImmunobacterialAssessment, "viralUpper" | "bacterialUpper" | "viralLower" | "bacterialLower" | "seriousComplications" | "recurrentOrResistant">; label: string }[] = [
+  { key: "viralUpper", label: "Infecções virais de vias aéreas superiores (resfriados, gripes, faringites etc.)" },
+  { key: "bacterialUpper", label: "Infecções bacterianas de vias aéreas superiores com uso de antibióticos (amigdalites, sinusites etc.)" },
+  { key: "viralLower", label: "Infecções virais de vias aéreas inferiores (pneumonia, chiado, tosse ou secreção pulmonar etc.)" },
+  { key: "bacterialLower", label: "Infecções bacterianas de vias aéreas inferiores com uso de antibióticos (pneumonias etc.)" },
+  { key: "seriousComplications", label: "Infecções com complicações graves, como sepse, abscessos, osteomielite ou pneumonia" },
+  { key: "recurrentOrResistant", label: "Infecções com recidiva ou resistência aos antibióticos" },
+];
+
+function formatImmunobacterialAssessment(assessment: ImmunobacterialAssessment) {
+  return [
+    "Acompanhamento da Imunobacteriana — frequência na última fase",
+    ...immunobacterialFrequencyQuestions.map((question) => `${question.label}: ${assessment[question.key]} vez(es).`),
+    `Dias de afastamento do trabalho ou escola: ${assessment.absentDays || "Não informado"}.`,
+    `Antibióticos utilizados: ${assessment.antibiotics.trim() || "Não informado"}.`,
+    `Observações gerais: ${assessment.observations.trim() || "Não informado"}.`,
+  ].join("\n");
+}
+
 export default function PatientPortalPage() {
   const router = useRouter();
   const [patient, setPatient] = useState<DemoPatientRecord | null>(null);
@@ -285,6 +328,7 @@ export default function PatientPortalPage() {
   const [assessmentMissed, setAssessmentMissed] = useState<NonNullable<PatientAssessment["missedImmunotherapy"]> | "">("");
   const [assessmentRescue, setAssessmentRescue] = useState<NonNullable<PatientAssessment["rescueMedication"]> | "">("");
   const [assessmentNotes, setAssessmentNotes] = useState("");
+  const [immunobacterialAssessment, setImmunobacterialAssessment] = useState<ImmunobacterialAssessment>(emptyImmunobacterialAssessment);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showReleaseNotes, setShowReleaseNotes] = useState(false);
   const [activeTreatment, setActiveTreatment] = useState<TreatmentTrack>("rinite");
@@ -389,14 +433,7 @@ export default function PatientPortalPage() {
       date: new Date().toISOString(),
       author: "Equipe CRA",
     };
-    const imunobacterianaGuidance = treatmentTracks.includes("imunobacteriana") ? [{
-      id: "imunobacteriana-use-guidance",
-      title: "Modo de usar — Imunobacteriana",
-      text: "✨ Orientações de uso:\n💧 Aplicar na região vestibular todos os dias: criança, 2 gotas; adulto, 4 gotas.\n🪥 Escovar os dentes e aguardar 20 minutos antes da aplicação.\n👄 Manter o líquido na região vestibular por 2 minutos e depois engolir.\n🚫 Após a aplicação, manter jejum, inclusive de água, por no mínimo 40 minutos.",
-      date: new Date().toISOString(),
-      author: "Equipe CRA",
-    }] : [];
-    const notes = [guidanceNote, ...imunobacterianaGuidance, ...prescriptions.flatMap((prescription) => {
+    const notes = [guidanceNote, ...prescriptions.flatMap((prescription) => {
       const entries = [
         {
           id: `${prescription.id}-posology`,
@@ -641,7 +678,9 @@ export default function PatientPortalPage() {
   }
 
   function saveAssessment() {
-    if (!portal || !pendingAssessmentBottle || assessmentNuisance === null || !assessmentMissed || !assessmentRescue) return;
+    const isImmunobacterial = activeTreatment === "imunobacteriana";
+    const hasCompletedImmunobacterialQuestionnaire = immunobacterialFrequencyQuestions.every((question) => immunobacterialAssessment[question.key] !== "") && immunobacterialAssessment.absentDays !== "";
+    if (!portal || !pendingAssessmentBottle || (!isImmunobacterial && (assessmentNuisance === null || !assessmentMissed || !assessmentRescue)) || (isImmunobacterial && !hasCompletedImmunobacterialQuestionnaire)) return;
 
     updatePortal({
       ...portal,
@@ -651,12 +690,12 @@ export default function PatientPortalPage() {
           bottleId: pendingAssessmentBottle.id,
           bottleNumber: pendingAssessmentBottle.number,
           assessmentType: latestAssessment ? "acompanhamento" : "inicial",
-          nuisanceScore: assessmentNuisance,
-          symptomScores: assessmentSymptoms,
-          symptomTotal: Object.values(assessmentSymptoms).reduce((total, score) => total + score, 0),
-          missedImmunotherapy: assessmentMissed,
-          rescueMedication: assessmentRescue,
-          notes: assessmentNotes.trim(),
+          nuisanceScore: isImmunobacterial ? undefined : assessmentNuisance ?? undefined,
+          symptomScores: isImmunobacterial ? undefined : assessmentSymptoms,
+          symptomTotal: isImmunobacterial ? undefined : Object.values(assessmentSymptoms).reduce((total, score) => total + score, 0),
+          missedImmunotherapy: isImmunobacterial ? undefined : assessmentMissed || undefined,
+          rescueMedication: isImmunobacterial ? undefined : assessmentRescue || undefined,
+          notes: isImmunobacterial ? formatImmunobacterialAssessment(immunobacterialAssessment) : assessmentNotes.trim(),
           createdAt: new Date().toISOString(),
         },
         ...portal.assessments,
@@ -664,7 +703,8 @@ export default function PatientPortalPage() {
     });
     setAssessmentNuisance(null); setAssessmentSymptoms({}); setAssessmentMissed(""); setAssessmentRescue("");
     setAssessmentNotes("");
-    setMessage("Avaliação da imunoterapia registrada no seu histórico.");
+    setImmunobacterialAssessment(emptyImmunobacterialAssessment());
+    setMessage(isImmunobacterial ? "Acompanhamento da Imunobacteriana registrado no seu histórico." : "Avaliação da imunoterapia registrada no seu histórico.");
   }
 
   async function saveReminders() {
@@ -963,7 +1003,7 @@ export default function PatientPortalPage() {
               </div>
             )}
 
-            {treatmentTracks.length > 1 && (
+            {treatmentTracks.length > 1 && section !== "notas-fiscais" && (
               <div className="mb-5 rounded-2xl border border-[#eadfd9] bg-white p-3 shadow-sm">
                 <p className="px-1 text-xs font-semibold text-[#766b6e]">Acompanhar tratamento</p>
                 <div className="mt-2 grid grid-cols-2 gap-2">
@@ -1097,7 +1137,7 @@ export default function PatientPortalPage() {
               <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Orientações da equipe</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">Orientações</h2></div><button type="button" onClick={downloadNotes} className="self-start rounded-xl border border-[#eadfd9] px-4 py-3 text-xs font-semibold text-[#a3113a]">Baixar orientações em PDF</button></div>
                 <div className="mt-6 grid gap-5 lg:grid-cols-2 lg:[&>section:first-child]:order-2 lg:[&>section:nth-child(2)]:order-1">
-                  <section className="rounded-2xl border border-[#f0dfe3] bg-[#fff7f8] p-5"><h3 className="flex items-center gap-2 text-base font-bold text-[#a3113a]">🎯 Por que fazer a imunoterapia?</h3><p className="mt-4 text-sm leading-6 text-[#65585c]">Ao escolher esta terapia você está tratando a sua doença alérgica e não só os seus sintomas, fazendo com que eles sejam abrandados e as crises espaçadas.</p><p className="mt-4 text-sm leading-6 text-[#65585c]">A alergia é uma doença do seu sistema imunológico que produz defesas de forma errada para uma substância que normalmente não faz mal. Esse exagero leva a sintomas no nariz, olhos, garganta e ouvidos.</p><blockquote className="mt-5 rounded-xl bg-[#fce8ed] p-4 text-sm italic leading-6 text-[#8e2140]">“A imunoterapia é o único tratamento para a alergia que é potencialmente curador.”<br /><span className="text-xs not-italic">– Organização Mundial da Saúde (OMS).</span></blockquote><div className="mt-5 space-y-4 text-sm leading-6 text-[#65585c]"><p><strong className="text-[#a3113a]">💉 Em alguns casos...</strong><br />Mudança de clima, cheiros fortes, ar-condicionado e perfumes podem gerar crises e não são controlados pela imunoterapia.</p><p><strong className="text-[#a3113a]">⚠ Possíveis reações</strong><br />Irritações na pele, formigamento oral e piora inicial dos sintomas podem ocorrer, geralmente de forma leve.</p><p><strong className="text-[#a3113a]">◷ Quando você sente o resultado?</strong><br />Com o uso contínuo, os benefícios aparecem. A primeira avaliação costuma ocorrer entre 6 e 8 meses.</p><p><strong className="text-[#a3113a]">◯ Tempo de tratamento</strong><br />Geralmente dura entre 3 e 5 anos, conforme a resposta clínica e a orientação médica.</p></div></section>
+                  {activeTreatment === "imunobacteriana" ? <section className="rounded-2xl border border-[#d9e4f3] bg-[#f7faff] p-5"><h3 className="text-base font-bold text-[#245486]">Por que fazer Imunobacteriana?</h3><p className="mt-4 text-sm leading-6 text-[#455b70]">O objetivo é reduzir a frequência e a gravidade das infecções respiratórias recorrentes, treinando seu corpo para responder melhor a futuros episódios infecciosos. Este tratamento é administrado de forma sublingual, ou seja, com gotas aplicadas debaixo da língua.</p><div className="mt-5 space-y-4 text-sm leading-6 text-[#455b70]"><p><strong className="text-[#245486]">Quanto tempo dura o tratamento?</strong><br />O tratamento com imunoterapia bacteriana sublingual geralmente tem duração de 6 meses, período necessário para avaliar sua eficácia na redução das infecções. Em alguns casos, ele pode ser ajustado ou estendido conforme a resposta do paciente.</p><p><strong className="text-[#245486]">Quais são os possíveis efeitos colaterais?</strong><br />Os efeitos colaterais são raros e geralmente leves. Quando ocorrem, podem incluir irritação local, formigamento na boca, inchaço e sintomas gastrointestinais leves. Reações graves são extremamente raras; caso ocorram, procure atendimento hospitalar emergencial e, assim que possível, comunique seu médico ou agende uma reavaliação.</p><p><strong className="text-[#245486]">Quando surgem os resultados?</strong><br />A resposta varia de paciente para paciente. Em geral, os primeiros resultados aparecem entre 3 e 6 meses, com redução na frequência e na gravidade das infecções. É importante seguir o tratamento até o final, conforme prescrito pelo médico, para garantir a melhor eficácia.</p></div></section> : <section className="rounded-2xl border border-[#f0dfe3] bg-[#fff7f8] p-5"><h3 className="flex items-center gap-2 text-base font-bold text-[#a3113a]">🎯 Por que fazer a imunoterapia?</h3><p className="mt-4 text-sm leading-6 text-[#65585c]">Ao escolher esta terapia você está tratando a sua doença alérgica e não só os seus sintomas, fazendo com que eles sejam abrandados e as crises espaçadas.</p><p className="mt-4 text-sm leading-6 text-[#65585c]">A alergia é uma doença do seu sistema imunológico que produz defesas de forma errada para uma substância que normalmente não faz mal. Esse exagero leva a sintomas no nariz, olhos, garganta e ouvidos.</p><blockquote className="mt-5 rounded-xl bg-[#fce8ed] p-4 text-sm italic leading-6 text-[#8e2140]">“A imunoterapia é o único tratamento para a alergia que é potencialmente curador.”<br /><span className="text-xs not-italic">– Organização Mundial da Saúde (OMS).</span></blockquote><div className="mt-5 space-y-4 text-sm leading-6 text-[#65585c]"><p><strong className="text-[#a3113a]">💉 Em alguns casos...</strong><br />Mudança de clima, cheiros fortes, ar-condicionado e perfumes podem gerar crises e não são controlados pela imunoterapia.</p><p><strong className="text-[#a3113a]">⚠ Possíveis reações</strong><br />Irritações na pele, formigamento oral e piora inicial dos sintomas podem ocorrer, geralmente de forma leve.</p><p><strong className="text-[#a3113a]">◷ Quando você sente o resultado?</strong><br />Com o uso contínuo, os benefícios aparecem. A primeira avaliação costuma ocorrer entre 6 e 8 meses.</p><p><strong className="text-[#a3113a]">◯ Tempo de tratamento</strong><br />Geralmente dura entre 3 e 5 anos, conforme a resposta clínica e a orientação médica.</p></div></section>}
                   <section className="rounded-2xl border border-[#f0dfe3] bg-[#fff7f8] p-5"><h3 className="flex items-center gap-2 text-base font-bold text-[#a3113a]">▣ Instruções sobre uso da vacina</h3><ol className="mt-4 space-y-4 text-sm leading-6 text-[#65585c]">{["Faça uma refeição antes da aplicação, escove os dentes e aguarde 20 minutos.","Siga o número correto de gotas conforme a orientação do médico e da enfermagem.","Aplique a vacina embaixo da língua, de frente ao espelho.","Mantenha as gotas por aproximadamente 2 minutos e depois engula.","Formigamento ou amortecimento leve na língua pode acontecer e é normal.","Permaneça 45 minutos em jejum após a vacina, sem alimentos, água ou líquidos.","A vacina pode ser aplicada pela manhã ou à noite.","Mantenha a vacina sempre na geladeira.","Fora da geladeira, a vacina pode permanecer no máximo 4 dias e deve ser transportada com cuidado."] .map((instruction, index) => <li key={instruction} className="flex gap-3"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full border border-[#e9b8c5] bg-white text-xs font-bold text-[#a3113a]">{index + 1}</span><span>{instruction}</span></li>)}</ol></section>
                 </div>
                 <section className="mt-5 rounded-2xl border border-[#eadfe0] bg-[#fdfbf9] p-5"><h3 className="text-base font-bold text-[#a3113a]">Posologia</h3><p className="mt-2 text-sm leading-6 text-[#65585c]">{latestPrescription?.posology ?? "A posologia será exibida quando o médico registrar a receita."}</p><p className="mt-2 text-xs text-[#817578]">Última orientação médica · {latestPrescription?.bottles ?? 0} frasco(s) prescritos</p></section>
@@ -1163,16 +1203,11 @@ export default function PatientPortalPage() {
       {pendingAssessmentBottle && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#2c1b20]/55 p-3 sm:items-center sm:p-5">
           <section className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-[30px] bg-white p-6 shadow-2xl sm:p-8">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Avaliação da imunoterapia · {latestAssessment ? "Acompanhamento" : "Inicial"}</p>
-            <h2 className="mt-3 text-xl font-bold text-[#433438] sm:text-2xl">{latestAssessment ? "Como foram seus últimos 60 dias?" : "Avaliação inicial do tratamento"}</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">{activeTreatment === "imunobacteriana" ? "Acompanhamento da Imunobacteriana" : `Avaliação da imunoterapia · ${latestAssessment ? "Acompanhamento" : "Inicial"}`}</p>
+            <h2 className="mt-3 text-xl font-bold text-[#433438] sm:text-2xl">{activeTreatment === "imunobacteriana" ? "Como foi a última fase do tratamento?" : latestAssessment ? "Como foram seus últimos 60 dias?" : "Avaliação inicial do tratamento"}</h2>
             <p className="mt-2 text-sm text-[#817578]">Data da avaliação: {formatDate(new Date().toISOString())}</p>
-            <div className="mt-5"><p className="text-sm font-semibold">De 0 a 10, qual sua perspectiva de melhorar? *</p><p className="mt-1 text-xs text-[#817578]">0 = nenhuma perspectiva · 10 = máxima perspectiva</p><div className="mt-3 flex flex-wrap gap-2">{Array.from({length:11},(_,score)=><button key={score} type="button" onClick={()=>setAssessmentNuisance(score)} className={`h-10 w-10 rounded-full border font-semibold ${assessmentNuisance===score?"border-[#a3113a] bg-[#a3113a] text-white":"border-[#eadfd9]"}`}>{score}</button>)}</div></div>
-            <div className="mt-6 space-y-4"><p className="text-sm font-semibold">Na última semana, com que frequência você apresentou:</p>{[["nariz","Nariz entupido ou congestionado"],["espirros","Espirros, coriza ou coceira no nariz"],["olhos","Olhos coçando, lacrimejando ou vermelhos"],["sono","Sintomas que atrapalharam seu sono"],["rotina","Sintomas que atrapalharam trabalho, escola ou lazer"]].map(([id,label])=><label key={id} className="block text-sm"><span>{label}</span><select value={assessmentSymptoms[id]??""} onChange={e=>setAssessmentSymptoms({...assessmentSymptoms,[id]:Number(e.target.value)})} className="mt-2 w-full rounded-xl border p-2"><option value="">Selecione</option><option value="0">Nunca (0)</option><option value="1">1 a 2 vezes (1)</option><option value="2">Mais de 2 vezes (2)</option><option value="5">Quase todos os dias (5)</option></select></label>)}</div>
-            <p className="mt-3 text-sm font-bold">Total: {Object.values(assessmentSymptoms).reduce((a,b)=>a+b,0)} / 15</p>
-            <AssessmentQuestion title="Nos últimos 60 dias, quantas vezes esqueceu de tomar a imunoterapia? *" options={[["nenhuma","Nenhuma"],["1-3","1 a 3 vezes"],["4-7","4 a 7 vezes"],["mais-7","Mais de 7 vezes"]] as const} value={assessmentMissed} onChange={setAssessmentMissed} />
-            <AssessmentQuestion title="Nos últimos 60 dias, quantas vezes precisou de medicação de resgate? *" options={[["nenhuma","Nenhuma"],["1-5","1 a 5 vezes"],["6-15","6 a 15 vezes"],["mais-15","Mais de 15 vezes"]] as const} value={assessmentRescue} onChange={setAssessmentRescue} />
-            <label className="mt-6 block text-sm font-semibold text-[#544449]">Gostaria de compartilhar sua experiência?<textarea value={assessmentNotes} onChange={(event) => setAssessmentNotes(event.target.value)} rows={3} placeholder="Escreva aqui, se quiser compartilhar algo com sua equipe." className="mt-2 w-full rounded-xl border border-[#e9dfda] px-3 py-3 text-sm font-normal outline-none focus:border-[#b91142]" /></label>
-            <button type="button" onClick={saveAssessment} disabled={assessmentNuisance===null || !assessmentMissed || !assessmentRescue} className="mt-5 w-full rounded-2xl bg-[#a3113a] px-4 py-3.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">Salvar avaliação</button>
+            {activeTreatment === "imunobacteriana" ? <><p className="mt-5 text-sm font-semibold leading-6 text-[#544449]">Relate abaixo a frequência com que cada uma das situações ocorreu na última fase:</p><div className="mt-5 space-y-4">{immunobacterialFrequencyQuestions.map((question) => <label key={question.key} className="block text-sm font-semibold text-[#544449]"><span>{question.label}</span><div className="mt-2 flex items-center gap-3"><input type="number" min="0" inputMode="numeric" value={immunobacterialAssessment[question.key]} onChange={(event) => setImmunobacterialAssessment((current) => ({ ...current, [question.key]: event.target.value.replace(/\D/g, "") }))} placeholder="0" className="h-11 w-24 rounded-xl border border-[#e9dfda] px-3 font-normal outline-none focus:border-[#3c6e9f]" /><span className="text-xs font-normal text-[#817578]">vez(es)</span></div></label>)}</div><label className="mt-6 block text-sm font-semibold text-[#544449]">Por quantos dias necessitou se ausentar do trabalho ou escola?<input type="number" min="0" inputMode="numeric" value={immunobacterialAssessment.absentDays} onChange={(event) => setImmunobacterialAssessment((current) => ({ ...current, absentDays: event.target.value.replace(/\D/g, "") }))} placeholder="0" className="mt-2 h-11 w-full rounded-xl border border-[#e9dfda] px-3 font-normal outline-none focus:border-[#3c6e9f]" /></label><label className="mt-6 block text-sm font-semibold text-[#544449]">Quais os nomes dos antibióticos que utilizou?<textarea value={immunobacterialAssessment.antibiotics} onChange={(event) => setImmunobacterialAssessment((current) => ({ ...current, antibiotics: event.target.value }))} rows={3} className="mt-2 w-full rounded-xl border border-[#e9dfda] px-3 py-3 text-sm font-normal outline-none focus:border-[#3c6e9f]" /></label><label className="mt-6 block text-sm font-semibold text-[#544449]">Observações gerais<textarea value={immunobacterialAssessment.observations} onChange={(event) => setImmunobacterialAssessment((current) => ({ ...current, observations: event.target.value }))} rows={3} className="mt-2 w-full rounded-xl border border-[#e9dfda] px-3 py-3 text-sm font-normal outline-none focus:border-[#3c6e9f]" /></label></> : <><div className="mt-5"><p className="text-sm font-semibold">De 0 a 10, qual sua perspectiva de melhorar? *</p><p className="mt-1 text-xs text-[#817578]">0 = nenhuma perspectiva · 10 = máxima perspectiva</p><div className="mt-3 flex flex-wrap gap-2">{Array.from({length:11},(_,score)=><button key={score} type="button" onClick={()=>setAssessmentNuisance(score)} className={`h-10 w-10 rounded-full border font-semibold ${assessmentNuisance===score?"border-[#a3113a] bg-[#a3113a] text-white":"border-[#eadfd9]"}`}>{score}</button>)}</div></div><div className="mt-6 space-y-4"><p className="text-sm font-semibold">Na última semana, com que frequência você apresentou:</p>{[["nariz","Nariz entupido ou congestionado"],["espirros","Espirros, coriza ou coceira no nariz"],["olhos","Olhos coçando, lacrimejando ou vermelhos"],["sono","Sintomas que atrapalharam seu sono"],["rotina","Sintomas que atrapalharam trabalho, escola ou lazer"]].map(([id,label])=><label key={id} className="block text-sm"><span>{label}</span><select value={assessmentSymptoms[id]??""} onChange={e=>setAssessmentSymptoms({...assessmentSymptoms,[id]:Number(e.target.value)})} className="mt-2 w-full rounded-xl border p-2"><option value="">Selecione</option><option value="0">Nunca (0)</option><option value="1">1 a 2 vezes (1)</option><option value="2">Mais de 2 vezes (2)</option><option value="5">Quase todos os dias (5)</option></select></label>)}</div><p className="mt-3 text-sm font-bold">Total: {Object.values(assessmentSymptoms).reduce((a,b)=>a+b,0)} / 15</p><AssessmentQuestion title="Nos últimos 60 dias, quantas vezes esqueceu de tomar a imunoterapia? *" options={[["nenhuma","Nenhuma"],["1-3","1 a 3 vezes"],["4-7","4 a 7 vezes"],["mais-7","Mais de 7 vezes"]] as const} value={assessmentMissed} onChange={setAssessmentMissed} /><AssessmentQuestion title="Nos últimos 60 dias, quantas vezes precisou de medicação de resgate? *" options={[["nenhuma","Nenhuma"],["1-5","1 a 5 vezes"],["6-15","6 a 15 vezes"],["mais-15","Mais de 15 vezes"]] as const} value={assessmentRescue} onChange={setAssessmentRescue} /><label className="mt-6 block text-sm font-semibold text-[#544449]">Gostaria de compartilhar sua experiência?<textarea value={assessmentNotes} onChange={(event) => setAssessmentNotes(event.target.value)} rows={3} placeholder="Escreva aqui, se quiser compartilhar algo com sua equipe." className="mt-2 w-full rounded-xl border border-[#e9dfda] px-3 py-3 text-sm font-normal outline-none focus:border-[#b91142]" /></label></>}
+            <button type="button" onClick={saveAssessment} disabled={activeTreatment === "imunobacteriana" ? !immunobacterialFrequencyQuestions.every((question) => immunobacterialAssessment[question.key] !== "") || immunobacterialAssessment.absentDays === "" : assessmentNuisance===null || !assessmentMissed || !assessmentRescue} className="mt-5 w-full rounded-2xl bg-[#a3113a] px-4 py-3.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">Salvar avaliação</button>
           </section>
         </div>
       )}
