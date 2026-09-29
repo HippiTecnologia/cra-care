@@ -335,12 +335,9 @@ export default function MedicalPatientPage() {
         phase: vaccineType === "imunobacteriana" ? undefined : phase,
         drops,
         treatment: prescription.treatment,
-        status: "com-pedido",
       } : current);
 
-      setMessage(
-        "Receita gerada com sucesso. O paciente foi encaminhado para a coluna Paciente com pedido da secretaria.",
-      );
+      setMessage("Receita gerada com sucesso.");
       setError("");
       setSelectedPrescriptionId(saved.id);
       setFormulas([]);

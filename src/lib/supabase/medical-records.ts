@@ -162,9 +162,7 @@ export function mapMedicalPatient(
     drops: numberValue(treatment, "drops"),
     phase: stringValue(treatment, "phase"),
     delivery: validDelivery(stringValue(treatment, "delivery") ?? stringValue(address, "delivery")),
-    status: registrationStatus === "pending-secretary" && row.status === "em-conversa"
-      ? "com-pedido"
-      : validStatus(row.status),
+    status: validStatus(row.status),
     acquisitionMethod: stringValue(financial, "acquisitionMethod"),
     agreedCondition: stringValue(financial, "agreedCondition") as DemoPatientRecord["agreedCondition"],
     methodSnapshotId: stringValue(financial, "methodSnapshotId"),
@@ -723,7 +721,6 @@ export async function createMedicalPrescription(
   };
   const { error: patientError } = await supabase.from("patients").update({
     treatment,
-    status: "com-pedido",
     updated_at: new Date().toISOString(),
   }).eq("id", patient.id).eq("doctor_profile_id", doctor.id);
   if (patientError) throw patientError;
