@@ -182,14 +182,16 @@ export default function SecretariaLotesPage() {
     return saved;
   }
 
-  function getBillingRequirement(patient: DemoPatientRecord, requestedBottles = 1) {
-    const acquisitionMethod = patient.acquisitionMethod ?? "Por frasco";
-    const paymentMethod = patient.paymentMethod ?? "A definir";
+  function getBillingRequirement(patient: DemoPatientRecord, prescription: DemoPrescription) {
+    const track = indicationForTreatment(prescription.treatment) === "bacteriana" ? "Imunobacteriana" : "Rinite";
+    const trackFinancial = patient.treatmentPayments?.find((payment) => payment.treatment === track);
+    const acquisitionMethod = trackFinancial?.acquisitionMethod ?? patient.acquisitionMethod ?? "Por frasco";
+    const paymentMethod = trackFinancial?.paymentMethod ?? patient.paymentMethod ?? "A definir";
     const pendingBatchBottles = batches.reduce((total, batch) => total + batch.items
-      .filter((item) => item.patientId === patient.id)
+      .filter((item) => item.patientId === patient.id && indicationForTreatment(item.treatment) === indicationForTreatment(prescription.treatment))
       .reduce((count, item) => count + item.bottles, 0), 0);
-    const nextBottleNumber = (patient.bottlesReceived ?? 0) + pendingBatchBottles + 1;
-    const bottleNumbers = Array.from({ length: Math.max(1, Math.trunc(requestedBottles)) }, (_, index) => nextBottleNumber + index);
+    const nextBottleNumber = pendingBatchBottles + 1;
+    const bottleNumbers = Array.from({ length: Math.max(1, Math.trunc(prescription.bottles)) }, (_, index) => nextBottleNumber + index);
     const renewalBottle = bottleNumbers.find((number) => number > 3 && (number - 1) % 3 === 0);
     const recurringAsaas = acquisitionMethod === "Recorrente — ASAAS";
     const paymentRequired = !recurringAsaas && (acquisitionMethod === "Por frasco" || Boolean(renewalBottle));
@@ -201,7 +203,7 @@ export default function SecretariaLotesPage() {
         : paymentRequired
           ? `Novo pagamento necessário: o pedido inclui o ${renewalBottle}º frasco.`
           : `Frasco ${nextBottleNumber} incluído no pagamento do tratamento.`;
-    return { acquisitionMethod, paymentMethod, nextBottleNumber, paymentRequired, asaasRequired, explanation };
+    return { acquisitionMethod, paymentMethod, paymentStatus: trackFinancial?.paymentStatus ?? patient.paymentStatus, nextBottleNumber, paymentRequired, asaasRequired, explanation };
   }
 
   const patientById = useMemo(
@@ -288,7 +290,10 @@ export default function SecretariaLotesPage() {
 
   function validateSelectedPayments() {
     const delinquent = orderType === "pedido-paciente"
-      ? selectedPrescriptions.find((prescription) => patientById.get(prescription.patientId)?.paymentStatus === "Vencido")
+      ? selectedPrescriptions.find((prescription) => {
+          const patient = patientById.get(prescription.patientId);
+          return patient ? getBillingRequirement(patient, prescription).paymentStatus === "Vencido" : false;
+        })
       : undefined;
     if (delinquent) {
       const patient = patientById.get(delinquent.patientId);
@@ -299,7 +304,7 @@ export default function SecretariaLotesPage() {
       ? selectedPrescriptions.find((prescription) => {
           const patient = patientById.get(prescription.patientId);
           if (!patient) return true;
-          const billing = getBillingRequirement(patient, prescription.bottles);
+          const billing = getBillingRequirement(patient, prescription);
           const confirmation = paymentConfirmations[prescription.id];
           return (billing.paymentRequired && !confirmation?.payment) || (billing.asaasRequired && !confirmation?.asaas);
         })
@@ -307,7 +312,7 @@ export default function SecretariaLotesPage() {
 
     if (missingPayment) {
       const patient = patientById.get(missingPayment.patientId);
-      const billing = patient ? getBillingRequirement(patient, missingPayment.bottles) : undefined;
+      const billing = patient ? getBillingRequirement(patient, missingPayment) : undefined;
       setError(billing?.asaasRequired && !paymentConfirmations[missingPayment.id]?.asaas
         ? `Confirmar no ASAAS se o pagamento de ${patient?.name} está em dia.`
         : `Confirme o pagamento de ${patient?.name ?? "todos os pacientes"} antes de incluir no lote.`);
@@ -323,7 +328,7 @@ export default function SecretariaLotesPage() {
         const patient = patientById.get(prescription.patientId);
 
         if (!patient) return [];
-        const billing = getBillingRequirement(patient, prescription.bottles);
+        const billing = getBillingRequirement(patient, prescription);
         const confirmedAt = new Date().toISOString();
 
         return [
@@ -369,6 +374,12 @@ export default function SecretariaLotesPage() {
     if (!validateSelectedPayments()) return;
 
     const items = orderType === "pronta-entrega" ? readyItems : createSelectedPatientItems();
+    const itemIndications = new Set(items.map((item) => indicationForTreatment(item.treatment)));
+    if (itemIndications.size > 1) {
+      setError("Rinite e Imunobacteriana não podem fazer parte do mesmo lote.");
+      return;
+    }
+    const actualIndication = itemIndications.values().next().value ?? batchIndication;
 
     const createdAt = new Date().toISOString();
     const nextNumber = String(batches.length + 1).padStart(3, "0");
@@ -378,9 +389,9 @@ export default function SecretariaLotesPage() {
       name: batchName.trim(),
       createdAt,
       orderType,
-      indication: batchIndication,
+      indication: actualIndication,
       status: "rascunho",
-      laboratory: laboratory.trim(),
+      laboratory: actualIndication === "bacteriana" ? "Laboratório externo" : laboratory.trim(),
       notes: notes.trim(),
       items,
     };
@@ -405,6 +416,10 @@ export default function SecretariaLotesPage() {
     if (!validateSelectedPayments()) return;
 
     const items = createSelectedPatientItems();
+    if (items.some((item) => indicationForTreatment(item.treatment) !== editingBatch.indication)) {
+      setError("A receita selecionada pertence a outro tratamento e não pode entrar neste lote.");
+      return;
+    }
     await persistBatch({ ...editingBatch, items: [...editingBatch.items, ...items] });
     setSelectedIds([]);
     setPaymentConfirmations({});
@@ -809,7 +824,7 @@ export default function SecretariaLotesPage() {
                     const selected = selectedIds.includes(prescription.id);
                     const registrationPending =
                       patient?.registrationStatus !== "completed";
-                    const billing = patient ? getBillingRequirement(patient, prescription.bottles) : undefined;
+                    const billing = patient ? getBillingRequirement(patient, prescription) : undefined;
 
                     return (
                       <button
@@ -973,14 +988,14 @@ export default function SecretariaLotesPage() {
                   {selectedPrescriptions.map((prescription) => {
                     const patient = patientById.get(prescription.patientId);
                     if (!patient) return null;
-                    const billing = getBillingRequirement(patient, prescription.bottles);
+                    const billing = getBillingRequirement(patient, prescription);
                     const confirmation = paymentConfirmations[prescription.id] ?? { payment: false, asaas: false };
 
                     return (
-                      <div key={prescription.id} className={`rounded-2xl border p-4 ${patient.paymentStatus === "Vencido" ? "border-[#f0bcc5] bg-[#fff2f3]" : billing.paymentRequired ? "border-[#f0dfc0] bg-[#fff9ef]" : "border-[#d7e9df] bg-[#f5fbf7]"}`}>
+                      <div key={prescription.id} className={`rounded-2xl border p-4 ${billing.paymentStatus === "Vencido" ? "border-[#f0bcc5] bg-[#fff2f3]" : billing.paymentRequired ? "border-[#f0dfc0] bg-[#fff9ef]" : "border-[#d7e9df] bg-[#f5fbf7]"}`}>
                         <p className="text-xs font-bold text-[#433438]">{patient.name}</p>
                         <p className="mt-1 text-xs text-[#66595d]">{billing.acquisitionMethod} · {billing.nextBottleNumber}º frasco</p>
-                        <p className={`mt-2 text-xs font-bold ${patient.paymentStatus === "Vencido" ? "text-[#a3113a]" : "text-[#187157]"}`}>{patient.paymentStatus === "Vencido" ? "● INADIMPLENTE — não liberar até regularizar" : "● EM DIA"}</p>
+                        <p className={`mt-2 text-xs font-bold ${billing.paymentStatus === "Vencido" ? "text-[#a3113a]" : "text-[#187157]"}`}>{billing.paymentStatus === "Vencido" ? `● ${indicationLabel(indicationForTreatment(prescription.treatment))} INADIMPLENTE — não liberar até regularizar` : `● ${indicationLabel(indicationForTreatment(prescription.treatment))} EM DIA`}</p>
                         <p className={`mt-2 text-xs font-semibold ${billing.paymentRequired ? "text-[#966419]" : "text-[#187157]"}`}>{billing.explanation}</p>
                         {billing.paymentRequired && (
                           <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-[#544449]"><input type="checkbox" checked={confirmation.payment} onChange={(event) => setPaymentConfirmations((current) => ({ ...current, [prescription.id]: { ...confirmation, payment: event.target.checked } }))} className="mt-0.5 accent-[#a3113a]" />Confirmo que a cobrança deste frasco foi realizada e paga.</label>

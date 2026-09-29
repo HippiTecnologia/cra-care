@@ -157,6 +157,9 @@ export async function loadSecretaryDoctors(context?: SecretaryContext) {
 function paymentFromRow(row: Record<string, unknown>): PatientPaymentRecord {
   return {
     id: text(row.id),
+    treatment: /bacteriana|imunobacteriana/i.test(text(row.treatment))
+      ? "Imunobacteriana"
+      : text(row.treatment) ? "Rinite" : undefined,
     amount: number(row.amount),
     paidAt: text(row.paid_at) || text(row.due_at),
     method: text(row.payment_method, "A definir"),
@@ -298,6 +301,7 @@ export async function saveSecretaryPatient(
       status: payment.paidAt ? "recebido" : "pendente",
       asaas_reference: payment.asaasReference ?? null,
       notes: payment.notes ?? null,
+      treatment: payment.treatment ?? null,
     };
     if (isUuid(payment.id)) {
       const { error: paymentError } = await supabase.from("payments").upsert({ id: payment.id, ...payload });

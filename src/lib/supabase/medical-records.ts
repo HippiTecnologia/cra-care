@@ -191,6 +191,13 @@ export function mapMedicalPatient(
           paymentMethod: stringValue(item, "paymentMethod"),
           dueDate: stringValue(item, "dueDate"),
           agreedCondition: stringValue(item, "agreedCondition") === "À vista" ? "À vista" as const : "Parcelado" as const,
+          acquisitionMethod: stringValue(item, "acquisitionMethod"),
+          paymentStatus: validPaymentStatus(stringValue(item, "paymentStatus")),
+          methodSnapshotId: stringValue(item, "methodSnapshotId"),
+          methodSnapshotVersion: numberValue(item, "methodSnapshotVersion"),
+          discountAmount: numberValue(item, "discountAmount"),
+          asaasReference: stringValue(item, "asaasReference"),
+          notes: stringValue(item, "notes"),
         }))
       : undefined,
     medicalRecord: (() => {

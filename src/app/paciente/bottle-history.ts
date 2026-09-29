@@ -6,6 +6,8 @@ import type { PatientPortalState } from "./patient-portal-store";
 
 export type BottleHistoryEntry = {
   number: number;
+  prescriptionId?: string;
+  treatment?: string;
   receivedAt?: string;
   startedAt?: string;
   finishedAt?: string;
@@ -59,6 +61,8 @@ export function buildBottleHistory(
 
     return {
       number,
+      prescriptionId: bottle?.prescriptionId,
+      treatment: bottle?.treatment,
       receivedAt: adjustment?.receivedAt ?? bottle?.receivedAt ?? receiptDates[index],
       startedAt: adjustment?.startedAt ?? bottle?.startedAt,
       finishedAt: adjustment?.finishedAt ?? bottle?.finishedAt,

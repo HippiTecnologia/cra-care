@@ -65,12 +65,19 @@ export type DemoPatientRecord = {
 
 export type TreatmentPayment = {
   treatment: "Rinite" | "Imunobacteriana";
+  acquisitionMethod?: string;
   contractValue?: number;
   installments?: number;
   installmentValue?: number;
   paymentMethod?: string;
   dueDate?: string;
   agreedCondition?: "À vista" | "Parcelado";
+  paymentStatus?: "A definir" | "Pendente" | "Em dia" | "Vencido" | "Cancelado";
+  methodSnapshotId?: string;
+  methodSnapshotVersion?: number;
+  discountAmount?: number;
+  asaasReference?: string;
+  notes?: string;
 };
 
 export type MedicalRecord = {
@@ -94,6 +101,7 @@ export type ClinicalRecord = {
 
 export type PatientPaymentRecord = {
   id: string;
+  treatment?: "Rinite" | "Imunobacteriana";
   amount: number;
   paidAt: string;
   method: string;
