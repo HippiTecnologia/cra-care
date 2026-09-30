@@ -599,8 +599,8 @@ export default function PatientPortalPage() {
       return;
     }
 
-    if (date > today) {
-      setMessage("Não é possível registrar o uso em uma data futura.");
+    if (date < currentBottle.startedAt || date > today) {
+      setMessage("O uso só pode ser registrado entre a data de início do frasco e hoje.");
       return;
     }
 
@@ -644,8 +644,8 @@ export default function PatientPortalPage() {
       return;
     }
 
-    if (date > today) {
-      setMessage("Não é possível editar uma data futura.");
+    if (date < currentBottle.startedAt || date > today) {
+      setMessage("Os dias só podem ser editados entre a data de início do frasco e hoje.");
       return;
     }
 
@@ -894,6 +894,7 @@ export default function PatientPortalPage() {
   ];
   const selectedRecord = portal.useRecords.find((record) => record.bottleId === currentBottle?.id && record.date === selectedDate);
   const selectedDayOverride = currentBottle ? portal.dayOverrides?.[dayOverrideKey(currentBottle.id, selectedDate)] : undefined;
+  const selectedWithinTreatment = Boolean(currentBottle && selectedDate >= currentBottle.startedAt && selectedDate <= today);
   const selectedWeekday = parseDate(selectedDate).getDay();
   const selectedScheduled = activeReminders.weekdays.includes(selectedWeekday);
   const milestone = currentBottleRecords.length >= 30
@@ -1111,17 +1112,19 @@ export default function PatientPortalPage() {
                 <article className="rounded-[28px] border border-[#eee5e0] bg-white p-5 shadow-sm sm:p-7">
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Histórico do tratamento</p><h2 className="mt-2 text-2xl font-bold text-[#433438]">Calendário geral</h2>
                   <div className="mt-6 flex items-center justify-between"><button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="rounded-xl bg-[#f7f2ef] px-4 py-2 text-[#a3113a]">←</button><p className="text-sm font-bold capitalize text-[#433438]">{monthLabel}</p><button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="rounded-xl bg-[#f7f2ef] px-4 py-2 text-[#a3113a]">→</button></div>
-                <div className="mt-5 grid grid-cols-7 gap-1 text-center sm:gap-2">{weekdays.map((day) => <span key={day.value} className="py-2 text-[11px] font-semibold text-[#817578]">{day.short.slice(0, 1)}</span>)}{calendarDays.map((day, index) => { if (!day) return <span key={`blank-${index}`} />; const key = dateKey(day); const record = portal.useRecords.find((item) => item.bottleId === currentBottle?.id && item.date === key); const override = currentBottle ? portal.dayOverrides?.[dayOverrideKey(currentBottle.id, key)] : undefined; const scheduled = activeReminders.weekdays.includes(day.getDay()); const withinTreatment = Boolean(currentBottle && key <= today); const missed = override === "nao-registrado" || (!record && override !== "off" && scheduled && withinTreatment && key < today); const selected = selectedDate === key; return <button key={key} type="button" onClick={() => setSelectedDate(key)} className={`flex aspect-square items-center justify-center rounded-xl text-xs font-semibold sm:text-sm ${selected ? "ring-2 ring-[#a3113a] ring-offset-2" : ""} ${record ? "bg-[#dff3e8] text-[#187157]" : override === "off" ? "bg-[#f0ebe8] text-[#716569]" : missed ? "bg-[#ffe6e8] text-[#a73a46]" : scheduled && withinTreatment ? "bg-[#fff2f3] text-[#a3113a]" : "bg-[#f8f5f2] text-[#716569]"}`}>{day.getDate()}</button>; })}</div>
+                <div className="mt-5 grid grid-cols-7 gap-1 text-center sm:gap-2">{weekdays.map((day) => <span key={day.value} className="py-2 text-[11px] font-semibold text-[#817578]">{day.short.slice(0, 1)}</span>)}{calendarDays.map((day, index) => { if (!day) return <span key={`blank-${index}`} />; const key = dateKey(day); const withinTreatment = Boolean(currentBottle && key >= currentBottle.startedAt && key <= today); const record = withinTreatment ? portal.useRecords.find((item) => item.bottleId === currentBottle?.id && item.date === key) : undefined; const override = withinTreatment && currentBottle ? portal.dayOverrides?.[dayOverrideKey(currentBottle.id, key)] : undefined; const scheduled = activeReminders.weekdays.includes(day.getDay()); const missed = override === "nao-registrado" || (!record && override !== "off" && scheduled && withinTreatment && key < today); const selected = selectedDate === key; return <button key={key} type="button" onClick={() => setSelectedDate(key)} className={`flex aspect-square items-center justify-center rounded-xl text-xs font-semibold sm:text-sm ${selected ? "ring-2 ring-[#a3113a] ring-offset-2" : ""} ${record ? "bg-[#dff3e8] text-[#187157]" : override === "off" ? "bg-[#f0ebe8] text-[#716569]" : missed ? "bg-[#ffe6e8] text-[#a73a46]" : scheduled && withinTreatment ? "bg-[#fff2f3] text-[#a3113a]" : !withinTreatment ? "bg-white text-[#c3b9b7]" : "bg-[#f8f5f2] text-[#716569]"}`}>{day.getDate()}</button>; })}</div>
                   <div className="mt-6 flex flex-wrap gap-4 text-xs text-[#66595d]"><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[#dff3e8]" />Uso realizado</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[#f0ebe8]" />Dia OFF</span><span className="flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-[#ffe6e8]" />Não registrado</span></div>
                 </article>
                 <article className="rounded-[24px] border border-[#eee5e0] bg-white p-5 shadow-sm">
                   <h3 className="text-sm font-bold text-[#433438]">Detalhes de {formatDate(selectedDate)}</h3>
-                  {selectedRecord ? (
+                  {!selectedWithinTreatment ? (
+                    <p className="mt-3 text-sm text-[#66595d]">Este dia é anterior ao início deste frasco e não faz parte do acompanhamento.</p>
+                  ) : selectedRecord ? (
                     <><p className="mt-3 text-sm font-semibold text-[#187157]">✓ Uso realizado</p><p className="mt-2 text-xs text-[#66595d]">{selectedRecord.drops} gotas · Registrado em {formatDate(selectedRecord.registeredAt, true)}</p></>
                   ) : (
                     <p className="mt-3 text-sm text-[#66595d]">{selectedDayOverride === "off" ? "Dia OFF: uso dispensado nesta data." : selectedDayOverride === "nao-registrado" ? "Dia de uso não registrado." : selectedScheduled ? "Dia previsto para uso, ainda sem registro." : "Dia OFF: sem uso programado."}</p>
                   )}
-                  {currentBottle && selectedDate <= today && (
+                  {selectedWithinTreatment && (
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button type="button" onClick={() => toggleUse(selectedDate)} className="rounded-xl bg-[#a3113a] px-4 py-2.5 text-xs font-semibold text-white">{selectedRecord ? "Remover registro deste dia" : "Registrar uso neste dia"}</button>
                       <button type="button" onClick={() => setCalendarDayStatus(selectedDate, "off")} className="rounded-xl border border-[#e6dbd6] px-4 py-2.5 text-xs font-semibold text-[#66595d]">Marcar como dia OFF</button>
