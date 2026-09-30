@@ -708,7 +708,7 @@ export async function createMedicalPrescription(
 
   const { data: currentPatient, error: currentPatientError } = await supabase
     .from("patients")
-    .select("treatment")
+    .select("treatment, status")
     .eq("id", patient.id)
     .eq("doctor_profile_id", doctor.id)
     .single();
@@ -719,10 +719,17 @@ export async function createMedicalPrescription(
     phase: prescription.phase,
     drops: prescription.drops,
   };
-  const { error: patientError } = await supabase.from("patients").update({
+  const patientUpdate = {
     treatment,
     updated_at: new Date().toISOString(),
-  }).eq("id", patient.id).eq("doctor_profile_id", doctor.id);
+    // Um paciente iniciado pela Enfermagem fica em "laudo" até que um
+    // médico assuma e prescreva um tratamento. Somente nessa transição ele
+    // entra automaticamente no Kanban como "Com pedido"; receitas novas de
+    // pacientes já acompanhados não reposicionam cartões manualmente movidos.
+    ...(currentPatient.status === "laudo" ? { status: "com-pedido" } : {}),
+  };
+  const { error: patientError } = await supabase.from("patients").update(patientUpdate)
+    .eq("id", patient.id).eq("doctor_profile_id", doctor.id);
   if (patientError) throw patientError;
 
   return mapPrescription(data as unknown as PrescriptionRow, doctor);
