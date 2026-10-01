@@ -22,12 +22,12 @@ import {
   completeMedicalPatientTreatment,
   deleteClinicalRecord,
   loadMedicalPatientWorkspace,
-  prepareMedicalPrescriptionSignature,
   updateMedicalPatientBasics,
   updateMedicalPatientTreatmentDuration,
   updateClinicalRecord,
   type MedicalDoctorProfile,
 } from "../../../../lib/supabase/medical-records";
+import { getSupabaseClient } from "../../../../lib/supabase/client";
 import { patchSubstanceCode, patchSubstanceDetails } from "../../../../lib/patch-substances";
 
 type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes" | "laudos" | "dashboard";
@@ -140,6 +140,7 @@ export default function MedicalPatientPage() {
   const [clinicalRecordDraft, setClinicalRecordDraft] = useState("");
   const [editingClinicalRecordId, setEditingClinicalRecordId] = useState<string | null>(null);
   const [recordSaving, setRecordSaving] = useState(false);
+  const [signatureStarting, setSignatureStarting] = useState(false);
   const [editingPatientData, setEditingPatientData] = useState(false);
   const [patientDataDraft, setPatientDataDraft] = useState({ name: "", cpf: "", birthDate: "" });
   const [patientSaving, setPatientSaving] = useState(false);
@@ -349,9 +350,9 @@ export default function MedicalPatientPage() {
     }
   }
 
-  async function prepareDigitalSignature() {
+  async function startVidaasSignature() {
     if (!selectedPrescription || !doctor) {
-      setError("Gere a receita antes de prepará-la para assinatura digital.");
+      setError("Gere a receita antes de iniciar a assinatura digital.");
       return;
     }
 
@@ -361,12 +362,42 @@ export default function MedicalPatientPage() {
     }
 
     try {
-      const prepared = await prepareMedicalPrescriptionSignature(doctor, selectedPrescription);
-      setPrescriptions((current) => current.map((item) => item.id === prepared.id ? prepared : item));
-      setMessage("Receita preparada para assinatura digital. A conexão com o certificado do médico será ativada quando o assinador for configurado.");
+      setSignatureStarting(true);
+      const { data: session } = await getSupabaseClient().auth.getSession();
+      if (!session.session?.access_token) throw new Error("Sua sessão médica expirou. Entre novamente para assinar.");
+      const response = await fetch("/api/assinatura/vidaas/iniciar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.session.access_token}` },
+        body: JSON.stringify({ prescriptionId: selectedPrescription.id }),
+      });
+      const payload = await response.json() as { authorizationUrl?: string; error?: string };
+      if (!response.ok || !payload.authorizationUrl) throw new Error(payload.error ?? "Não foi possível iniciar o VIDaaS.");
+      const signatureWindow = window.open(payload.authorizationUrl, "vidaas-assinatura", "popup,width=620,height=760");
+      if (!signatureWindow) throw new Error("Permita a abertura da janela do VIDaaS para exibir o QR Code.");
+      setMessage("QR Code VIDaaS aberto. O médico deve ler e autorizar a assinatura no aplicativo.");
       setError("");
-    } catch {
-      setError("Não foi possível preparar a receita para assinatura agora.");
+      const interval = window.setInterval(async () => {
+        try {
+          const statusResponse = await fetch(`/api/assinatura/vidaas/status?prescriptionId=${encodeURIComponent(selectedPrescription.id)}`, { headers: { Authorization: `Bearer ${session.session?.access_token}` } });
+          const statusPayload = await statusResponse.json() as { signature?: { status?: string; error_message?: string; certificate_alias?: string } | null };
+          const status = statusPayload.signature?.status;
+          if (status === "signed") {
+            window.clearInterval(interval);
+            setPrescriptions((current) => current.map((item) => item.id === selectedPrescription.id ? { ...item, signatureStatus: "signed" } : item));
+            setMessage(`Receita assinada com certificado ICP-Brasil${statusPayload.signature?.certificate_alias ? ` (${statusPayload.signature.certificate_alias})` : ""}.`);
+            setSignatureStarting(false);
+          }
+          if (["failed", "rejected", "expired"].includes(status ?? "")) {
+            window.clearInterval(interval);
+            setError(statusPayload.signature?.error_message ?? "A assinatura VIDaaS não foi concluída.");
+            setSignatureStarting(false);
+          }
+        } catch { /* a consulta será repetida até o prazo da sessão */ }
+      }, 2500);
+      window.setTimeout(() => { window.clearInterval(interval); setSignatureStarting(false); }, 15 * 60_000);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível iniciar a assinatura VIDaaS.");
+      setSignatureStarting(false);
     }
   }
 
@@ -865,8 +896,8 @@ export default function MedicalPatientPage() {
                 <button type="button" onClick={printPrescription} disabled={preview.formulas.length === 0} className="rounded-xl border border-[#a3113a] px-5 py-3 text-sm font-semibold text-[#a3113a] disabled:cursor-not-allowed disabled:opacity-45">
                   Imprimir receita
                 </button>
-                <button type="button" onClick={prepareDigitalSignature} disabled={!selectedPrescription || selectedPrescription.signatureStatus === "signed"} className="rounded-xl bg-[#263f73] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">
-                  {selectedPrescription?.signatureStatus === "ready" ? "Assinatura preparada" : "Assinar digitalmente"}
+                <button type="button" onClick={startVidaasSignature} disabled={!selectedPrescription || selectedPrescription.signatureStatus === "signed" || signatureStarting} className="rounded-xl bg-[#263f73] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">
+                  {signatureStarting ? "Aguardando VIDaaS…" : selectedPrescription?.signatureStatus === "signed" ? "Assinada digitalmente" : "Assinar com VIDaaS"}
                 </button>
               </div>
             </div>
