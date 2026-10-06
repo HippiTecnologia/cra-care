@@ -144,7 +144,7 @@ export type DemoPrescription = {
   posology: string;
   formulas: PrescriptionFormula[];
   notes: string;
-  signatureStatus: "pending" | "ready" | "signed";
+  signatureStatus: "pending" | "ready" | "signed" | "demo";
   signaturePreparedAt?: string;
   signaturePreparedBy?: string;
 };

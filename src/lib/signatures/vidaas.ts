@@ -173,3 +173,24 @@ export async function buildPrescriptionPdf(prescription: PrescriptionForSignatur
   page.drawText(`CRM ${prescription.doctorCrm}`, { x: 265, y, size: 9, font: regular });
   return document.save();
 }
+
+/**
+ * Gera somente uma prova visual do fluxo de assinatura. Este PDF não recebe
+ * uma assinatura criptográfica e, portanto, não possui validade jurídica.
+ */
+export async function buildDemonstrationPdf(prescription: PrescriptionForSignature) {
+  const bytes = await buildPrescriptionPdf(prescription);
+  const document = await PDFDocument.load(bytes);
+  const page = document.getPages()[0];
+  const font = await document.embedFont(StandardFonts.HelveticaBold);
+  const { width } = page.getSize();
+  page.drawText("ASSINATURA DEMONSTRATIVA — SEM VALIDADE JURÍDICA", {
+    x: 58,
+    y: 32,
+    size: 8,
+    font,
+    color: rgb(0.65, 0.08, 0.18),
+    maxWidth: width - 116,
+  });
+  return document.save();
+}

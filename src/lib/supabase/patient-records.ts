@@ -90,7 +90,7 @@ function prescriptionFromRow(row: Record<string, unknown>): DemoPrescription {
   const formulas = Array.isArray(content.formulas)
     ? content.formulas.filter((item) => item && typeof item === "object") as PrescriptionFormula[]
     : [];
-  const status = ["pending", "ready", "signed"].includes(text(row.signature_status))
+  const status = ["pending", "ready", "signed", "demo"].includes(text(row.signature_status))
     ? text(row.signature_status) as DemoPrescription["signatureStatus"]
     : "pending";
   return {

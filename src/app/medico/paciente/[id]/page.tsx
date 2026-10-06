@@ -141,6 +141,7 @@ export default function MedicalPatientPage() {
   const [editingClinicalRecordId, setEditingClinicalRecordId] = useState<string | null>(null);
   const [recordSaving, setRecordSaving] = useState(false);
   const [signatureStarting, setSignatureStarting] = useState(false);
+  const [signatureProvider, setSignatureProvider] = useState<"vidaas" | "demo">("vidaas");
   const [editingPatientData, setEditingPatientData] = useState(false);
   const [patientDataDraft, setPatientDataDraft] = useState({ name: "", cpf: "", birthDate: "" });
   const [patientSaving, setPatientSaving] = useState(false);
@@ -397,6 +398,32 @@ export default function MedicalPatientPage() {
       window.setTimeout(() => { window.clearInterval(interval); setSignatureStarting(false); }, 15 * 60_000);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível iniciar a assinatura VIDaaS.");
+      setSignatureStarting(false);
+    }
+  }
+
+  async function startDemonstrationSignature() {
+    if (!selectedPrescription || !doctor) {
+      setError("Gere a receita antes de executar a demonstração.");
+      return;
+    }
+    try {
+      setSignatureStarting(true);
+      const { data: session } = await getSupabaseClient().auth.getSession();
+      if (!session.session?.access_token) throw new Error("Sua sessão médica expirou. Entre novamente para continuar.");
+      const response = await fetch("/api/assinatura/demonstracao", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.session.access_token}` },
+        body: JSON.stringify({ prescriptionId: selectedPrescription.id }),
+      });
+      const payload = await response.json() as { message?: string; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Não foi possível concluir a demonstração.");
+      setPrescriptions((current) => current.map((item) => item.id === selectedPrescription.id ? { ...item, signatureStatus: "demo" } : item));
+      setMessage(payload.message ?? "Demonstração concluída.");
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível concluir a demonstração.");
+    } finally {
       setSignatureStarting(false);
     }
   }
@@ -896,10 +923,21 @@ export default function MedicalPatientPage() {
                 <button type="button" onClick={printPrescription} disabled={preview.formulas.length === 0} className="rounded-xl border border-[#a3113a] px-5 py-3 text-sm font-semibold text-[#a3113a] disabled:cursor-not-allowed disabled:opacity-45">
                   Imprimir receita
                 </button>
-                <button type="button" onClick={startVidaasSignature} disabled={!selectedPrescription || selectedPrescription.signatureStatus === "signed" || signatureStarting} className="rounded-xl bg-[#263f73] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">
-                  {signatureStarting ? "Aguardando VIDaaS…" : selectedPrescription?.signatureStatus === "signed" ? "Assinada digitalmente" : "Assinar com VIDaaS"}
+                <label className="flex items-center gap-2 rounded-xl border border-[#d9dfe9] bg-[#f7f9fd] px-3 py-2 text-xs font-semibold text-[#344461]">
+                  Certificado
+                  <select value={signatureProvider} onChange={(event) => setSignatureProvider(event.target.value as "vidaas" | "demo")} className="bg-transparent text-xs font-semibold outline-none">
+                    <option value="vidaas">Nuvem · VIDaaS</option>
+                    <option value="demo">Demonstração CRA Care</option>
+                  </select>
+                </label>
+                <button type="button" onClick={signatureProvider === "demo" ? startDemonstrationSignature : startVidaasSignature} disabled={!selectedPrescription || selectedPrescription.signatureStatus === "signed" || signatureStarting} className="rounded-xl bg-[#263f73] px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">
+                  {signatureStarting
+                    ? signatureProvider === "demo" ? "Gerando demonstração…" : "Aguardando VIDaaS…"
+                    : selectedPrescription?.signatureStatus === "signed" ? "Assinada digitalmente"
+                    : signatureProvider === "demo" ? "Demonstrar assinatura" : "Assinar com VIDaaS"}
                 </button>
               </div>
+              <p className="mt-3 text-xs text-[#817578]">A demonstração gera um PDF visível, identificado como <strong>sem validade jurídica</strong>. A assinatura válida usa o certificado ICP-Brasil do médico.</p>
             </div>
 
             <aside className="self-start rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
@@ -955,8 +993,8 @@ export default function MedicalPatientPage() {
                 <div className="mt-12 text-center text-sm">
                   <p className="font-bold text-[#433438]">{preview.doctor}</p>
                   <p className="mt-1 text-[#776b6e]">CRM PR {preview.doctorCrm}</p>
-                  <div className={`mt-4 rounded-xl px-3 py-2 text-xs font-semibold ${preview.signatureStatus === "signed" ? "bg-[#edf8f3] text-[#187157]" : preview.signatureStatus === "ready" ? "bg-[#eef3ff] text-[#3c5da0]" : "bg-[#fff5e8] text-[#956426]"}`}>
-                    {preview.signatureStatus === "signed" ? "✓ Assinada digitalmente" : preview.signatureStatus === "ready" ? `Pronta para assinatura por ${preview.signaturePreparedBy ?? preview.doctor}` : "Aguardando preparação para assinatura digital"}
+                  <div className={`mt-4 rounded-xl px-3 py-2 text-xs font-semibold ${preview.signatureStatus === "signed" ? "bg-[#edf8f3] text-[#187157]" : preview.signatureStatus === "demo" ? "bg-[#fff4e8] text-[#9a5d1b]" : preview.signatureStatus === "ready" ? "bg-[#eef3ff] text-[#3c5da0]" : "bg-[#fff5e8] text-[#956426]"}`}>
+                    {preview.signatureStatus === "signed" ? "✓ Assinada digitalmente" : preview.signatureStatus === "demo" ? "Demonstração de assinatura — sem validade jurídica" : preview.signatureStatus === "ready" ? `Pronta para assinatura por ${preview.signaturePreparedBy ?? preview.doctor}` : "Aguardando preparação para assinatura digital"}
                   </div>
                   {preview.signatureStatus === "ready" && <p className="mt-3 text-xs text-[#817578]">Preparada em {formatDate(preview.signaturePreparedAt)}. A assinatura real dependerá do certificado do médico.</p>}
                 </div>
@@ -1111,7 +1149,7 @@ export default function MedicalPatientPage() {
                     <div className="flex flex-wrap items-center gap-3">
                       <h3 className="text-sm font-bold text-[#433438]">Receita {String(prescriptions.length - index).padStart(2, "0")}</h3>
                       {index === 0 && <span className="rounded-full bg-[#edf8f3] px-3 py-1 text-xs font-semibold text-[#187157]">Mais recente</span>}
-                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${prescription.signatureStatus === "signed" ? "bg-[#edf8f3] text-[#187157]" : prescription.signatureStatus === "ready" ? "bg-[#eef3ff] text-[#3c5da0]" : "bg-[#fff5e8] text-[#956426]"}`}>{prescription.signatureStatus === "signed" ? "Assinada" : prescription.signatureStatus === "ready" ? "Pronta para assinar" : "Pendente de assinatura"}</span>
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${prescription.signatureStatus === "signed" ? "bg-[#edf8f3] text-[#187157]" : prescription.signatureStatus === "demo" ? "bg-[#fff4e8] text-[#9a5d1b]" : prescription.signatureStatus === "ready" ? "bg-[#eef3ff] text-[#3c5da0]" : "bg-[#fff5e8] text-[#956426]"}`}>{prescription.signatureStatus === "signed" ? "Assinada" : prescription.signatureStatus === "demo" ? "Demonstração" : prescription.signatureStatus === "ready" ? "Pronta para assinar" : "Pendente de assinatura"}</span>
                     </div>
                     <p className="mt-2 text-xs text-[#776b6e]">
                       Emitida em {formatDate(prescription.createdAt)} · {prescription.phase}

@@ -223,7 +223,7 @@ function mapPrescription(
   const formulas = Array.isArray(content.formulas)
     ? content.formulas.filter((item) => item && typeof item === "object") as DemoPrescription["formulas"]
     : [];
-  const status = ["pending", "ready", "signed"].includes(row.signature_status)
+  const status = ["pending", "ready", "signed", "demo"].includes(row.signature_status)
     ? row.signature_status as DemoPrescription["signatureStatus"]
     : "pending";
 
