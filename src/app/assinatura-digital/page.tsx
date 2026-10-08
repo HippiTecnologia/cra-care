@@ -4,7 +4,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { getSupabaseClient } from "../../lib/supabase/client";
 
 type SignatureRow = {
@@ -32,7 +32,7 @@ function formatDate(value?: string) {
   return value ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "—";
 }
 
-export default function DigitalSignaturePage() {
+function DigitalSignatureContent() {
   const params = useSearchParams();
   const prescriptionId = params.get("prescriptionId") ?? "";
   const [rows, setRows] = useState<SignatureRow[]>([]);
@@ -152,4 +152,8 @@ export default function DigitalSignaturePage() {
       </div>
     </section>
   </main>;
+}
+
+export default function DigitalSignaturePage() {
+  return <Suspense fallback={<main className="min-h-screen bg-[#f6f8fc] p-10 text-center text-[#17233b]">Carregando assinaturas…</main>}><DigitalSignatureContent /></Suspense>;
 }
