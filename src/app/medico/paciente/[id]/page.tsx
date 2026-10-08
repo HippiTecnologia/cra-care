@@ -29,6 +29,7 @@ import {
 } from "../../../../lib/supabase/medical-records";
 import { getSupabaseClient } from "../../../../lib/supabase/client";
 import { patchSubstanceCode, patchSubstanceDetails } from "../../../../lib/patch-substances";
+import { clinicContact, sublingualUseInstructions } from "../../../../lib/clinic-info";
 
 type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes" | "laudos" | "dashboard";
 type VaccineType = "rinite" | "imunobacteriana";
@@ -213,7 +214,7 @@ export default function MedicalPatientPage() {
     ? prescriptions.find((item) => item.id === selectedPrescriptionId)
     : undefined;
 
-  const generatedPosology = `Aplicar ${drops} gotas, ${frequency}.`;
+  const generatedPosology = `Aplicar ${drops} gotas, ${frequency}. ${sublingualUseInstructions}`;
   const currentPosology = customPosology && posology.trim()
     ? posology.trim()
     : generatedPosology;
@@ -285,7 +286,7 @@ export default function MedicalPatientPage() {
   function changeVaccineType(type: VaccineType) {
     setVaccineType(type);
     setFormulas(type === "imunobacteriana" ? immunobacterialFormulas.map((formula) => ({ ...formula })) : []);
-    setDurationMonths(type === "imunobacteriana" ? 12 : 36);
+    setDurationMonths(type === "imunobacteriana" ? 6 : 36);
     setDrops(type === "imunobacteriana" ? 4 : 2);
     setFrequency(type === "imunobacteriana" ? "todos os dias" : "3 vezes por semana");
     setCustomPosology(false);
@@ -592,18 +593,19 @@ export default function MedicalPatientPage() {
             table { width: 100%; border-collapse: collapse; }
             th, td { border-bottom: 1px solid #eadfd9; padding: 9px 4px; text-align: left; }
             th:last-child, td:last-child { text-align: right; }
-            .signature { margin: 70px auto 0; width: 320px; border-top: 1px solid #45383c; padding-top: 9px; text-align: center; line-height: 1.6; }
+            .document-card { min-height: 1020px; position: relative; padding-bottom: 185px; }
+            .signature { position: absolute; bottom: 75px; left: 50%; transform: translateX(-50%); width: 320px; border-top: 1px solid #45383c; padding-top: 9px; text-align: center; line-height: 1.6; }
             .footer { margin-top: 36px; color: #817578; font-size: 10px; text-align: center; }
             .document-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-bottom: 16px; }
             .document-actions button { border: 0; border-radius: 10px; padding: 11px 14px; font: 600 13px Arial, sans-serif; cursor: pointer; }
             .print { background: #a3113a; color: white; }
             .close { border: 1px solid #d9c9cc !important; background: white; color: #a3113a; }
-            @media print { body { background: white; } .document-shell { max-width: none; padding: 0; } .document-card { border-radius: 0; padding: 0; box-shadow: none; } .footer { position: fixed; bottom: 0; left: 0; right: 0; } .document-actions { display: none; } }
+            @media print { body { background: white; } .document-shell { max-width: none; padding: 0; } .document-card { min-height: 260mm; border-radius: 0; padding: 0 0 45mm; box-shadow: none; } .footer { position: fixed; bottom: 0; left: 0; right: 0; } .document-actions { display: none; } }
           </style>
         </head>
         <body>
           <main class="document-shell"><div class="document-actions"><button class="print" onclick="window.print()">Imprimir / salvar em PDF</button><button class="close" onclick="window.close()">Fechar e voltar</button></div><article class="document-card">
-          <header><div><h1>Receita médica</h1><p>CRA Care · Centro de Rinite e Alergia</p></div><img src="${window.location.origin}/logo-cra.png" alt="CRA Care" /></header>
+          <header><div><h1>Receita médica</h1><p>CRA Care · Centro de Rinite e Alergia</p><small>${escapeHtml(clinicContact.address)}<br />${escapeHtml(clinicContact.phone)} · ${escapeHtml(clinicContact.email)}</small></div><img src="${window.location.origin}/logo-cra.png" alt="CRA Care" /></header>
           <div class="meta">
             <div><strong>Paciente:</strong> ${escapeHtml(printablePatient.name)}</div>
             <div><strong>CPF:</strong> ${escapeHtml(printablePatient.cpf)}</div>
@@ -613,7 +615,7 @@ export default function MedicalPatientPage() {
           <h2>RECEITA</h2>
           <div class="section"><div class="section-title">${escapeHtml(preview.treatment.toUpperCase())}</div><p><strong>Frascos:</strong> ${escapeHtml(preview.bottles)}</p>${preview.phase ? `<p><strong>Fase:</strong> ${escapeHtml(preview.phase)}</p>` : ""}</div>
           <div class="section"><div class="section-title">Composição</div><table><thead><tr><th>Componente</th><th>%</th></tr></thead><tbody>${formulaRows}</tbody></table></div>
-          <div class="section"><div class="section-title">Posologia</div><p>${escapeHtml(preview.posology)}</p></div>
+          <div class="section"><div class="section-title">Posologia</div><p>${escapeHtml(preview.posology)}</p>${preview.posology.includes(sublingualUseInstructions) ? "" : `<p>${escapeHtml(sublingualUseInstructions)}</p>`}</div>
           ${preview.notes ? `<div class="section"><div class="section-title">Observações</div><p>${escapeHtml(preview.notes)}</p></div>` : ""}
           <div class="signature"><strong>${escapeHtml(preview.doctor)}</strong><br />CRM PR ${escapeHtml(preview.doctorCrm)}<br /><small>${preview.signatureStatus === "signed" ? "Assinada digitalmente" : preview.signatureStatus === "ready" ? "Preparada para assinatura digital" : "Aguardando assinatura digital"}</small></div>
           <p class="footer">Documento gerado pelo CRA Care.</p></article></main>
@@ -644,6 +646,12 @@ export default function MedicalPatientPage() {
       const nurse = escapeHtml(String(report.content.nurseName ?? "Enfermagem"));
       const nurseCoren = escapeHtml(String(report.content.nurseCoren ?? "Não informado"));
       printWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Laudo Prick</title><style>@page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;font-size:9px}.actions{margin-bottom:8px}button{padding:8px 12px;border:0;border-radius:6px;background:#a3113a;color:#fff;font-weight:bold}.brand{display:flex;align-items:center;gap:12px;border-bottom:2px solid #a3113a;padding-bottom:10px}.brand-logo{display:block;width:64px;height:64px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:18px;letter-spacing:.9px}.brand small{display:block;font-size:8px;font-weight:bold;letter-spacing:.8px}.patient{margin:12px 0 16px;font-size:11px;line-height:18px}table{width:100%;border-collapse:collapse;table-layout:fixed}th{background:#aeb5be;border:1px solid #8e959d;padding:5px 2px;text-align:center;font-size:8px}td{border-bottom:1px solid #e3e5e8;padding:5px 3px;text-align:center;word-break:break-word;font-size:8.5px;line-height:1.2}td:nth-child(2){text-align:left}.category td{background:#d3d6da;text-align:left;font-weight:700;padding:5px 8px}.battery{margin-top:11px;border:1px solid #bac0c7;border-radius:3px;overflow:hidden}.battery h2{font-size:11px;margin:0;padding:5px 9px;background:#d3d6da;border-top:2px solid #687380}.legend{margin-top:17px;font-size:9px;line-height:14px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:36px;margin-top:54px;text-align:center;font-size:9px}.line{border-top:1px solid #111;padding-top:5px;margin:auto;width:205px}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>${autoPrint ? '<div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div>' : ""}<header class="brand"><img class="brand-logo" src="${window.location.origin}/logo-cra.png" alt="CRA Care"/><div><strong>CRA CARE</strong><small>CENTRO DE RINITE E ALERGIA</small></div></header><div class="patient">Paciente: <strong>${escapeHtml(patient.name)}</strong><br/>Data: <strong>${escapeHtml(formatDate(report.createdAt))}</strong></div>${batteries}<div class="legend"><strong>Legenda:</strong><br/>- = Sem reação<br/>+ = Reação fraca<br/>++ = Reação moderada<br/>+++ = Reação forte<br/>++++ = Reação muito forte<br/>XXXX = Teste inválido por dermatografismo/impossibilidade técnica.</div><div class="signatures"><div><div class="line">${nurse}<br/>Enfermagem · COREN ${nurseCoren}</div></div><div><div class="line">Equipe médica responsável<br/>CRA Care</div></div></div>${autoPrint ? "<script>window.onload=()=>window.print()<\\/script>" : ""}</body></html>`);
+      if (!autoPrint) {
+        const screenStyle = printWindow.document.createElement("style");
+        screenStyle.textContent = "body{width:190mm;min-height:277mm;margin:18px auto;padding:10mm;background:#fff;box-shadow:0 4px 28px #0008}.reaction{font-size:13px;font-weight:700;letter-spacing:2px}@media print{body{width:auto;min-height:0;margin:0;padding:0;box-shadow:none}}";
+        printWindow.document.head.append(screenStyle);
+        printWindow.document.documentElement.style.background = "#333";
+      }
       printWindow.document.close(); printWindow.focus(); return;
     }
     const patchRows = Object.entries(reportResults).map(([name, result]) => {
@@ -668,13 +676,19 @@ export default function MedicalPatientPage() {
     const title = report.reportType === "prick_test" ? "Laudo Prick Test" : "Laudo Patch Test";
     const notes = typeof report.content.notes === "string" ? report.content.notes : "";
     printWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${title}</title><style>@page{size:A4 portrait;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#34292d;font-size:10px;line-height:1.45}header{display:flex;align-items:center;gap:12px;border-bottom:3px solid #a3113a;padding-bottom:12px;margin-bottom:16px}header img{width:54px;height:54px;object-fit:contain}header small{display:block;color:#66595d;font-size:8px;font-weight:bold;letter-spacing:.7px}h1{margin:0;color:#8f1539;font-size:20px}table{width:100%;border-collapse:collapse;margin-top:16px;table-layout:fixed}th,td{padding:6px 5px;border:1px solid #ddd;text-align:left;word-break:break-word}th{background:#d3d6da;font-size:9px}.actions{margin-bottom:14px}button{padding:10px 14px;border:0;border-radius:8px;background:#a3113a;color:#fff;font-weight:bold}.detail{border-top:1px solid #d7d0cc;margin-top:14px;padding-top:10px;break-inside:avoid}.detail h2{font-size:13px;color:#8f1539;margin:0 0 6px}.detail p{line-height:1.45;margin:5px 0}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>${autoPrint ? '<div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div>' : ""}<header><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><small>CRA CARE · CENTRO DE RINITE E ALERGIA</small><h1>${title}</h1></div></header><p><strong>Paciente:</strong> ${escapeHtml(patient.name)}<br><strong>CPF:</strong> ${escapeHtml(patient.cpf)}<br><strong>Data:</strong> ${escapeHtml(formatDate(report.createdAt))}</p><table><thead><tr><th>Substância</th><th>1ª leitura · 48h</th><th>2ª leitura · 48h</th><th>Resultado</th></tr></thead><tbody>${patchRows || "<tr><td colspan=\"4\">Sem resultados detalhados.</td></tr>"}</tbody></table>${positiveDetails ? `<section><h1 style="font-size:15px;margin-top:20px">Substâncias com reação positiva</h1>${positiveDetails}</section>` : ""}${notes ? `<p><strong>Observações:</strong> ${escapeHtml(notes)}</p>` : ""}</body></html>`);
+    if (!autoPrint) {
+      const screenStyle = printWindow.document.createElement("style");
+      screenStyle.textContent = "body{width:186mm;min-height:273mm;margin:18px auto;padding:12mm;background:#fff;box-shadow:0 4px 28px #0008}td{padding:10px 8px;font-size:11px}.detail{margin:12px 0;padding:12px;border:1px solid #e2d8d5;border-radius:8px;background:#fffafa}@media print{body{width:auto;min-height:0;margin:0;padding:0;box-shadow:none}}";
+      printWindow.document.head.append(screenStyle);
+      printWindow.document.documentElement.style.background = "#333";
+    }
     printWindow.document.close();
     printWindow.focus();
   }
 
   return (
     <main className="min-h-screen bg-[#f8f5f2] px-4 py-6 text-[#34292d] sm:px-7 lg:px-10 lg:pl-72">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-gradient-to-b from-[#b31340] to-[#790b2a] p-7 text-white lg:flex"><Image src="/logo-cra-branca.png" alt="CRA Care" width={160} height={100} priority/><p className="mt-4 text-sm text-white/70">Painel do Médico</p><nav className="mt-8 space-y-2"><Link href="/medico" className="block rounded-xl p-3 hover:bg-white/15">Pacientes</Link><button type="button" onClick={() => setActiveTab("dashboard")} className="w-full rounded-xl p-3 text-left hover:bg-white/15">Dashboard</button><button type="button" onClick={() => setActiveTab("laudos")} className="w-full rounded-xl p-3 text-left hover:bg-white/15">Laudos</button><Link href="/sair" className="mt-4 block rounded-xl p-3 hover:bg-white/15">Sair</Link></nav></aside>
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-gradient-to-b from-[#b31340] to-[#790b2a] p-7 text-white lg:flex"><Image src="/logo-cra-branca.png" alt="CRA Care" width={160} height={100} priority/><p className="mt-4 text-sm text-white/70">Painel do Médico</p><nav className="mt-8 space-y-2"><Link href="/medico" className="block rounded-xl p-3 hover:bg-white/15">Pacientes</Link><button type="button" onClick={() => setActiveTab("dashboard")} className="w-full rounded-xl p-3 text-left hover:bg-white/15">Dashboard</button><button type="button" onClick={() => setActiveTab("laudos")} className="w-full rounded-xl p-3 text-left hover:bg-white/15">Exames</button><Link href="/sair" className="mt-4 block rounded-xl p-3 hover:bg-white/15">Sair</Link></nav></aside>
       <div className="mx-auto max-w-[1550px]">
         <header className="flex flex-col gap-5 rounded-3xl border border-[#eee4df] bg-white px-6 py-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
@@ -750,7 +764,7 @@ export default function MedicalPatientPage() {
             { id: "resumo", label: "Resumo clínico" },
             { id: "prontuario", label: "Prontuário" },
             { id: "historico", label: "Histórico de receitas" },
-            { id: "laudos", label: "Laudos" },
+            { id: "laudos", label: "Exames" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -1128,8 +1142,8 @@ export default function MedicalPatientPage() {
 
         {activeTab === "laudos" && (
           <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
-            <h2 className="text-2xl font-bold text-[#433438]">Laudos da enfermagem</h2>
-            <p className="mt-2 text-sm text-[#817578]">Resultados preenchidos pela enfermagem e vinculados a esta paciente.</p>
+            <h2 className="text-2xl font-bold text-[#433438]">Exames</h2>
+            <p className="mt-2 text-sm text-[#817578]">Resultados dos exames vinculados a este paciente.</p>
             <div className="mt-6 space-y-4">{nursingReports.length === 0 ? <p className="rounded-2xl border border-dashed border-[#e6dbd6] p-6 text-center text-sm text-[#817578]">Nenhum laudo registrado.</p> : nursingReports.map((report) => <article key={report.id} className="rounded-2xl border border-[#e6dbd6] bg-[#fdfbf9] p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-bold">{report.reportType === "prick_test" ? "Prick Test" : "Patch Test"}</h3><span className="mt-1 block text-xs text-[#817578]">{formatDate(report.createdAt)}</span></div><div className="flex flex-wrap gap-2"><button type="button" onClick={() => printNursingReport(report, false)} className="rounded-xl border border-[#e6dbd6] bg-white px-4 py-2 text-xs font-semibold text-[#a3113a]">Visualizar</button><button type="button" onClick={() => printNursingReport(report)} className="rounded-xl bg-[#a3113a] px-4 py-2 text-xs font-semibold text-white">Imprimir / gerar PDF</button></div></div>{typeof report.content.notes === "string" && report.content.notes && <p className="mt-4 text-sm"><strong>Observações:</strong> {report.content.notes}</p>}</article>)}</div>
           </section>
         )}

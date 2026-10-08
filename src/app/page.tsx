@@ -6,28 +6,10 @@ import { FormEvent, useEffect, useState } from "react";
 import { authEmailForPatientCpf, authEmailForUsername, requiresPasswordChange, type AccountRole } from "../lib/auth/credentials";
 import { getSupabaseClient } from "../lib/supabase/client";
 
-type UserRole = "Paciente" | "Médico" | "Secretaria" | "Laboratório" | "Enfermagem" | "Administrador";
-
-const roles: UserRole[] = [
-  "Paciente",
-  "Médico",
-  "Secretaria",
-  "Laboratório",
-  "Enfermagem",
-  "Administrador",
-];
-
-const profileRoleForLogin: Record<Exclude<UserRole, "Paciente">, string[]> = {
-  "Médico": ["medico"],
-  "Secretaria": ["secretaria"],
-  "Laboratório": ["laboratorio"],
-  "Enfermagem": ["enfermagem"],
-  "Administrador": ["admin"],
-};
+const isPatientIdentifier = (value: string) => /^\d{11}$/.test(value.replace(/\D/g, ""));
 
 export default function Home() {
   const router = useRouter();
-  const [selectedRole, setSelectedRole] = useState<UserRole>("Paciente");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -68,21 +50,22 @@ export default function Home() {
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!identifier.trim() || !password.trim()) {
-      setMessage(selectedRole === "Paciente" ? "Informe CPF e senha para continuar." : "Informe usuário e senha para continuar.");
+      setMessage("Informe CPF ou usuário e senha para continuar.");
       return;
     }
     setLoading(true);
     setMessage("");
     try {
       const supabase = getSupabaseClient();
+      const patientAccess = isPatientIdentifier(identifier);
       let { data, error } = await supabase.auth.signInWithPassword({
-        email: selectedRole === "Paciente" ? authEmailForPatientCpf(identifier) : authEmailForUsername(identifier),
+        email: patientAccess ? authEmailForPatientCpf(identifier) : authEmailForUsername(identifier),
         password,
       });
 
       // Pacientes criados antes da troca para CPF ainda usam o endereço interno
       // baseado no nome. A tela permanece em CPF e faz essa compatibilidade automaticamente.
-      if ((error || !data.user) && selectedRole === "Paciente") {
+      if ((error || !data.user) && patientAccess) {
         const legacyResponse = await fetch("/api/patient-login", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -98,7 +81,7 @@ export default function Home() {
       }
 
       if (error || !data.user) {
-        if (selectedRole === "Paciente") {
+        if (patientAccess) {
           const response = await fetch("/api/login-security", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -129,12 +112,6 @@ export default function Home() {
           setMessage("Este acesso é exclusivo do Hippi ADM.");
           return;
         }
-        const allowedRoles = selectedRole === "Paciente" ? [] : profileRoleForLogin[selectedRole];
-        if (!allowedRoles.includes(profile.role)) {
-          await supabase.auth.signOut();
-          setMessage(`Este usuário pertence ao perfil ${profile.role === "admin" || profile.role === "super_admin" ? "Administrador" : profile.role === "secretaria" ? "Secretaria" : profile.role === "laboratorio" ? "Laboratório" : profile.role === "enfermagem" ? "Enfermagem" : "Médico"}. Selecione a aba correta para entrar.`);
-          return;
-        }
         if (profile.must_change_password && requiresPasswordChange(profile.role as AccountRole)) {
           router.push("/alterar-senha");
           return;
@@ -156,13 +133,6 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }
-
-  function selectRole(role: UserRole) {
-    setSelectedRole(role);
-    setIdentifier("");
-    setPassword("");
-    setMessage("");
   }
 
   return (
@@ -244,29 +214,8 @@ export default function Home() {
               </h2>
 
               <p className="mt-3 text-sm leading-6 text-[#766b6e] sm:text-base">
-                Selecione seu perfil e informe seus dados para entrar.
+                Informe seus dados para entrar. O CRA Care identifica seu acesso automaticamente.
               </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#f8f2ef] p-2 sm:grid-cols-3">
-              {roles.map((role) => {
-                const active = selectedRole === role;
-
-                return (
-                  <button
-                    key={role}
-                    type="button"
-                    onClick={() => selectRole(role)}
-                    className={`rounded-xl px-3 py-3 text-sm font-semibold transition ${
-                      active
-                        ? "bg-white text-[#a3113a] shadow-sm"
-                        : "text-[#766b6e] hover:bg-white/60"
-                    }`}
-                  >
-                    {role}
-                  </button>
-                );
-              })}
             </div>
 
             <form onSubmit={handleLogin} className="mt-8 space-y-5">
@@ -275,7 +224,7 @@ export default function Home() {
                   htmlFor="identifier"
                   className="mb-2 block text-sm font-semibold text-[#45373b]"
                 >
-                  {selectedRole === "Paciente" ? "CPF" : "Usuário"}
+                  CPF ou usuário
                 </label>
 
                 <input
@@ -283,8 +232,8 @@ export default function Home() {
                   type="text"
                   value={identifier}
                   onChange={(event) => setIdentifier(event.target.value)}
-                  placeholder={selectedRole === "Paciente" ? "Digite seu CPF" : "Digite seu usuário de acesso"}
-                  autoComplete={selectedRole === "Paciente" ? "off" : "username"}
+                  placeholder="Digite seu CPF ou usuário de acesso"
+                  autoComplete="username"
                   className="h-14 w-full rounded-2xl border border-[#e9ded9] bg-white px-4 text-sm outline-none transition placeholder:text-[#aaa0a2] focus:border-[#b91142] focus:ring-4 focus:ring-[#b91142]/10"
                 />
               </div>

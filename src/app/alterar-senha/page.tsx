@@ -34,7 +34,7 @@ export default function ChangePasswordPage() {
         router.replace("/");
         return;
       }
-      const destination = profile.role === "admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : "/medico";
+      const destination = profile.role === "admin" ? "/adm" : profile.role === "secretaria" ? "/secretaria" : profile.role === "laboratorio" ? "/laboratorio" : profile.role === "enfermagem" ? "/enfermagem" : "/medico";
       if (profile.role === "admin") window.sessionStorage.setItem("cra-care-demo-admin-session", JSON.stringify({ signedInAt: new Date().toISOString() }));
       router.replace(destination);
     } catch {

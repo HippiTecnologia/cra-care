@@ -30,3 +30,25 @@ html, body { max-width: 100%; overflow-x: hidden; }
 button, input, select, textarea { font-size: 16px; }
 @media (min-width: 640px) { button, input, select, textarea { font-size: inherit; } }
 img, svg { max-width: 100%; }
+
+/* Mantém a tipografia dos menus laterais uniforme em todas as áreas. */
+aside nav a,
+aside nav button {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+/* Leituras do Patch: sinais maiores, centralizados e cada substância bem separada. */
+[data-exams-area] select.rounded-lg {
+  text-align: center;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+[data-exams-area] section.rounded-xl > div.border-t {
+  margin: 0.5rem;
+  border: 1px solid #e5dcd8;
+  border-radius: 0.75rem;
+  background: #fffafa;
+  padding: 0.875rem;
+}

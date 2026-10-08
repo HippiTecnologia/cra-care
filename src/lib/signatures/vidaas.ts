@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "crypto";
 import { readFile } from "fs/promises";
 import path from "path";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { clinicContact, sublingualUseInstructions } from "../clinic-info";
 
 export type VidaasConfig = {
   baseUrl: string;
@@ -160,6 +161,8 @@ export async function buildPrescriptionPdf(prescription: PrescriptionForSignatur
 
   page.drawText("Receita médica", { x: left, y: 790, size: 14, font: bold, color: ink });
   page.drawText("CRA Care · Centro de Rinite e Alergia", { x: left, y: 774, size: 8.5, font: regular, color: burgundy });
+  page.drawText(`${clinicContact.address} · ${clinicContact.phone}`, { x: left, y: 760, size: 7.5, font: regular, color: muted, maxWidth: contentWidth - 70 });
+  page.drawText(clinicContact.email, { x: left, y: 750, size: 7.5, font: regular, color: muted, maxWidth: contentWidth - 70 });
   page.drawLine({ start: { x: left, y: 748 }, end: { x: right, y: 748 }, thickness: 2.2, color: burgundy });
 
   const inlineField = (x: number, y: number, heading: string, value: string, maxWidth = 210) => {
@@ -202,7 +205,8 @@ export async function buildPrescriptionPdf(prescription: PrescriptionForSignatur
   }
   y -= 23;
   section("Posologia");
-  for (const value of wrap(prescription.posology || "Conforme orientação médica.", 88)) {
+  const completePosology = `${prescription.posology || "Conforme orientação médica."}${prescription.posology?.includes(sublingualUseInstructions) ? "" : ` ${sublingualUseInstructions}`}`;
+  for (const value of wrap(completePosology, 88)) {
     page.drawText(value, { x: left, y, size: 10, font: regular, color: ink, maxWidth: contentWidth });
     y -= 15;
   }
@@ -215,7 +219,7 @@ export async function buildPrescriptionPdf(prescription: PrescriptionForSignatur
     }
   }
 
-  const signatureY = Math.max(210, Math.min(y - 38, 350));
+  const signatureY = Math.max(155, Math.min(y - 38, 205));
   page.drawLine({ start: { x: 185, y: signatureY }, end: { x: 410, y: signatureY }, thickness: 0.8, color: ink });
   const doctorWidth = bold.widthOfTextAtSize(prescription.doctor, 10);
   page.drawText(prescription.doctor, { x: (pageWidth - doctorWidth) / 2, y: signatureY - 15, size: 10, font: bold, color: ink });

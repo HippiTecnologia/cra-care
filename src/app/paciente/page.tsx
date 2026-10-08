@@ -23,6 +23,7 @@ import {
 import { loadPatientWorkspace, savePatientPortalState } from "../../lib/supabase/patient-records";
 import { getSupabaseClient } from "../../lib/supabase/client";
 import { currentRelease } from "../../lib/release-notes";
+import { clinicContact, sublingualUseInstructions } from "../../lib/clinic-info";
 
 type PatientSection = "inicio" | "frasco" | "alertas" | "calendario" | "receitas" | "notas" | "notas-fiscais" | "termo";
 type TreatmentTrack = "rinite" | "imunobacteriana";
@@ -800,7 +801,8 @@ export default function PatientPortalPage() {
       { heading: "Dados do paciente", text: `Paciente: ${patient.name}\nCPF: ${patient.cpf}\nData de nascimento: ${formatDate(patient.birthDate)}` },
       { heading: "Prescrição médica", text: `Médico responsável: ${prescription.doctor} · CRM ${prescription.doctorCrm}\nEmitida em: ${formatDate(prescription.createdAt)}\nTratamento: ${prescription.treatment}\nFase: ${prescription.phase}\nQuantidade: ${prescription.bottles} frasco(s)` },
       { heading: "Fórmula e composição", text: formulas },
-      { heading: "Posologia", text: `${prescription.posology}\nFrequência: ${prescription.frequency}` },
+      { heading: "Clínica", text: `CRA Care · Centro de Rinite e Alergia\nEndereço: ${clinicContact.address}\nTelefone: ${clinicContact.phone}\nE-mail: ${clinicContact.email}` },
+      { heading: "Posologia", text: `${prescription.posology}\n${prescription.posology.includes(sublingualUseInstructions) ? "" : `${sublingualUseInstructions}\n`}Frequência: ${prescription.frequency}` },
       ...(prescription.notes.trim() ? [{ heading: "Observações médicas", text: prescription.notes }] : []),
     ];
 

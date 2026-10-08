@@ -60,7 +60,7 @@ const prickGroups = [
 ];
 const patchBatteries = [
   { name: "Bateria Padrão 1", items: ["P-01 · Antraquinona · 2,0%", "P-02 · Bálsamo do Peru · 25,0%", "P-03 · PPD Mix · 0,4%", "P-04 · Hidroquinona · 1,0%", "P-05 · Bicromato de Potássio · 0,5%", "P-06 · Propilenoglicol · 10,0%", "P-07 · Butilfenol-para-terciário · 1,0%", "P-08 · Neomicina, Sulfato · 20,0%", "P-09 · Irgasan · 1,0%", "P-10 · Kathon CG · 0,5%"] },
-  { name: "Bateria Padrão 2", items: ["P-11 · Cloreto de Cobalto · 1,0%", "P-12 · Lanolina · 30,0%", "P-13 · Tiuram Mix · 1,0%", "P-14 · Etilenodiamina · 1,0%", "P-15 · Perfume Mix · 7,0%", "P-16 · Mercapto Mix · 2,0%", "P-17 · Benzocaína · 5,0%", "P-18 · Quartenium 15 · 6,0%", "P-19 · Quinolina Mix · 6,0%", "P-20 · Nitrofurazona · 1,0%"] },
+  { name: "Bateria Padrão 2", items: ["P-11 · Cloreto de Cobalto · 1,0%", "P-12 · Lanolina · 30,0%", "P-13 · Tiuram Mix · 1,0%", "P-14 · Etilenodiamina · 1,0%", "P-15 · Perfume Mix · 7,0%", "P-16 · Mercapto Mix · 2,0%", "P-17 · Benzocaína · 5,0%", "P-18 · Metacrilato de 2-hidroxietila (2-HEMA)", "P-19 · Quinolina Mix · 6,0%", "P-20 · Nitrofurazona · 1,0%"] },
   { name: "Bateria Padrão 3", items: ["P-21 · Paraben Mix · 15,0%", "P-22 · Resina Epóxi · 1,0%", "P-23 · Timerosal · 0,1%", "P-24 · Terebentina · 10,0%", "P-25 · Carba Mix · 3,0%", "P-26 · Prometazina · 1,0%", "P-27 · Sulfato de Níquel · 5,0%", "P-28 · Colofônia · 20,0%", "P-29 · Parafenilenodiamina · 1,0%", "P-30 · Formaldeído · 1,0%"] },
   { name: "Bateria Cosméticos 1", items: ["C-01 · Germall 115 · 2,0%", "C-02 · BHT · 2,0%", "C-03 · Resina Tosilamida/Formaldeído · 10,0%", "C-04 · Trietanolamina · 2,5%", "C-05 · Bronopol · 0,5%", "C-06 · Cloracetamida · 0,2%", "C-07 · Ácido Sórbico · 2,0%", "C-08 · Tioglicolato de Amônio · 2,5%", "C-09 · Amerchol L 101 · 100,0%", "C-10 · Clorexidina · 0,5%", "C-11 · Dietanolamida de Ácido Graxo de Coco · 0,5%"] },
 ];
@@ -120,7 +120,7 @@ export default function NursingPage() {
   }
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { void reload().catch(() => setMessage("Não foi possível carregar a área de Enfermagem.")); }, []);
+  useEffect(() => { void reload().catch(() => setMessage("Não foi possível carregar a área de Exames.")); }, []);
 
   const reportCount = useMemo(() => reports.length, [reports]);
   const filteredReports = useMemo(() => {
@@ -159,7 +159,7 @@ export default function NursingPage() {
     if (!patient) return setMessage("Paciente não encontrada.");
     setPatients((current) => current.some((item) => item.id === patient.id) ? current : [patient, ...current]);
     await openPatient(patient, "patients");
-    setMessage("Cadastro e histórico de laudos carregados.");
+    setMessage("Cadastro e histórico de exames carregados.");
   }
 
   async function savePatient(event: FormEvent<HTMLFormElement>) {
@@ -175,9 +175,22 @@ export default function NursingPage() {
 
   function updatePrick(item: string, change: Partial<PrickResult>) {
     setPrickResults((current) => {
-      const next = { ...(current[item] ?? emptyPrick()), ...change };
-      next.reaction = reactionForMm(next.mm);
-      return { ...current, [item]: next };
+      const updated = { ...current, [item]: { ...(current[item] ?? emptyPrick()), ...change } };
+      const negativeMm = item === "Controle Negativo"
+        ? Number(updated[item].mm || 0)
+        : Number(updated["Controle Negativo"]?.mm || 0);
+      const dermatographismActive = negativeMm > 0;
+
+      return Object.fromEntries(prickGroups.flatMap((group) => group.items).map((name) => {
+        const result = { ...(updated[name] ?? emptyPrick()), dermatographism: dermatographismActive };
+        const isControl = name === "Controle Positivo" || name === "Controle Negativo";
+        if (!isControl && negativeMm > 0 && result.mm > 0 && result.mm <= negativeMm) {
+          result.mm = 0;
+          result.pseudopod = false;
+        }
+        result.reaction = result.pseudopod ? "++++" : reactionForMm(result.mm);
+        return [name, result];
+      }));
     });
   }
 
@@ -257,7 +270,8 @@ export default function NursingPage() {
         const number = prickGroups.slice(0, prickGroups.indexOf(group)).reduce((total, current) => total + current.items.length, 0) + itemIndex + 1;
         const result = savedResults[item] ?? {};
         const mm = Number(result.mm ?? 0);
-        return `<tr><td class="number">${number}</td><td>${escapeHtml(item)}</td><td>${mm} mm</td><td>${result.pseudopod ? "sim" : "não"}</td><td>${reactionForMm(mm) === "-" ? "Sem Reação" : reactionForMm(mm)}</td><td>${result.dermatographism ? "sim" : "não"}</td></tr>`;
+        const reaction = result.pseudopod ? "++++" : result.reaction ?? reactionForMm(mm);
+        return `<tr><td class="number">${number}</td><td>${escapeHtml(item)}</td><td>${mm} mm</td><td>${result.pseudopod ? "sim" : "não"}</td><td class="reaction">${reaction === "-" ? "Sem Reação" : reaction}</td><td>${result.dermatographism ? "sim" : "não"}</td></tr>`;
       }).join("");
       return `<tr class="category"><td colspan="6">${escapeHtml(group.category)}</td></tr>${items}`;
     });
@@ -272,7 +286,7 @@ export default function NursingPage() {
     if (!printable) { setMessage("Permita a abertura de janelas para gerar o PDF."); return; }
     printable.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"/><title>Laudo Prick - ${escapeHtml(patientName)}</title><style>@page{size:A4 portrait;margin:10mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#202020;margin:0;font-size:9px}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:7px}.brand img{height:38px;width:38px;border-radius:7px}.brand strong{font-size:16px;letter-spacing:.8px;color:#8e1535}.brand small{display:block;font-size:7px;font-weight:700;letter-spacing:.7px}.patient{margin:8px 0 10px;font-size:9px;line-height:14px}table{width:100%;border-collapse:collapse;table-layout:fixed}th{background:#aeb5be;border:1px solid #8e959d;padding:3px 2px;text-align:center;font-size:8px}td{border-bottom:1px solid #e3e5e8;padding:2px 3px;text-align:center;font-size:8px;line-height:10px;vertical-align:middle}td:nth-child(2){text-align:left}.number{width:5%}th:nth-child(2){width:32%}th:nth-child(n+3){width:15.75%}.category td{background:#d3d6da;text-align:left;font-weight:700;padding:3px 6px}.battery{margin-top:7px;border:1px solid #bac0c7;border-radius:3px;overflow:hidden}.battery h2{font-size:9px;margin:0;padding:4px 7px;background:#d3d6da;border-top:2px solid #687380}.legend{margin-top:10px;font-size:8px;line-height:12px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:72px;text-align:center;font-size:8px}.line{border-top:1px solid #111;padding-top:3px;margin:auto;width:170px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><header class="brand"><img src="${window.location.origin}/cra-care-icon-512.png" alt="CRA Care"/><div><strong>CRA CARE</strong><small>CENTRO DE RINITE E ALERGIA</small></div></header><div class="patient">Paciente: <strong>${escapeHtml(patientName)}</strong><br/>Data: <strong>${formattedDate}</strong></div>${batteries}<div class="legend"><strong>Legenda:</strong><br/>- = Sem reação<br/>+ = Reação fraca<br/>++ = Reação moderada<br/>+++ = Reação forte<br/>++++ = Reação muito forte<br/>XXXX = Teste inválido por dermatografismo/impossibilidade técnica.</div><div class="signatures"><div><div class="line">${nurse}<br/>Enfermagem · COREN ${nurseCoren}</div></div><div><div class="line">${responsible}<br/>CRM ${responsibleCrm}</div></div></div>${openPrintDialog ? "<script>window.onload=()=>window.print()<\\/script>" : ""}</body></html>`);
     const readableStyle = printable.document.createElement("style");
-    readableStyle.textContent = "body{font-size:10px}.patient{font-size:10px;line-height:15px}th{font-size:8.5px;padding:4px 3px}td{font-size:8.7px;line-height:11px;padding:3px 4px}.battery h2{font-size:10px;padding:5px 8px}.legend{font-size:9px;line-height:13px}.signatures{font-size:9px;margin-top:26px}";
+    readableStyle.textContent = "body{font-size:10px;background:#3a3a3a;padding:18px}.patient{font-size:10px;line-height:15px}th{font-size:8.5px;padding:4px 3px}td{font-size:8.7px;line-height:11px;padding:3px 4px}.reaction{font-size:12px;font-weight:700;text-align:center;letter-spacing:2px}.battery h2{font-size:10px;padding:5px 8px}.legend{font-size:9px;line-height:13px}.signatures{font-size:9px;margin-top:26px}@media screen{body:before{content:'';position:fixed;z-index:-1;inset:18px calc((100vw - 210mm)/2);background:white;box-shadow:0 4px 24px #1118}body{width:190mm;min-height:277mm;margin:0 auto}}@media print{body{background:white;padding:0;width:auto;min-height:0}}";
     printable.document.head.append(readableStyle);
     printable.document.close();
   }
@@ -292,14 +306,14 @@ export default function NursingPage() {
     if (!printable) { setMessage("Permita a abertura de janelas para gerar o PDF."); return; }
     printable.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"/><title>Laudo Patch - ${escapeHtml(patientName)}</title><style>@page{size:A4 portrait;margin:11mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#1e1b1c;margin:0;font-size:10px}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:9px}.brand img{height:36px;width:36px;border-radius:7px}.brand strong{font-size:17px;letter-spacing:1px;color:#8e1535}.brand small{display:block;font-size:7px;font-weight:700;letter-spacing:1px}.patient{margin:10px 0 12px;line-height:16px}.battery{margin-top:8px;border:1px solid #bac0c7;border-radius:3px;overflow:hidden}.battery h2,.details h2{margin:0;padding:5px 9px;background:#d3d6da;border-top:2px solid #687380;font-size:10px}table{width:100%;border-collapse:collapse;table-layout:fixed}th{background:#aeb5be;border:1px solid #8e959d;padding:4px;text-align:left;font-size:8px}td{border-bottom:1px solid #e3e5e8;padding:3px 4px;font-size:8px}th:nth-child(n+2),td:nth-child(n+2){text-align:center;width:18%}.details{margin-top:14px}.details article{border-bottom:1px solid #ddd;padding:7px 2px}.details h3{margin:0 0 4px;font-size:10px;color:#8e1535}.details p{margin:0;font-size:9px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><header class="brand"><img src="${window.location.origin}/cra-care-icon-512.png" alt="CRA Care"/><div><strong>CRA CARE</strong><small>CENTRO DE RINITE E ALERGIA</small></div></header><div class="patient">Paciente: <strong>${escapeHtml(patientName)}</strong><br/>Data: <strong>${formattedDate}</strong><br/>Responsabilidade médica: <strong>${responsible} · CRM ${responsibleCrm}</strong><br/>Enfermagem: <strong>${escapeHtml(String(report.content.nurseName ?? "Enfermagem"))} · COREN ${escapeHtml(String(report.content.nurseCoren ?? profile?.coren ?? "Não informado"))}</strong></div>${rows}${detailed}${typeof report.content.notes === "string" && report.content.notes ? `<section class="details"><h2>Observações</h2><article>${escapeHtml(report.content.notes)}</article></section>` : ""}${openPrintDialog ? "<script>window.onload=()=>window.print()<\\/script>" : ""}</body></html>`);
     const readableStyle = printable.document.createElement("style");
-    readableStyle.textContent = "body{font-size:10.5px}.patient{font-size:10.5px;line-height:17px}th{font-size:9px;padding:4px}td{font-size:9px;line-height:12px;padding:4px 5px}.battery h2,.details h2{font-size:10.5px;padding:6px 9px}.details h3{font-size:10.5px}.details p{font-size:9.5px;line-height:13px}.details article{padding:8px 3px}";
+    readableStyle.textContent = "body{font-size:10.5px;background:#3a3a3a;padding:18px}.patient{font-size:10.5px;line-height:17px}th{font-size:9px;padding:6px}td{font-size:11px;line-height:14px;padding:8px 7px}.battery h2,.details h2{font-size:10.5px;padding:7px 9px}.details h3{font-size:11px}.details p{font-size:9.5px;line-height:13px}.details article{margin:8px 0;padding:10px;border:1px solid #e2d8d5;border-radius:8px;background:#fffafa;break-inside:avoid}@media screen{body:before{content:'';position:fixed;z-index:-1;inset:18px calc((100vw - 210mm)/2);background:white;box-shadow:0 4px 24px #1118}body{width:188mm;min-height:275mm;margin:0 auto}}@media print{body{background:white;padding:0;width:auto;min-height:0}}";
     printable.document.head.append(readableStyle);
     printable.document.close();
   }
 
-  return <main className="min-h-screen bg-[#f8f5f2] text-[#34292d]"><div className="min-h-screen lg:grid lg:grid-cols-[270px_1fr]">
-    <aside className="bg-gradient-to-b from-[#b31340] to-[#790b2a] p-7 text-white"><Image src="/logo-cra-branca.png" alt="CRA" width={160} height={100} priority/><p className="mt-4 text-sm text-white/70">Painel de Enfermagem</p><nav className="mt-8 space-y-2"><button onClick={() => setSection("patients")} className={`w-full rounded-xl p-3 text-left ${section === "patients" ? "bg-white/20 font-bold" : ""}`}>Pacientes</button><button onClick={() => setSection("reports")} className={`w-full rounded-xl p-3 text-left ${section === "reports" ? "bg-white/20 font-bold" : ""}`}>Laudos</button><button onClick={() => setSection("in-progress")} className={`w-full rounded-xl p-3 text-left ${section === "in-progress" ? "bg-white/20 font-bold" : ""}`}>Laudos em andamento{inProgressReports.length ? ` (${inProgressReports.length})` : ""}</button><Link href="/sair" className="block rounded-xl p-3">Sair</Link></nav></aside>
-    <section className="p-6 lg:p-10"><header className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-[#a3113a]">Área clínica</p><h1 className="mt-2 text-3xl font-bold">{section === "patients" ? "Pacientes" : section === "in-progress" ? "Laudos em andamento" : "Laudos"}</h1></div>{canEditReports && section !== "in-progress" && <button onClick={() => section === "patients" ? setModal("patient") : openReport()} className="rounded-xl bg-[#a3113a] px-5 py-3 font-bold text-white">{section === "patients" ? "+ Cadastrar paciente" : "+ Novo laudo"}</button>}</header>
+  return <main data-exams-area className="min-h-screen bg-[#f8f5f2] text-[#34292d]"><div className="min-h-screen lg:grid lg:grid-cols-[270px_1fr]">
+    <aside className="bg-gradient-to-b from-[#b31340] to-[#790b2a] p-7 text-white"><Image src="/logo-cra-branca.png" alt="CRA" width={160} height={100} priority/><p className="mt-4 text-sm text-white/70">Painel de Exames</p><nav className="mt-8 space-y-2"><button onClick={() => setSection("patients")} className={`w-full rounded-xl p-3 text-left ${section === "patients" ? "bg-white/20 font-bold" : ""}`}>Pacientes</button><button onClick={() => setSection("reports")} className={`w-full rounded-xl p-3 text-left ${section === "reports" ? "bg-white/20 font-bold" : ""}`}>Exames</button><button onClick={() => setSection("in-progress")} className={`w-full rounded-xl p-3 text-left ${section === "in-progress" ? "bg-white/20 font-bold" : ""}`}>Exames em andamento{inProgressReports.length ? ` (${inProgressReports.length})` : ""}</button><Link href="/sair" className="block rounded-xl p-3">Sair</Link></nav></aside>
+    <section className="p-6 lg:p-10"><header className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-[#a3113a]">Área clínica</p><h1 className="mt-2 text-3xl font-bold">{section === "patients" ? "Pacientes" : section === "in-progress" ? "Exames em andamento" : "Exames"}</h1></div>{canEditReports && section !== "in-progress" && <button onClick={() => section === "patients" ? setModal("patient") : openReport()} className="rounded-xl bg-[#a3113a] px-5 py-3 font-bold text-white">{section === "patients" ? "+ Cadastrar paciente" : "+ Novo exame"}</button>}</header>
       {message && <p className="mt-5 rounded-xl bg-[#edf8f3] p-4 text-sm">{message}</p>}
       {section === "patients" && <p className="mt-4 text-sm text-[#817578]">Você pode localizar a paciente pelo nome ou pelo CPF.</p>}
       {section === "reports" && <div className="mt-6 rounded-2xl bg-white p-4"><input value={reportSearchQuery} onChange={(event) => setReportSearchQuery(event.target.value)} placeholder="Pesquisar laudo pelo nome ou CPF do paciente" className="w-full rounded-xl border p-3" /></div>}
@@ -323,12 +337,12 @@ function MemoGroup({ group, showBattery, values, update }: { group: { battery: s
     <tr><td colSpan={5} className="bg-[#aeb5bd] px-4 py-1 text-xs font-semibold text-[#26303a]">{group.category}</td></tr>
     {group.items.map((item, itemIndex) => {
       const value = values[item] ?? emptyPrick();
-      const reaction = reactionForMm(value.mm);
+      const reaction = value.pseudopod ? "++++" : value.reaction ?? reactionForMm(value.mm);
       return <tr key={item} className="border-b border-[#d9dde0] bg-white text-xs text-[#2f3840]">
         <td className="w-[48%] px-3 py-2"><div className="grid grid-cols-[36px_1fr] items-center gap-3"><span className="text-center font-medium">{firstNumber + itemIndex}</span><span className="text-center">{item}</span></div></td>
-        <td className="w-[20%] px-3 py-2"><div className="flex items-center justify-center gap-4"><button aria-label={`Aumentar medida de ${item}`} type="button" onClick={() => update(item, { mm: value.mm + 1 })} className="font-bold text-[#159568]">⊕</button><span className="min-w-12 text-center font-medium">{value.mm} mm</span><button aria-label={`Diminuir medida de ${item}`} type="button" onClick={() => update(item, { mm: Math.max(0, value.mm - 1) })} className="font-bold text-[#4d5965]">⊖</button><button aria-label={`Zerar medida de ${item}`} type="button" onClick={() => update(item, { mm: 0 })} className="font-bold text-[#c52743]">⊗</button></div></td>
+        <td className="w-[20%] px-3 py-2"><div className="flex items-center justify-center gap-2"><button aria-label={`Aumentar medida de ${item}`} type="button" onClick={() => update(item, { mm: value.mm + 1 })} className="grid h-9 w-9 place-items-center rounded-lg text-xl font-bold leading-none text-[#159568]">⊕</button><span className="min-w-12 text-center font-medium">{value.mm} mm</span><button aria-label={`Diminuir medida de ${item}`} type="button" onClick={() => update(item, { mm: Math.max(0, value.mm - 1) })} className="grid h-9 w-9 place-items-center rounded-lg text-xl font-bold leading-none text-[#4d5965]">⊖</button><button aria-label={`Zerar medida de ${item}`} type="button" onClick={() => update(item, { mm: 0 })} className="grid h-9 w-9 place-items-center rounded-lg text-xl font-bold leading-none text-[#c52743]">⊗</button></div></td>
         <td className="w-[18%] px-3 py-2"><label className="flex items-center gap-1.5"><input type="checkbox" checked={value.pseudopod} onChange={(event) => update(item, { pseudopod: event.target.checked })}/><span>Pseudópode</span></label><label className="mt-1 flex items-center gap-1.5"><input type="checkbox" checked={value.dermatographism} onChange={(event) => update(item, { dermatographism: event.target.checked })}/><span>Dermatografismo</span></label></td>
-        <td colSpan={2} className={`w-[14%] px-3 py-2 text-right font-medium ${reaction === "-" ? "text-[#4e5961]" : "text-[#a3113a]"}`}>{reaction === "-" ? "Sem Reação" : reaction}</td>
+        <td colSpan={2} className={`w-[14%] px-3 py-2 text-center text-lg font-bold tracking-[.18em] ${reaction === "-" ? "text-[#4e5961]" : "text-[#a3113a]"}`}>{reaction === "-" ? "Sem Reação" : reaction}</td>
       </tr>;
     })}
   </>;
