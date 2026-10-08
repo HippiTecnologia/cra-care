@@ -1,4 +1,6 @@
 import { createHash, randomBytes } from "crypto";
+import { readFile } from "fs/promises";
+import path from "path";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 export type VidaasConfig = {
@@ -139,38 +141,87 @@ export async function buildPrescriptionPdf(prescription: PrescriptionForSignatur
   const page = document.addPage([595.28, 841.89]);
   const regular = await document.embedFont(StandardFonts.Helvetica);
   const bold = await document.embedFont(StandardFonts.HelveticaBold);
-  const burgundy = rgb(0.51, 0.06, 0.20);
-  let y = 794;
-  const line = (text: string, size = 10, font = regular, color = rgb(0.15, 0.12, 0.13)) => {
-    page.drawText(text, { x: 48, y, size, font, color }); y -= size + 7;
-  };
-  line("CRA CARE", 20, bold, burgundy);
-  line("CENTRO DE RINITE E ALERGIA", 8, bold, burgundy);
-  y -= 14;
-  line("RECEITA MÉDICA", 14, bold);
-  line(`Emissão: ${formatDate(prescription.createdAt)}`, 10);
-  line(`Paciente: ${prescription.patientName}`, 10, bold);
-  line(`CPF: ${formatCpf(prescription.patientCpf)}`, 10);
-  y -= 8;
-  line(`Tratamento: ${prescription.treatment}`, 11, bold, burgundy);
-  if (prescription.phase) line(`Fase: ${prescription.phase}`);
-  line(`Frascos: ${prescription.bottles} · ${prescription.drops} gotas · ${prescription.frequency}`);
-  y -= 8;
-  line("Composição", 11, bold);
-  for (const formula of prescription.formulas) line(`${formula.name} — ${formula.percentage}%`);
-  y -= 8;
-  line("Posologia", 11, bold);
-  for (const value of wrap(prescription.posology || "Conforme orientação médica.")) line(value);
-  if (prescription.notes) {
-    y -= 8; line("Observações", 11, bold);
-    for (const value of wrap(prescription.notes)) line(value);
+  const burgundy = rgb(0.64, 0.07, 0.23);
+  const ink = rgb(0.20, 0.16, 0.18);
+  const muted = rgb(0.40, 0.35, 0.37);
+  const border = rgb(0.92, 0.87, 0.85);
+  const pageWidth = page.getWidth();
+  const left = 48;
+  const right = pageWidth - 48;
+  const contentWidth = right - left;
+
+  try {
+    const logoBytes = await readFile(path.join(process.cwd(), "public", "logo-cra.png"));
+    const logo = await document.embedPng(logoBytes);
+    page.drawImage(logo, { x: right - 68, y: 735, width: 68, height: 68 });
+  } catch {
+    // O conteúdo clínico continua disponível caso o logo não esteja presente no ambiente de execução.
   }
-  y = Math.min(y - 54, 150);
-  page.drawLine({ start: { x: 160, y }, end: { x: 435, y }, thickness: 0.8, color: rgb(0.25, 0.22, 0.23) });
-  y -= 16;
-  page.drawText(prescription.doctor, { x: 210, y, size: 10, font: bold });
-  y -= 14;
-  page.drawText(`CRM ${prescription.doctorCrm}`, { x: 265, y, size: 9, font: regular });
+
+  page.drawText("Receita médica", { x: left, y: 790, size: 22, font: bold, color: ink });
+  page.drawText("CRA Care · Centro de Rinite e Alergia", { x: left, y: 770, size: 10, font: regular, color: burgundy });
+  page.drawLine({ start: { x: left, y: 748 }, end: { x: right, y: 748 }, thickness: 2.2, color: burgundy });
+
+  const label = (x: number, y: number, heading: string, value: string) => {
+    page.drawText(heading, { x, y, size: 8.2, font: bold, color: muted });
+    page.drawText(value, { x, y: y - 13, size: 10.2, font: regular, color: ink, maxWidth: 210 });
+  };
+  label(left, 724, "PACIENTE", prescription.patientName);
+  label(320, 724, "CPF", formatCpf(prescription.patientCpf));
+  label(left, 684, "ATENDIMENTO", formatDate(prescription.createdAt));
+  label(320, 684, "MÉDICO", `${prescription.doctor}${prescription.doctorCrm ? ` · CRM ${prescription.doctorCrm}` : ""}`);
+
+  page.drawRectangle({ x: left, y: 602, width: contentWidth, height: 53, color: rgb(0.99, 0.96, 0.97), borderColor: border, borderWidth: 0.6 });
+  page.drawText(prescription.treatment.toUpperCase(), { x: left + 14, y: 635, size: 11, font: bold, color: burgundy });
+  const treatmentDetails = [`Frascos: ${prescription.bottles}`, prescription.phase ? `Fase: ${prescription.phase}` : "", `${prescription.drops} gotas`, prescription.frequency].filter(Boolean).join("  ·  ");
+  page.drawText(treatmentDetails, { x: left + 14, y: 616, size: 9.2, font: regular, color: ink, maxWidth: contentWidth - 28 });
+
+  let y = 574;
+  const section = (title: string) => {
+    page.drawText(title, { x: left, y, size: 12, font: bold, color: burgundy });
+    y -= 12;
+    page.drawLine({ start: { x: left, y }, end: { x: right, y }, thickness: 0.6, color: border });
+    y -= 17;
+  };
+  section("Composição");
+  page.drawRectangle({ x: left, y: y - 20, width: contentWidth, height: 20, color: rgb(0.96, 0.90, 0.91) });
+  page.drawText("COMPONENTE", { x: left + 10, y: y - 13, size: 8, font: bold, color: muted });
+  page.drawText("%", { x: right - 26, y: y - 13, size: 8, font: bold, color: muted });
+  y -= 20;
+  const formulas = prescription.formulas.length ? prescription.formulas : [{ name: "Composição não informada", percentage: 0 }];
+  for (const formula of formulas) {
+    const rowHeight = 22;
+    page.drawLine({ start: { x: left, y: y - rowHeight }, end: { x: right, y: y - rowHeight }, thickness: 0.45, color: border });
+    page.drawText(formula.name, { x: left + 10, y: y - 14, size: 9.3, font: regular, color: ink, maxWidth: contentWidth - 70 });
+    page.drawText(`${formula.percentage}%`, { x: right - 30, y: y - 14, size: 9.3, font: bold, color: burgundy });
+    y -= rowHeight;
+  }
+  y -= 23;
+  section("Posologia");
+  for (const value of wrap(prescription.posology || "Conforme orientação médica.", 88)) {
+    page.drawText(value, { x: left, y, size: 10, font: regular, color: ink, maxWidth: contentWidth });
+    y -= 15;
+  }
+  if (prescription.notes) {
+    y -= 10;
+    section("Observações");
+    for (const value of wrap(prescription.notes, 88)) {
+      page.drawText(value, { x: left, y, size: 10, font: regular, color: ink, maxWidth: contentWidth });
+      y -= 15;
+    }
+  }
+
+  const signatureY = Math.max(130, Math.min(y - 38, 230));
+  page.drawLine({ start: { x: 185, y: signatureY }, end: { x: 410, y: signatureY }, thickness: 0.8, color: ink });
+  const doctorWidth = bold.widthOfTextAtSize(prescription.doctor, 10);
+  page.drawText(prescription.doctor, { x: (pageWidth - doctorWidth) / 2, y: signatureY - 15, size: 10, font: bold, color: ink });
+  const crm = prescription.doctorCrm ? `CRM PR ${prescription.doctorCrm}` : "Responsável técnico";
+  const crmWidth = regular.widthOfTextAtSize(crm, 9);
+  page.drawText(crm, { x: (pageWidth - crmWidth) / 2, y: signatureY - 28, size: 9, font: regular, color: muted });
+  const state = "Documento preparado para assinatura digital";
+  const stateWidth = regular.widthOfTextAtSize(state, 8);
+  page.drawText(state, { x: (pageWidth - stateWidth) / 2, y: signatureY - 41, size: 8, font: regular, color: muted });
+  page.drawText("Documento gerado pelo CRA Care.", { x: left, y: 91, size: 8, font: regular, color: muted });
   return document.save();
 }
 
