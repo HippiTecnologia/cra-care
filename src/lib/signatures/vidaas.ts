@@ -153,30 +153,34 @@ export async function buildPrescriptionPdf(prescription: PrescriptionForSignatur
   try {
     const logoBytes = await readFile(path.join(process.cwd(), "public", "logo-cra.png"));
     const logo = await document.embedPng(logoBytes);
-    page.drawImage(logo, { x: right - 68, y: 735, width: 68, height: 68 });
+    page.drawImage(logo, { x: right - 55, y: 760, width: 55, height: 55 });
   } catch {
     // O conteúdo clínico continua disponível caso o logo não esteja presente no ambiente de execução.
   }
 
-  page.drawText("Receita médica", { x: left, y: 790, size: 22, font: bold, color: ink });
-  page.drawText("CRA Care · Centro de Rinite e Alergia", { x: left, y: 770, size: 10, font: regular, color: burgundy });
+  page.drawText("Receita médica", { x: left, y: 790, size: 14, font: bold, color: ink });
+  page.drawText("CRA Care · Centro de Rinite e Alergia", { x: left, y: 774, size: 8.5, font: regular, color: burgundy });
   page.drawLine({ start: { x: left, y: 748 }, end: { x: right, y: 748 }, thickness: 2.2, color: burgundy });
 
-  const label = (x: number, y: number, heading: string, value: string) => {
-    page.drawText(heading, { x, y, size: 8.2, font: bold, color: muted });
-    page.drawText(value, { x, y: y - 13, size: 10.2, font: regular, color: ink, maxWidth: 210 });
+  const inlineField = (x: number, y: number, heading: string, value: string, maxWidth = 210) => {
+    const prefix = `${heading}: `;
+    page.drawText(prefix, { x, y, size: 8.3, font: bold, color: ink });
+    page.drawText(value, { x: x + bold.widthOfTextAtSize(prefix, 8.3), y, size: 8.3, font: regular, color: ink, maxWidth });
   };
-  label(left, 724, "PACIENTE", prescription.patientName);
-  label(320, 724, "CPF", formatCpf(prescription.patientCpf));
-  label(left, 684, "ATENDIMENTO", formatDate(prescription.createdAt));
-  label(320, 684, "MÉDICO", `${prescription.doctor}${prescription.doctorCrm ? ` · CRM ${prescription.doctorCrm}` : ""}`);
+  inlineField(left, 723, "Paciente", prescription.patientName);
+  inlineField(319, 723, "CPF", formatCpf(prescription.patientCpf), 120);
+  inlineField(left, 705, "Atendimento", formatDate(prescription.createdAt));
+  inlineField(319, 705, "Médico", prescription.doctor, 205);
+  page.drawLine({ start: { x: left, y: 682 }, end: { x: right, y: 682 }, thickness: 0.6, color: ink });
+  page.drawLine({ start: { x: left, y: 657 }, end: { x: right, y: 657 }, thickness: 0.6, color: ink });
+  const recipeTitle = "R E C E I T A";
+  page.drawText(recipeTitle, { x: (pageWidth - bold.widthOfTextAtSize(recipeTitle, 9)) / 2, y: 665, size: 9, font: bold, color: ink });
 
-  page.drawRectangle({ x: left, y: 602, width: contentWidth, height: 53, color: rgb(0.99, 0.96, 0.97), borderColor: border, borderWidth: 0.6 });
-  page.drawText(prescription.treatment.toUpperCase(), { x: left + 14, y: 635, size: 11, font: bold, color: burgundy });
-  const treatmentDetails = [`Frascos: ${prescription.bottles}`, prescription.phase ? `Fase: ${prescription.phase}` : "", `${prescription.drops} gotas`, prescription.frequency].filter(Boolean).join("  ·  ");
-  page.drawText(treatmentDetails, { x: left + 14, y: 616, size: 9.2, font: regular, color: ink, maxWidth: contentWidth - 28 });
+  page.drawText(prescription.treatment.toUpperCase(), { x: left, y: 628, size: 9.5, font: bold, color: burgundy });
+  page.drawText(`Frascos: ${prescription.bottles}`, { x: left, y: 610, size: 8.6, font: bold, color: ink });
+  if (prescription.phase) page.drawText(`Fase: ${prescription.phase}`, { x: left, y: 593, size: 8.6, font: bold, color: ink });
 
-  let y = 574;
+  let y = prescription.phase ? 562 : 578;
   const section = (title: string) => {
     page.drawText(title, { x: left, y, size: 12, font: bold, color: burgundy });
     y -= 12;
@@ -211,7 +215,7 @@ export async function buildPrescriptionPdf(prescription: PrescriptionForSignatur
     }
   }
 
-  const signatureY = Math.max(130, Math.min(y - 38, 230));
+  const signatureY = Math.max(210, Math.min(y - 38, 350));
   page.drawLine({ start: { x: 185, y: signatureY }, end: { x: 410, y: signatureY }, thickness: 0.8, color: ink });
   const doctorWidth = bold.widthOfTextAtSize(prescription.doctor, 10);
   page.drawText(prescription.doctor, { x: (pageWidth - doctorWidth) / 2, y: signatureY - 15, size: 10, font: bold, color: ink });
