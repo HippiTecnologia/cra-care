@@ -936,6 +936,7 @@ export default function MedicalPatientPage() {
                     : selectedPrescription?.signatureStatus === "signed" ? "Assinada digitalmente"
                     : signatureProvider === "demo" ? "Demonstrar assinatura" : "Assinar com VIDaaS"}
                 </button>
+                {selectedPrescription && <Link href={`/assinatura-digital?prescriptionId=${encodeURIComponent(selectedPrescription.id)}`} className="rounded-xl border border-[#263f73] px-5 py-3 text-center text-sm font-semibold text-[#263f73]">Abrir Central de Assinaturas</Link>}
               </div>
               <p className="mt-3 text-xs text-[#817578]">A demonstração gera um PDF visível, identificado como <strong>sem validade jurídica</strong>. A assinatura válida usa o certificado ICP-Brasil do médico.</p>
             </div>

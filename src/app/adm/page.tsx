@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -562,6 +563,7 @@ export default function AdminPage() {
           <Image src="/logo-cra-branca.png" alt="CRA" width={150} height={100} className="h-auto w-32" priority />
           <div className="mt-5 border-b border-white/15 pb-5"><p className="text-sm font-bold">Painel Administrativo</p><p className="mt-1 text-xs text-white/60">Gestão financeira e estratégica</p></div>
           <nav className="mt-6 space-y-1">{sections.map((item) => <button key={item.id} type="button" onClick={() => chooseSection(item.id)} className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm transition ${section === item.id ? "bg-white/16 font-bold text-white" : "text-white/75 hover:bg-white/10"}`}><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10 text-xs font-bold">{item.icon}</span>{item.label}</button>)}</nav>
+          <Link href="/assinatura-digital" className="mt-2 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm text-white/75 hover:bg-white/10"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10 text-xs font-bold">✓</span>Assinatura Digital</Link>
           <div className="mt-8 rounded-2xl border border-white/15 bg-white/8 p-4"><p className="text-xs font-bold">Acesso protegido</p><p className="mt-2 text-[11px] leading-5 text-white/65">Preços, custos e honorários são exclusivos do ADM e possuem histórico.</p></div>
           <button type="button" onClick={() => void signOut()} className="mt-6 block w-full rounded-xl px-3 py-3 text-left text-sm font-semibold text-white/80 hover:bg-white/10">← Sair do painel</button>
         </aside>

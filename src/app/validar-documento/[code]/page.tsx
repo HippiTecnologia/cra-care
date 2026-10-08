@@ -1,0 +1,17 @@
+"use client";
+
+import Image from "next/image";
+import { useParams } from "next/navigation";
+import { useEffect, useState } from "react";
+
+type Validation = { valid: boolean; status: string; document?: string; patient?: string; signer?: { name: string; crm?: string }; provider?: string; certificateType?: string; signatureId?: string; signedAt?: string; validatedAt?: string; fingerprint?: string };
+
+function formatDate(value?: string) { return value ? new Intl.DateTimeFormat("pt-BR", { dateStyle: "long", timeStyle: "short" }).format(new Date(value)) : "—"; }
+
+export default function ValidateDocumentPage() {
+  const { code } = useParams<{ code: string }>();
+  const [result, setResult] = useState<Validation | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => { void fetch(`/api/signatures/verify?code=${encodeURIComponent(code)}`).then(async (response) => { const payload = await response.json(); if (!response.ok) throw new Error(payload.error); setResult(payload); }).catch((cause) => setError(cause instanceof Error ? cause.message : "Não foi possível validar o documento.")); }, [code]);
+  return <main className="flex min-h-screen items-center justify-center bg-[#07152f] p-5 text-[#17233b]"><section className="w-full max-w-2xl rounded-[32px] bg-white p-7 shadow-2xl sm:p-10"><Image src="/logo-cra.png" alt="CRA Care" width={130} height={90} className="h-auto w-28"/><p className="mt-6 text-xs font-bold uppercase tracking-[0.2em] text-blue-700">Validação pública</p><h1 className="mt-2 text-3xl font-bold">Validar documento</h1>{error && <div className="mt-6 rounded-2xl bg-red-50 p-5 text-red-700">{error}</div>}{!result && !error && <p className="mt-8 text-slate-500">Consultando autenticidade…</p>}{result && <><div className={`mt-7 rounded-2xl border p-5 ${result.valid ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}><p className="text-xl font-bold">{result.valid ? "✓ Documento e assinatura válidos" : "Documento sem assinatura válida"}</p><p className="mt-1 text-sm">Status registrado: {result.status}</p></div><dl className="mt-7 grid gap-5 sm:grid-cols-2"><div><dt className="text-xs uppercase text-slate-500">Documento</dt><dd className="mt-1 font-semibold">{result.document ?? "—"}</dd></div><div><dt className="text-xs uppercase text-slate-500">Paciente</dt><dd className="mt-1 font-semibold">{result.patient ?? "—"}</dd></div><div><dt className="text-xs uppercase text-slate-500">Signatário</dt><dd className="mt-1 font-semibold">{result.signer?.name ?? "—"}{result.signer?.crm ? ` · CRM ${result.signer.crm}` : ""}</dd></div><div><dt className="text-xs uppercase text-slate-500">Provedor / certificado</dt><dd className="mt-1 font-semibold">{result.provider?.toUpperCase() ?? "—"} · {result.certificateType?.toUpperCase() ?? "—"}</dd></div><div><dt className="text-xs uppercase text-slate-500">Assinado em</dt><dd className="mt-1 font-semibold">{formatDate(result.signedAt)}</dd></div><div><dt className="text-xs uppercase text-slate-500">Validado em</dt><dd className="mt-1 font-semibold">{formatDate(result.validatedAt)}</dd></div></dl><div className="mt-7 rounded-2xl bg-slate-50 p-4"><p className="text-xs uppercase text-slate-500">Identificador</p><p className="mt-1 break-all font-mono text-xs">{result.signatureId ?? "—"}</p><p className="mt-4 text-xs uppercase text-slate-500">Impressão digital SHA-256</p><p className="mt-1 break-all font-mono text-xs">{result.fingerprint ?? "—"}</p></div></>}</section></main>;
+}

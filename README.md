@@ -1,5 +1,7 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+O módulo de assinatura digital está documentado em [`docs/assinaturas-digitais.md`](docs/assinaturas-digitais.md). Execute as migrations do Supabase em ordem antes de habilitar os providers.
+
 ## Getting Started
 
 First, run the development server:

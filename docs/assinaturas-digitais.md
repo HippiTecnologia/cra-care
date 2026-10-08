@@ -1,30 +1,74 @@
-# Assinaturas digitais no CRA Care
+# Módulo de Assinatura Digital do CRA Care
 
-O CRA Care separa a experiência de uso do mecanismo que guarda o certificado. O certificado e a senha nunca podem ser salvos no sistema.
+## Instalação
 
-## Situação atual
+1. Execute as migrations `026`, `027` e `028` no SQL Editor do Supabase, nessa ordem.
+2. Crie no Vercel as variáveis listadas em `.env.example`.
+3. No painel administrativo, abra **Assinatura Digital → Configurações** e registre somente URLs públicas e nomes das variáveis de ambiente.
+4. Nunca cole PIN, senha, PFX, chave privada ou Client Secret na interface.
 
-- **Nuvem / VIDaaS:** fluxo real preparado para o Dr. Sérgio. O médico clica em `Assinar com VIDaaS`, lê o QR Code no app e autoriza a assinatura. A API registra o PDF assinado em PAdES.
-- **Demonstração CRA Care:** gera um PDF marcado visivelmente como `ASSINATURA DEMONSTRATIVA — SEM VALIDADE JURÍDICA`. Serve apenas para apresentar o fluxo sem certificado.
+## Fluxo
 
-## Modelos que serão suportados
+`Documento → solicitação → autenticação → assinatura no provedor → validação → armazenamento privado → auditoria → consulta pública por QR Code`.
 
-| Modelo | Como o médico autoriza | O que é necessário |
+O médico acessa **Assinatura Digital**, abre o documento e autoriza. A secretária solicita e acompanha. O administrador consulta auditoria e configura os provedores. Todos os acessos são segregados por clínica.
+
+## Provedores
+
+| Provider | Estado | Observação |
 | --- | --- | --- |
-| Certificado em nuvem | QR Code, push ou app do provedor | Credenciais da API do provedor (VIDaaS, Soluti Bird ID, etc.) |
-| A1 | Assinatura pelo conector local, sem enviar o PFX ao CRA Care | Aplicativo/conector homologado instalado no computador do médico |
-| A3 | Token ou cartão conectado ao computador, via conector local | Driver do token/cartão e conector homologado no computador do médico |
+| VIDaaS | Adaptador real existente | Requer credenciais e callback cadastrados pela Valid. |
+| Soluti Bird ID | Interface preparada | A API completa exige credenciamento e documentação oficial da Soluti. Enquanto isso, aparece como `Integração pendente de configuração`. |
+| A1 | Interface preparada | Requer SDK/conector homologado; o CRA Care não recebe o PFX nem a senha. |
+| A3 | Interface preparada | Requer driver do token/cartão e conector oficial; o CRA Care não recebe o PIN. |
+| Cloud genérico | Interface preparada | Requer API oficial do provedor escolhido. |
 
-## Regra de segurança
+Não foram inventados endpoints para Soluti, A1 ou A3. Ativar uma variável sem o conector correspondente não produz assinatura e nenhum mock é marcado como válido.
 
-Um navegador ou servidor não deve receber a senha do token, o arquivo PFX, PIN ou chave privada do médico. Para A1 e A3, o conector local conversa com o certificado no computador do médico; para nuvem, o provedor recebe a autorização diretamente do médico.
+## Banco e armazenamento
 
-## Próximos cadastros necessários
+- `digital_signatures`: estado e evidências da assinatura.
+- `signature_audit_logs`: trilha imutável de eventos funcionais.
+- `signature_webhook_events`: deduplicação idempotente dos webhooks.
+- `signature_provider_configs`: apenas configuração não sensível e nomes das variáveis de ambiente.
+- `signature_document_rules`: quais documentos exigem assinatura.
+- Bucket privado `digital-signatures`: PDF original preparado e PDF final assinado.
 
-Para cada médico, registrar apenas:
+## Segurança
 
-1. O tipo: `nuvem`, `A1` ou `A3`.
-2. O provedor (por exemplo, VIDaaS ou Soluti).
-3. O CRM e a identificação pública retornada pelo provedor, quando houver.
-4. A credencial da integração no Vercel, fornecida pelo provedor — nunca a credencial pessoal do médico.
+- APIs autenticadas usam token de sessão e verificam clínica/perfil no servidor.
+- O documento é conferido por SHA-256 antes de iniciar a assinatura.
+- Webhooks exigem HMAC e o mesmo evento não é processado duas vezes.
+- O webhook nunca marca um documento como assinado sozinho: ainda é necessário consultar/confirmar o provedor e validar o PDF.
+- Tokens, PKCE e segredos permanecem no servidor.
+- O QR Code aponta para `/validar-documento/{codigo}` e nunca expõe CPF ou dados clínicos.
+- O rate limit implementado é local ao processo. Em produção com múltiplas instâncias, configure também rate limiting no gateway/edge.
+
+## Estados
+
+`draft`, `awaiting_signature`, `authentication_pending`, `signing`, `signed`, `rejected`, `cancelled`, `expired`, `error` e `invalid`.
+
+Somente `signed`, com `validation_result.valid = true` e `validated_at` preenchido, aparece como documento válido na consulta pública.
+
+## Endpoints
+
+- `GET/POST /api/signatures`
+- `GET/DELETE /api/signatures/{id}`
+- `POST /api/signatures/{id}/start`
+- `GET /api/signatures/{id}/download`
+- `GET /api/signatures/verify?code=...`
+- `GET/PUT/POST /api/signatures/config`
+- `POST /api/signatures/webhook/{provider}`
+
+## Soluti
+
+O portal público da Soluti confirma o Bird ID e o Hub de Integrações, mas o contrato da API de assinatura, autenticação, consulta, webhook e sandbox precisa ser fornecido pela Soluti ao integrador. Para finalizar o provider, solicite:
+
+1. credenciais de sandbox e produção;
+2. documentação OpenAPI/SDK oficial atual;
+3. fluxo OAuth/OTP ou autorização móvel;
+4. formato de assinatura PAdES;
+5. endpoint oficial de consulta/validação;
+6. esquema e assinatura dos webhooks;
+7. URLs de callback permitidas.
 

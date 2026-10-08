@@ -220,6 +220,7 @@ export default function MedicoPage() {
             <button type="button" onClick={() => setSection("evolucao")} className={`w-full rounded-2xl px-4 py-3 text-left text-sm ${section === "evolucao" ? "bg-white/15 font-semibold" : "text-white/80 hover:bg-white/10"}`}>
               Evolução
             </button>
+            <Link href="/assinatura-digital" className="block rounded-2xl px-4 py-3 text-sm text-white/80 hover:bg-white/10">Assinatura Digital</Link>
             {nursingAreaAllowed && <Link href="/enfermagem" className="block rounded-2xl px-4 py-3 text-sm text-white/80 hover:bg-white/10">Área de Enfermagem</Link>}
             <Link
               href="/sair"
