@@ -40,6 +40,34 @@ function escapeHtml(value: string) {
   })[character] ?? character);
 }
 
+function formatContractMoney(value?: number) {
+  return typeof value === "number" && value > 0
+    ? value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+    : "Não informado";
+}
+
+function financialContractText(patient: DemoPatientRecord) {
+  if (patient.treatmentPayments?.length) {
+    return patient.treatmentPayments.map((payment) => {
+      const installments = Math.max(1, payment.installments ?? 1);
+      const installmentValue = payment.installmentValue
+        ?? (typeof payment.contractValue === "number" ? payment.contractValue / installments : undefined);
+      const paymentDetails = installments > 1
+        ? `${payment.paymentMethod ?? "Forma não informada"} · ${installments}x de ${formatContractMoney(installmentValue)}${payment.dueDate ? ` · primeira cobrança em ${formatDate(payment.dueDate)}` : ""}`
+        : `${payment.paymentMethod ?? "Forma não informada"}${payment.dueDate ? ` · cobrança em ${formatDate(payment.dueDate)}` : ""}`;
+      return `Tratamento: ${payment.treatment}\nValor total contratado: ${formatContractMoney(payment.contractValue)}.\nMétodo de aquisição: ${payment.acquisitionMethod ?? "Não informado"}.\nForma de pagamento: ${paymentDetails}.\nCondição escolhida: ${payment.agreedCondition ?? "Não informada"}.`;
+    }).join("\n\n");
+  }
+
+  const installments = Math.max(1, patient.paymentInstallments ?? 1);
+  const installmentValue = patient.installmentValue
+    ?? (typeof patient.contractValue === "number" ? patient.contractValue / installments : undefined);
+  const paymentDetails = installments > 1
+    ? `${patient.paymentMethod ?? "Forma não informada"} · ${installments}x de ${formatContractMoney(installmentValue)}${patient.paymentDueDate ? ` · primeira cobrança em ${formatDate(patient.paymentDueDate)}` : ""}`
+    : patient.paymentMethod ?? "Forma não informada";
+  return `Tratamento: ${patient.treatment ?? "Imunoterapia Alérgeno Específica (IAE)"}.\nValor total contratado: ${formatContractMoney(patient.contractValue)}.\nMétodo de aquisição: ${patient.acquisitionMethod ?? "Não informado"}.\nForma de pagamento: ${paymentDetails}.\nCondição escolhida: ${patient.agreedCondition ?? "Não informada"}.`;
+}
+
 function contractSections(patient: DemoPatientRecord, portal: PatientPortalState): ContractSection[] {
   return [
     {
@@ -60,7 +88,7 @@ function contractSections(patient: DemoPatientRecord, portal: PatientPortalState
     },
     {
       heading: "Valores, pagamento e cancelamento",
-      text: `Tratamento Imunoterápico (Alérgeno Específico) — orientação e planejamento técnico.\nValor registrado: ${patient.contractValue ? patient.contractValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "Não informado"}.\nMétodo de aquisição: ${patient.acquisitionMethod || "Não informado"}.\nForma de pagamento: ${patient.paymentMethod || "Não informada"}${patient.paymentInstallments ? ` em ${patient.paymentInstallments} parcela(s)` : ""}.\nO paciente poderá cancelar o tratamento a qualquer momento, mediante as condições acordadas com a equipe responsável.`,
+      text: `${financialContractText(patient)}\n\nO paciente poderá cancelar o tratamento a qualquer momento, mediante as condições registradas e acordadas com a equipe responsável.`,
     },
     {
       heading: "Possíveis efeitos adversos e crises de rinite",
