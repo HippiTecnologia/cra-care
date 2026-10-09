@@ -155,7 +155,7 @@ function contractSections(patient: DemoPatientRecord, portal: PatientPortalState
   const installmentValue = patient.installmentValue ?? (contractValue ? contractValue / installments : undefined);
   const formatContractMoney = (value?: number) => value && value > 0 ? value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "Não informado";
   const paymentDetails = installments > 1
-    ? `${patient.paymentMethod ?? "Forma não informada"} · ${installments}x de ${formatContractMoney(installmentValue)}${patient.paymentDueDate ? ` · primeira cobrança em ${formatDate(patient.paymentDueDate)}` : ""}`
+    ? `${patient.paymentMethod ?? "Forma não informada"} · ${installments}x de ${formatContractMoney(installmentValue)}${patient.paymentDueDate ? ` · validade em ${formatDate(patient.paymentDueDate)}` : ""}`
     : patient.paymentMethod ?? "Não informada";
   const acquisitionGuidance = (() => {
     const method = (patient.acquisitionMethod ?? "").toLowerCase();
@@ -181,7 +181,7 @@ function contractSections(patient: DemoPatientRecord, portal: PatientPortalState
     const count = Math.max(1, payment?.installments ?? 1);
     const perInstallment = payment?.installmentValue ?? (value ? value / count : undefined);
     const details = count > 1
-      ? `${payment?.paymentMethod ?? "Forma não informada"} · ${count}x de ${formatContractMoney(perInstallment)}${payment?.dueDate ? ` · primeira cobrança em ${formatDate(payment.dueDate)}` : ""}`
+      ? `${payment?.paymentMethod ?? "Forma não informada"} · ${count}x de ${formatContractMoney(perInstallment)}${payment?.dueDate ? ` · validade em ${formatDate(payment.dueDate)}` : ""}`
       : payment?.paymentMethod ?? "Forma não informada";
     return `${label}\nValor total contratado: ${formatContractMoney(value)}.\nForma de pagamento: ${details}.\nCondição escolhida: ${payment?.agreedCondition ?? "Não informada"}.`;
   };

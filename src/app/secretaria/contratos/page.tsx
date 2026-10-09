@@ -53,7 +53,7 @@ function financialContractText(patient: DemoPatientRecord) {
       const installmentValue = payment.installmentValue
         ?? (typeof payment.contractValue === "number" ? payment.contractValue / installments : undefined);
       const paymentDetails = installments > 1
-        ? `${payment.paymentMethod ?? "Forma não informada"} · ${installments}x de ${formatContractMoney(installmentValue)}${payment.dueDate ? ` · primeira cobrança em ${formatDate(payment.dueDate)}` : ""}`
+        ? `${payment.paymentMethod ?? "Forma não informada"} · ${installments}x de ${formatContractMoney(installmentValue)}${payment.dueDate ? ` · validade em ${formatDate(payment.dueDate)}` : ""}`
         : `${payment.paymentMethod ?? "Forma não informada"}${payment.dueDate ? ` · cobrança em ${formatDate(payment.dueDate)}` : ""}`;
       return `Tratamento: ${payment.treatment}\nValor total contratado: ${formatContractMoney(payment.contractValue)}.\nMétodo de aquisição: ${payment.acquisitionMethod ?? "Não informado"}.\nForma de pagamento: ${paymentDetails}.\nCondição escolhida: ${payment.agreedCondition ?? "Não informada"}.`;
     }).join("\n\n");
@@ -63,7 +63,7 @@ function financialContractText(patient: DemoPatientRecord) {
   const installmentValue = patient.installmentValue
     ?? (typeof patient.contractValue === "number" ? patient.contractValue / installments : undefined);
   const paymentDetails = installments > 1
-    ? `${patient.paymentMethod ?? "Forma não informada"} · ${installments}x de ${formatContractMoney(installmentValue)}${patient.paymentDueDate ? ` · primeira cobrança em ${formatDate(patient.paymentDueDate)}` : ""}`
+    ? `${patient.paymentMethod ?? "Forma não informada"} · ${installments}x de ${formatContractMoney(installmentValue)}${patient.paymentDueDate ? ` · validade em ${formatDate(patient.paymentDueDate)}` : ""}`
     : patient.paymentMethod ?? "Forma não informada";
   return `Tratamento: ${patient.treatment ?? "Imunoterapia Alérgeno Específica (IAE)"}.\nValor total contratado: ${formatContractMoney(patient.contractValue)}.\nMétodo de aquisição: ${patient.acquisitionMethod ?? "Não informado"}.\nForma de pagamento: ${paymentDetails}.\nCondição escolhida: ${patient.agreedCondition ?? "Não informada"}.`;
 }
