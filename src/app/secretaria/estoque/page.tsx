@@ -145,7 +145,7 @@ export default function SecretariaEstoquePage() {
     const treatmentBottles = stock.filter((item) => item.patientId === patient.id && indicationForTreatment(item.treatment) === indicationForTreatment(prescription.treatment))
       .reduce((total, item) => total + item.bottles, 0);
     const nextBottleNumber = treatmentBottles + 1;
-    const renewalBottle = nextBottleNumber > 3 && (nextBottleNumber - 1) % 3 === 0;
+    const renewalBottle = nextBottleNumber > 2 && (nextBottleNumber - 1) % 2 === 0;
     const recurringAsaas = acquisitionMethod === "Recorrente — ASAAS";
     const paymentRequired = !recurringAsaas && (acquisitionMethod === "Por frasco" || renewalBottle);
     const asaasRequired = recurringAsaas || (paymentRequired && paymentMethod === "Asaas");

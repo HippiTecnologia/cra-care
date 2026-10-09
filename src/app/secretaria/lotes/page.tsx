@@ -205,7 +205,7 @@ export default function SecretariaLotesPage() {
       .reduce((count, item) => count + item.bottles, 0), 0);
     const nextBottleNumber = pendingBatchBottles + 1;
     const bottleNumbers = Array.from({ length: Math.max(1, Math.trunc(prescription.bottles)) }, (_, index) => nextBottleNumber + index);
-    const renewalBottle = bottleNumbers.find((number) => number > 3 && (number - 1) % 3 === 0);
+    const renewalBottle = bottleNumbers.find((number) => number > 2 && (number - 1) % 2 === 0);
     const recurringAsaas = acquisitionMethod === "Recorrente — ASAAS";
     const isImmunobacterial = track === "Imunobacteriana";
     const prescriptionPaymentConfirmed = batches.some((batch) => batch.items.some((item) =>

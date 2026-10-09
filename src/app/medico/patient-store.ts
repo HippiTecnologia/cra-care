@@ -640,7 +640,7 @@ export function getPatientBillingRequirement(
     (_, index) => nextBottleNumber + index,
   );
   const renewalBottle = bottleNumbers.find(
-    (number) => number > 3 && (number - 1) % 3 === 0,
+    (number) => number > 2 && (number - 1) % 2 === 0,
   );
   const recurringAsaas = acquisitionMethod === "Recorrente — ASAAS";
   const paymentRequired =
