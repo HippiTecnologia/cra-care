@@ -161,8 +161,6 @@ export async function buildPrescriptionPdf(prescription: PrescriptionForSignatur
 
   page.drawText("Receita médica", { x: left, y: 790, size: 14, font: bold, color: ink });
   page.drawText("CRA Care · Centro de Rinite e Alergia", { x: left, y: 774, size: 8.5, font: regular, color: burgundy });
-  page.drawText(`${clinicContact.address} · ${clinicContact.phone}`, { x: left, y: 760, size: 7.5, font: regular, color: muted, maxWidth: contentWidth - 70 });
-  page.drawText(clinicContact.email, { x: left, y: 750, size: 7.5, font: regular, color: muted, maxWidth: contentWidth - 70 });
   page.drawLine({ start: { x: left, y: 748 }, end: { x: right, y: 748 }, thickness: 2.2, color: burgundy });
 
   const inlineField = (x: number, y: number, heading: string, value: string, maxWidth = 210) => {
@@ -229,7 +227,12 @@ export async function buildPrescriptionPdf(prescription: PrescriptionForSignatur
   const state = "Documento preparado para assinatura digital";
   const stateWidth = regular.widthOfTextAtSize(state, 8);
   page.drawText(state, { x: (pageWidth - stateWidth) / 2, y: signatureY - 41, size: 8, font: regular, color: muted });
-  page.drawText("Documento gerado pelo CRA Care.", { x: left, y: 91, size: 8, font: regular, color: muted });
+  const clinicLine = `${clinicContact.address} · ${clinicContact.phone}`;
+  const clinicLineWidth = regular.widthOfTextAtSize(clinicLine, 7.5);
+  page.drawText(clinicLine, { x: Math.max(left, (pageWidth - clinicLineWidth) / 2), y: 105, size: 7.5, font: regular, color: muted, maxWidth: contentWidth });
+  const emailWidth = regular.widthOfTextAtSize(clinicContact.email, 7.5);
+  page.drawText(clinicContact.email, { x: (pageWidth - emailWidth) / 2, y: 94, size: 7.5, font: regular, color: muted });
+  page.drawText("Documento gerado pelo CRA Care.", { x: left, y: 78, size: 8, font: regular, color: muted });
   return document.save();
 }
 

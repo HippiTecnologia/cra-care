@@ -390,7 +390,7 @@ export default function LaboratorioPage() {
     const document = printWindow.document;
     document.title = `Receita médica - ${item.patientName} - ${batch.code}`;
     const styles = document.createElement("style");
-    styles.textContent = "@page{size:A4 portrait;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#34292d;margin:28px auto;max-width:760px;min-height:980px;line-height:1.55;font-size:13px;position:relative;padding-bottom:150px}header{border-bottom:3px solid #a3113a;padding-bottom:14px}.brand-logo{width:132px;height:auto;display:block;margin-bottom:10px;filter:brightness(0) saturate(100%) invert(14%) sepia(71%) saturate(3580%) hue-rotate(328deg) brightness(79%) contrast(105%);-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{color:#a3113a;margin:0;font-size:22px}h2{font-size:16px;margin:24px 0 9px}.formula{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #eee}.signature{position:absolute;bottom:55px;left:0;right:0;border-top:1px solid #aaa;padding-top:10px;break-inside:avoid}@media print{body{margin:0;max-width:none;min-height:260mm}}";
+    styles.textContent = "@page{size:A4 portrait;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#34292d;margin:28px auto;max-width:760px;min-height:980px;line-height:1.55;font-size:13px;position:relative;padding-bottom:180px}header{border-bottom:3px solid #a3113a;padding-bottom:14px}.brand-logo{width:132px;height:auto;display:block;margin-bottom:10px;filter:brightness(0) saturate(100%) invert(14%) sepia(71%) saturate(3580%) hue-rotate(328deg) brightness(79%) contrast(105%);-webkit-print-color-adjust:exact;print-color-adjust:exact}h1{color:#a3113a;margin:0;font-size:22px}h2{font-size:16px;margin:24px 0 9px}.formula{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #eee}.signature{position:absolute;bottom:75px;left:0;right:0;border-top:1px solid #aaa;padding-top:10px;break-inside:avoid}.clinic-footer{position:absolute;bottom:12px;left:0;right:0;text-align:center;color:#817578;font-size:10px;line-height:1.5}@media print{body{margin:0;max-width:none;min-height:260mm}}";
     document.head.append(styles);
 
     function addText(tag: "h1" | "h2" | "p", value: string, parent: HTMLElement = document.body) {
@@ -406,7 +406,6 @@ export default function LaboratorioPage() {
     logo.className = "brand-logo";
     header.append(logo);
     addText("h1", "CRA Care · Receita médica", header);
-    addText("p", `${clinicContact.address} · ${clinicContact.phone} · ${clinicContact.email}`, header);
     addText("p", `Lote ${batch.name ?? batch.code} · Emitida em ${formatDate(documentData.createdAt)}`, header);
     document.body.append(header);
     addText("h2", "Dados do paciente");
@@ -442,6 +441,10 @@ export default function LaboratorioPage() {
     addText("p", `${technicalDoctor.name} · CRM ${technicalDoctor.crm}`, signature);
     addText("p", `Responsável técnico e assinatura final · ${documentData.signatureStatus === "signed" ? "Receita assinada" : "Documento preparado para assinatura"}`, signature);
     document.body.append(signature);
+    const clinicFooter = document.createElement("div");
+    clinicFooter.className = "clinic-footer";
+    clinicFooter.textContent = `${clinicContact.address} · ${clinicContact.phone} · ${clinicContact.email}`;
+    document.body.append(clinicFooter);
     printWindow.focus();
     void logo.decode().catch(() => undefined).then(() => {
       printWindow.requestAnimationFrame(() => printWindow.print());
