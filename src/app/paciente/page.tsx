@@ -47,7 +47,7 @@ const navigation: { id: PatientSection; icon: string; label: string; short: stri
   { id: "termo", icon: "▤", label: "Termo", short: "Termo" },
 ];
 
-const vaccineWhatsAppUrl = `https://wa.me/5541999999999?text=${encodeURIComponent(
+const vaccineWhatsAppUrl = `https://wa.me/${clinicContact.whatsapp.replace(/\D/g, "")}?text=${encodeURIComponent(
   "Olá! Sou paciente do CRA Care e gostaria de falar com o setor de vacinas.",
 )}`;
 
