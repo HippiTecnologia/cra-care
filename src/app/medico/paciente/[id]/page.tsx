@@ -932,12 +932,21 @@ export default function MedicalPatientPage() {
                 </label>
               </div>
 
-              <div className="flex">
-                <button type="button" onClick={() => void createAndSignPrescription()} disabled={totalPercentage !== 100 || selectedPrescription?.signatureStatus === "signed" || signatureStarting} className="w-full rounded-xl bg-[#263f73] px-5 py-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <button type="button" onClick={() => void createPrescription()} disabled={totalPercentage !== 100} className="rounded-xl bg-[#a3113a] px-4 py-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">
+                  Gerar receita
+                </button>
+                <button type="button" onClick={clearPrescription} className="rounded-xl border border-[#d9ccca] bg-white px-4 py-4 text-sm font-semibold text-[#544449]">
+                  Limpar receita
+                </button>
+                <button type="button" onClick={printPrescription} disabled={preview.formulas.length === 0} className="rounded-xl border border-[#a3113a] bg-white px-4 py-4 text-sm font-semibold text-[#a3113a] disabled:cursor-not-allowed disabled:opacity-45">
+                  Imprimir receita
+                </button>
+                <button type="button" onClick={() => void createAndSignPrescription()} disabled={totalPercentage !== 100 || selectedPrescription?.signatureStatus === "signed" || signatureStarting} className="rounded-xl bg-[#263f73] px-4 py-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">
                   {signatureStarting ? "Aguardando assinatura…" : selectedPrescription?.signatureStatus === "signed" ? "Assinada digitalmente" : "Assinar digitalmente"}
                 </button>
               </div>
-              <p className="mt-3 text-xs text-[#817578]">A receita será salva e encaminhada para assinatura válida com o certificado ICP-Brasil do médico.</p>
+              <p className="mt-3 text-xs text-[#817578]">Gere para salvar no prontuário; imprima quando precisar. A assinatura encaminha a receita para assinatura válida com o certificado ICP-Brasil do médico.</p>
             </div>
 
             <aside className="self-start rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
