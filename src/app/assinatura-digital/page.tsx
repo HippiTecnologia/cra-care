@@ -134,12 +134,18 @@ function DigitalSignatureContent() {
   }
 
   const counts = { pending: rows.filter((row) => ["awaiting_signature", "authentication_pending", "signing"].includes(row.status)).length, signed: rows.filter((row) => row.status === "signed").length, cancelled: rows.filter((row) => row.status === "cancelled").length };
+  const returnPath = role === "medico" ? "/medico"
+    : role === "secretaria" ? "/secretaria"
+      : role === "enfermagem" ? "/enfermagem"
+        : role === "laboratorio" ? "/laboratorio"
+          : ["admin", "super_admin"].includes(role) ? "/adm"
+            : null;
 
   return <main className="min-h-screen bg-[#f6f8fc] text-[#17233b]">
     <header className="border-b border-[#dce3ef] bg-[#07152f] px-5 py-5 text-white sm:px-10">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
         <div className="flex items-center gap-4"><Image src="/logo-cra-branca.png" alt="CRA Care" width={112} height={75} className="h-auto w-24"/><div><p className="text-xs uppercase tracking-[0.22em] text-cyan-300">CRA Care</p><h1 className="text-2xl font-bold">Assinatura Digital</h1></div></div>
-        <div className="flex gap-2">{["admin", "super_admin"].includes(role) && <Link href="/assinatura-digital/configuracoes" className="rounded-xl border border-white/20 px-4 py-2 text-sm">Configurações</Link>}<Link href={role === "medico" ? "/medico" : role === "secretaria" ? "/secretaria" : "/adm"} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#07152f]">Voltar</Link></div>
+        <div className="flex gap-2">{["admin", "super_admin"].includes(role) && <Link href="/assinatura-digital/configuracoes" className="rounded-xl border border-white/20 px-4 py-2 text-sm">Configurações</Link>}{returnPath ? <Link href={returnPath} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-[#07152f]">Voltar</Link> : <button type="button" disabled className="rounded-xl bg-white/50 px-4 py-2 text-sm font-semibold text-[#07152f]">Carregando…</button>}</div>
       </div>
     </header>
     <section className="mx-auto max-w-7xl space-y-6 px-5 py-8 sm:px-10">
