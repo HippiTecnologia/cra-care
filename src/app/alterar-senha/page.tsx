@@ -19,7 +19,7 @@ export default function ChangePasswordPage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (password.length < 8) return setMessage("Crie uma senha com pelo menos 8 caracteres.");
+    if (password.length < 3) return setMessage("Crie uma senha com pelo menos 3 caracteres.");
     if (password !== confirmation) return setMessage("As senhas não conferem.");
     setSaving(true);
     setMessage("");
