@@ -88,7 +88,7 @@ function contractSections(patient: DemoPatientRecord, portal: PatientPortalState
     },
     {
       heading: "Valores, pagamento e cancelamento",
-      text: `${financialContractText(patient)}\n\nO paciente poderá cancelar o tratamento a qualquer momento, mediante as condições registradas e acordadas com a equipe responsável.`,
+      text: `${financialContractText(patient)}\n\nCancelamento: O paciente poderá solicitar o cancelamento do tratamento a qualquer momento, mediante pagamento de multa correspondente a 1 (uma) mensalidade.\n\nNota fiscal: Na modalidade de pagamento recorrente, a nota fiscal será enviada mensalmente ao e-mail cadastrado do paciente, no valor correspondente ao pagamento efetuado.`,
     },
     {
       heading: "Possíveis efeitos adversos e crises de rinite",
