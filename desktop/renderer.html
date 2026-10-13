@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hippi Assinador A1</title>
+    <style>
+      :root { color: #342b2e; font-family: "Segoe UI", Arial, sans-serif; background: #f7f4f2; }
+      * { box-sizing: border-box; } body { margin: 0; } .shell { padding: 34px 40px 38px; max-width: 920px; margin: auto; }
+      header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; }
+      .brand { display: flex; align-items: center; gap: 13px; } .mark { width: 46px; height: 46px; border-radius: 14px; background: #9b0b3d; color: white; display:grid; place-items:center; font-size: 22px; font-weight: 800; }
+      h1 { font-size: 23px; margin: 0; letter-spacing: -.4px; } .eyebrow { margin: 3px 0 0; color: #8a757b; font-size: 13px; }
+      .pill { border-radius: 999px; background: #f8e4ea; color: #a70b43; padding: 9px 14px; font-size: 13px; font-weight: 700; } .pill.ready { background: #e2f3e8; color: #176a37; }
+      .card { background: #fff; border: 1px solid #eadfe1; border-radius: 20px; padding: 25px; box-shadow: 0 8px 22px rgba(50, 27, 36, .05); margin-top: 16px; }
+      h2 { font-size: 16px; margin: 0 0 7px; } .sub { margin: 0; color: #786a6e; line-height: 1.5; font-size: 14px; }
+      .certificate { background: #fff7f9; border: 1px solid #f0d6dd; border-radius: 12px; padding: 14px; margin: 17px 0; color: #5b4c50; font-size: 14px; overflow-wrap: anywhere; min-height: 48px; }
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; } button { border: 0; border-radius: 10px; cursor: pointer; padding: 12px 16px; font-size: 14px; font-weight: 700; } button.primary { background:#a70b43; color: white; } button.secondary { background: #fff; border: 1px solid #dfcdd1; color: #684c55; } button:disabled { opacity: .45; cursor: not-allowed; }
+      label { display:block; margin: 20px 0 8px; font-weight: 700; font-size: 14px; } input[type=password] { width:100%; border:1px solid #dacace; border-radius:10px; padding:13px; font: inherit; outline-color:#a70b43; }
+      .session { display:none; margin-top:18px; padding:16px; border-radius:12px; background:#edf8f0; border:1px solid #cde8d5; color:#195f35; } .session.visible { display:block; } .session strong { display:block; margin-bottom:5px; }
+      code { display:inline-block; background:#fff; border:1px dashed #b6d5be; border-radius:7px; padding:7px 8px; margin-top:7px; font-size:12px; color:#284733; word-break:break-all; }
+      .options { margin-top: 17px; display:flex; align-items:center; gap:8px; font-size:14px; color:#5e5154; } .options input { width:17px; height:17px; accent-color:#a70b43; }
+      .notice { margin: 18px 2px 0; font-size:13px; line-height:1.45; color:#786a6e; } .notice b { color:#5b2837; } #error { display:none; color:#a70b43; margin: 12px 0 0; font-size:14px; } #error.visible { display:block; }
+      footer { margin-top: 23px; display:flex; justify-content:space-between; align-items:center; color:#806e73; font-size:13px; }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header><div class="brand"><div class="mark">H</div><div><h1>Hippi Assinador A1</h1><p class="eyebrow">Assinatura local, segura e integrada ao CRA Care</p></div></div><span id="status" class="pill">Não conectado</span></header>
+      <section class="card"><h2>Seu certificado A1</h2><p class="sub">O certificado fica apenas neste computador. Nem sua senha nem sua chave privada são enviadas ao CRA Care.</p><div id="certificate" class="certificate">Nenhum certificado selecionado.</div><div class="actions"><button class="secondary" id="select">Escolher certificado .p12 ou .pfx</button><button class="secondary" id="open">Abrir CRA Care</button></div></section>
+      <section class="card"><h2>Ativar assinatura com um clique</h2><p class="sub">Informe a senha do certificado para liberar assinaturas por 12 horas. Ao desligar o computador, será preciso informar a senha novamente.</p><label for="password">Senha do certificado A1</label><input id="password" type="password" autocomplete="off" placeholder="Digite a senha somente para esta sessão" /><div id="error"></div><div class="actions" style="margin-top:16px"><button class="primary" id="activate">Ativar por 12 horas</button><button class="secondary" id="deactivate">Encerrar sessão</button></div><div id="session" class="session"><strong>Hippi está pronto para assinar.</strong><span id="expiry"></span><br/><code id="endpoint"></code><br/><span style="font-size:12px">Código de pareamento desta sessão:</span><br/><code id="pairing"></code></div><label class="options"><input id="startup" type="checkbox" /> Iniciar automaticamente com o Windows</label></section>
+      <p class="notice"><b>Importante:</b> use somente o seu próprio certificado. O código de pareamento será ligado ao seu perfil no CRA Care na etapa de integração.</p>
+      <footer><span>Hippi Tecnologia</span><span>Certificado A1 • assinatura local</span></footer>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let current = {};
+      function render(state) {
+        current = state;
+        $("certificate").textContent = state.certificatePath || "Nenhum certificado selecionado.";
+        $("status").textContent = state.active ? "Pronto para assinar" : "Não conectado";
+        $("status").classList.toggle("ready", state.active);
+        $("activate").disabled = !state.certificatePath || state.active;
+        $("deactivate").disabled = !state.active;
+        $("startup").checked = Boolean(state.startWithWindows);
+        $("session").classList.toggle("visible", Boolean(state.active));
+        if (state.active) { $("expiry").textContent = "Sessão válida até " + new Date(state.expiresAt).toLocaleString("pt-BR"); $("endpoint").textContent = state.endpoint; $("pairing").textContent = state.pairingToken; }
+      }
+      function showError(message) { $("error").textContent = message || ""; $("error").classList.toggle("visible", Boolean(message)); }
+      $("select").onclick = async () => { showError(); render(await window.hippi.chooseCertificate()); };
+      $("activate").onclick = async () => { try { showError(); render(await window.hippi.activate($("password").value)); $("password").value = ""; } catch (error) { showError(error.message || "Não foi possível ativar o certificado."); } };
+      $("deactivate").onclick = async () => { showError(); render(await window.hippi.deactivate()); };
+      $("startup").onchange = async (event) => render(await window.hippi.setStartup(event.target.checked));
+      $("open").onclick = () => window.hippi.openCraCare();
+      window.hippi.onStatusChanged(render); window.hippi.getStatus().then(render);
+    </script>
+  </body>
+</html>

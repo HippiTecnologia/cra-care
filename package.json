@@ -1,19 +1,29 @@
 {
   "name": "cra-care",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "a1:sign": "node scripts/a1-sign-pdf.mjs",
+    "hippi:a1": "node scripts/hippi-assinador-a1.mjs",
+    "hippi:dev": "electron .",
+    "hippi:dist": "electron-builder --win nsis",
     "bootstrap:access": "node --env-file=.env.local scripts/bootstrap-cra-access.mjs"
   },
   "dependencies": {
+    "@signpdf/placeholder-pdf-lib": "^3.3.0",
+    "@signpdf/signer-p12": "^3.3.0",
+    "@signpdf/signpdf": "^3.3.0",
     "@supabase/supabase-js": "^2.112.4",
+    "asn1js": "^3.0.10",
     "next": "^16.4.0",
+    "node-forge": "^1.4.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.2.108",
+    "pkijs": "^3.4.1",
     "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -26,10 +36,37 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/web-push": "^3.6.4",
+    "electron": "^39.8.10",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "^16.4.0",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "main": "desktop/main.mjs",
+  "build": {
+    "appId": "br.com.hippi.assinador.a1",
+    "productName": "Hippi Assinador A1",
+    "asar": true,
+    "directories": {
+      "output": "C:/Users/gusta/Documents/Codex/Hippi-Assinador-A1-release"
+    },
+    "files": [
+      "desktop/**/*",
+      "public/hippi-mark.png",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "Hippi-Assinador-A1-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": true
+    }
   },
   "overrides": {
     "source-map-js": "1.2.2"
