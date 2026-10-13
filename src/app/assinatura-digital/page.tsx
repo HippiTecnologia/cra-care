@@ -109,6 +109,31 @@ function DigitalSignatureContent() {
           if (current && ["signed", "error", "invalid", "rejected", "expired"].includes(current.status)) window.clearInterval(timer);
         }, 3000);
         window.setTimeout(() => window.clearInterval(timer), 15 * 60_000);
+      } else if (payload.connector === "hippi-a1" && payload.endpoint) {
+        const tokenKey = "cra-care-hippi-a1-token";
+        let token = window.localStorage.getItem(tokenKey) ?? "";
+        if (!token) {
+          token = window.prompt("Cole o código de pareamento exibido no Hippi Assinador A1:")?.trim() ?? "";
+          if (!token) throw new Error("Código de pareamento do Hippi não informado.");
+          window.localStorage.setItem(tokenKey, token);
+        }
+        const originalResponse = await authFetch(`/api/signatures/${row.id}/download`);
+        if (!originalResponse.ok) throw new Error("Não foi possível carregar o PDF preparado.");
+        const originalBytes = new Uint8Array(await originalResponse.arrayBuffer());
+        let binary = "";
+        for (let index = 0; index < originalBytes.length; index += 0x8000) binary += String.fromCharCode(...originalBytes.subarray(index, index + 0x8000));
+        const signResponse = await fetch(`${payload.endpoint}/sign`, { method: "POST", headers: { "Content-Type": "application/json", "X-Hippi-Connector-Token": token }, body: JSON.stringify({ pdfBase64: window.btoa(binary) }) });
+        const signedPayload = await signResponse.json();
+        if (signResponse.status === 401) { window.localStorage.removeItem(tokenKey); throw new Error("Código do Hippi inválido ou expirado. Clique novamente e informe o código atual."); }
+        if (!signResponse.ok || !signedPayload.signedPdfBase64) throw new Error(signedPayload.error ?? "O Hippi não conseguiu assinar o PDF.");
+        const certificateResponse = await fetch(`${payload.endpoint}/certificate`, { headers: { "X-Hippi-Connector-Token": token } });
+        const certificatePayload = await certificateResponse.json();
+        if (!certificateResponse.ok || !certificatePayload.certificateDerBase64) throw new Error(certificatePayload.error ?? "Não foi possível obter o certificado público do Hippi.");
+        const finishResponse = await authFetch(`/api/signatures/${row.id}/a1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ signedPdfBase64: signedPayload.signedPdfBase64, certificateDerBase64: certificatePayload.certificateDerBase64 }) });
+        const finishPayload = await finishResponse.json();
+        if (!finishResponse.ok) throw new Error(finishPayload.error ?? "Não foi possível receber o PDF assinado.");
+        setMessage("PDF assinado pelo Hippi e recebido pelo CRA Care. A validação ICP-Brasil será concluída antes do status final.");
+        await load();
       } else setMessage(payload.message ?? "Conclua a autorização no conector oficial.");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível iniciar a assinatura."); }
     finally { setWorking(false); }

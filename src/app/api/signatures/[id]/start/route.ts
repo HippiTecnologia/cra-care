@@ -40,6 +40,16 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   }
   if (result.kind === "connector") {
     await writeSignatureAudit({ signatureId: id, clinicId: user.clinicId, event: "connector_required", status: signature.status, actorId: user.id, provider: provider.key, metadata: { message: result.message }, ...meta });
+    if (provider.key === "a1") {
+      return NextResponse.json({
+        kind: "connector",
+        connector: "hippi-a1",
+        endpoint: "http://127.0.0.1:43127",
+        signatureId: id,
+        documentHash: signature.document_hash,
+        message: "Hippi Assinador A1 localizado. O próximo passo é enviar o documento para assinatura.",
+      });
+    }
     return NextResponse.json({ kind: "connector", message: result.message });
   }
   await (admin.from("digital_signatures") as any).update({
