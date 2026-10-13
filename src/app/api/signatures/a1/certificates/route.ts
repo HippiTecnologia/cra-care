@@ -6,7 +6,7 @@ import { certificateFingerprintFromDer } from "../../../../../lib/signatures/a1"
 import { getSupabaseAdminClient } from "../../../../../lib/supabase/admin";
 
 function isAdmin(role: string) {
-  return role === "admin" || role === "super_admin";
+  return role === "secretaria" || role === "admin" || role === "super_admin";
 }
 
 export async function GET(request: NextRequest) {

@@ -8,11 +8,18 @@ import { getSupabaseClient } from "../../../lib/supabase/client";
 type Provider = { key: string; label: string; configured: boolean };
 type Config = { provider: string; environment: string; enabled: boolean; api_base_url?: string; authorization_url?: string; client_id_env_key?: string; client_secret_env_key?: string; webhook_secret_env_key?: string };
 type Rule = { document_type: string; label: string; signature_required: boolean; active: boolean; allowed_providers: string[] };
+type Doctor = { id: string; full_name: string; crm?: string | null };
+type Certificate = { doctor_user_id: string; certificate_subject: string; certificate_serial: string; enrolled_at: string };
 
 export default function SignatureConfigurationPage() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [configs, setConfigs] = useState<Config[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [certificates, setCertificates] = useState<Certificate[]>([]);
+  const [selectedDoctor, setSelectedDoctor] = useState("");
+  const [hippiEndpoint, setHippiEndpoint] = useState("http://127.0.0.1:43127");
+  const [hippiToken, setHippiToken] = useState("");
   const [selected, setSelected] = useState("vidaas");
   const [draft, setDraft] = useState<Config>({ provider: "vidaas", environment: "sandbox", enabled: false });
   const [message, setMessage] = useState("");
@@ -25,11 +32,14 @@ export default function SignatureConfigurationPage() {
   }
 
   async function load() {
-    const [configResponse, rulesResponse] = await Promise.all([authFetch("/api/signatures/config"), authFetch("/api/signatures/rules")]);
-    const [payload, rulePayload] = await Promise.all([configResponse.json(), rulesResponse.json()]);
+    const [configResponse, rulesResponse, certificateResponse] = await Promise.all([authFetch("/api/signatures/config"), authFetch("/api/signatures/rules"), authFetch("/api/signatures/a1/certificates")]);
+    const [payload, rulePayload, certificatePayload] = await Promise.all([configResponse.json(), rulesResponse.json(), certificateResponse.json()]);
     if (!configResponse.ok) throw new Error(payload.error ?? "Não foi possível carregar as configurações.");
     if (!rulesResponse.ok) throw new Error(rulePayload.error ?? "Não foi possível carregar as regras.");
+    if (!certificateResponse.ok) throw new Error(certificatePayload.error ?? "Não foi possível carregar os certificados A1.");
     setProviders(payload.providers ?? []); setConfigs(payload.configs ?? []); setRules(rulePayload.rules ?? []);
+    setDoctors(certificatePayload.doctors ?? []); setCertificates(certificatePayload.certificates ?? []);
+    setSelectedDoctor((current) => current || certificatePayload.doctors?.[0]?.id || "");
   }
 
   useEffect(() => { void load().catch((cause) => setError(cause instanceof Error ? cause.message : "Erro ao carregar.")); }, []);
@@ -63,6 +73,22 @@ export default function SignatureConfigurationPage() {
       const payload = await response.json(); if (!response.ok) throw new Error(payload.error ?? "Não foi possível salvar a regra.");
       setMessage("Regra de documento atualizada."); await load();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível salvar a regra."); }
+  }
+
+  async function enrollCertificate() {
+    setError(""); setMessage("");
+    try {
+      if (!selectedDoctor || !hippiToken.trim()) throw new Error("Selecione o médico e informe o código do Hippi.");
+      const endpoint = new URL(hippiEndpoint);
+      if (endpoint.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(endpoint.hostname) || endpoint.port !== "43127") throw new Error("O Hippi deve usar apenas http://127.0.0.1:43127.");
+      const certificateResponse = await fetch(`${endpoint.origin}/certificate`, { headers: { "X-Hippi-Connector-Token": hippiToken.trim() } });
+      const certificatePayload = await certificateResponse.json();
+      if (!certificateResponse.ok || !certificatePayload.certificateDerBase64) throw new Error(certificatePayload.error ?? "Não foi possível obter o certificado do Hippi.");
+      const response = await authFetch("/api/signatures/a1/certificates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ doctorUserId: selectedDoctor, certificateDerBase64: certificatePayload.certificateDerBase64 }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Não foi possível vincular o certificado.");
+      setMessage("Certificado A1 vinculado ao médico com sucesso."); setHippiToken(""); await load();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível vincular o certificado."); }
   }
 
   const field = (label: string, key: keyof Config, placeholder: string) => <label className="text-sm font-semibold text-slate-700">{label}<input value={String(draft[key] ?? "")} onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))} placeholder={placeholder} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 font-normal outline-none focus:border-blue-500"/></label>;
