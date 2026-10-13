@@ -40,10 +40,13 @@ function initials(value: string) {
     .join("") || "DR";
 }
 
-function canAccessNursingArea(name: string) {
+function canAccessNursingArea(name: string, crm: string) {
   const normalized = name.toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  return normalized.includes("alessandra") && normalized.includes("bitencourt")
-    || normalized.includes("patricia") && (normalized.includes("martinski") || normalized.includes("trudes"));
+  const crmDigits = crm.replace(/\D/g, "");
+  return crmDigits === "28606"
+    || crmDigits === "17877"
+    || normalized.includes("alessandra") && normalized.includes("bitencourt")
+    || normalized.includes("patricia") && normalized.includes("martins");
 }
 
 export default function MedicoPage() {
@@ -84,7 +87,7 @@ export default function MedicoPage() {
   }, []);
 
   const loggedDoctor = doctor?.fullName ?? "Médico";
-  const nursingAreaAllowed = doctor ? canAccessNursingArea(doctor.fullName) : false;
+  const nursingAreaAllowed = doctor ? canAccessNursingArea(doctor.fullName, doctor.crm) : false;
   const allDoctorPatients = records;
 
   const visiblePatients = useMemo(() => {

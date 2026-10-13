@@ -9,10 +9,13 @@ function normalizeName(value: string) {
   return value.toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
-function doctorCanAccessNursing(name: string) {
+function doctorCanAccessNursing(name: string, crm: string | null) {
   const normalized = normalizeName(name);
-  return normalized.includes("alessandra") && normalized.includes("bitencourt")
-    || normalized.includes("patricia") && (normalized.includes("martinski") || normalized.includes("trudes"));
+  const crmDigits = (crm ?? "").replace(/\D/g, "");
+  return crmDigits === "28606"
+    || crmDigits === "17877"
+    || normalized.includes("alessandra") && normalized.includes("bitencourt")
+    || normalized.includes("patricia") && normalized.includes("martins");
 }
 
 export async function loadNursingWorkspace() {
@@ -20,7 +23,7 @@ export async function loadNursingWorkspace() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Sessão não encontrada.");
   const { data: profile, error } = await supabase.from("profiles").select("id, clinic_id, full_name, crm, role").eq("id", user.id).single();
-  const allowedDoctor = profile?.role === "medico" && doctorCanAccessNursing(profile.full_name);
+  const allowedDoctor = profile?.role === "medico" && doctorCanAccessNursing(profile.full_name, profile.crm);
   if (error || !profile || (profile.role !== "enfermagem" && !allowedDoctor)) throw error ?? new Error("Este perfil não possui acesso à área de Enfermagem.");
   if (!profile.clinic_id) throw new Error("Clínica não encontrada para este acesso.");
   const clinicId = profile.clinic_id;
@@ -30,7 +33,7 @@ export async function loadNursingWorkspace() {
     // A Enfermagem e o médico usam a mesma carteira de pacientes da clínica.
     patientTable.select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)").eq("clinic_id", clinicId).order("created_at", { ascending: false }),
     supabase.from("profiles").select("id, full_name, crm").eq("clinic_id", clinicId).eq("role", "medico").order("full_name"),
-    reportTable.select("id, patient_id, report_type, content, created_at").eq("clinic_id", clinicId).order("created_at", { ascending: false }),
+    reportTable.select("id, patient_id, nurse_profile_id, doctor_profile_id, report_type, content, created_at").eq("clinic_id", clinicId).order("created_at", { ascending: false }),
   ]);
   if (patientsResult.error) throw patientsResult.error;
   if (doctorsResult.error) throw doctorsResult.error;
@@ -84,7 +87,7 @@ export async function findNursingPatient(profile: NursingProfile, query: string)
 }
 
 export async function loadNursingReportsForPatient(patientId: string) {
-  const { data, error } = await (getSupabaseClient().from("nursing_reports") as any).select("id, patient_id, report_type, content, created_at").eq("patient_id", patientId).order("created_at", { ascending: false });
+  const { data, error } = await (getSupabaseClient().from("nursing_reports") as any).select("id, patient_id, nurse_profile_id, doctor_profile_id, report_type, content, created_at").eq("patient_id", patientId).order("created_at", { ascending: false });
   if (error) throw error;
   return data ?? [];
 }
