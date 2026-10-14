@@ -49,10 +49,14 @@ export async function createNursingPatient(profile: NursingProfile, input: { nam
 }
 
 export async function updateNursingPatient(profile: NursingProfile, patientId: string, input: { name: string; cpf: string; birthDate: string; phone?: string }) {
-  const { error } = await (getSupabaseClient().from("patients") as any)
-    .update({ full_name: input.name.trim(), cpf: input.cpf.replace(/\D/g, ""), birth_date: input.birthDate, phone: input.phone?.trim() || null })
-    .eq("id", patientId)
-    .eq("clinic_id", profile.clinicId);
+  if (profile.role !== "enfermagem") throw new Error("Somente a Enfermagem pode editar dados de pacientes nesta área.");
+  const { error } = await (getSupabaseClient() as any).rpc("update_nursing_patient_profile_fields", {
+    p_patient_id: patientId,
+    p_full_name: input.name.trim(),
+    p_cpf: input.cpf.replace(/\D/g, ""),
+    p_birth_date: input.birthDate,
+    p_phone: input.phone?.trim() || null,
+  });
   if (error) throw error;
 }
 
