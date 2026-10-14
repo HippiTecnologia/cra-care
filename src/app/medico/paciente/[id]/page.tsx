@@ -6,9 +6,11 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   availableFormulas,
+  bottleVolumeOptions,
   treatmentPhases,
 } from "../../patient-store";
 import type {
+  BottleVolumeMl,
   ClinicalRecord,
   DemoPatientRecord,
   DemoPrescription,
@@ -123,6 +125,7 @@ export default function MedicalPatientPage() {
   const [formulas, setFormulas] = useState<PrescriptionFormula[]>([]);
   const [phase, setPhase] = useState(treatmentPhases[0]);
   const [bottlesByTreatment, setBottlesByTreatment] = useState<Record<VaccineType, number>>({ rinite: 1, imunobacteriana: 4 });
+  const [bottleVolumeMl, setBottleVolumeMl] = useState<BottleVolumeMl>(4);
   const [durationMonths, setDurationMonths] = useState(36);
   const [drops, setDrops] = useState(2);
   const [frequency, setFrequency] = useState("3 vezes por semana");
@@ -189,6 +192,7 @@ export default function MedicalPatientPage() {
         setPortal(workspace.portal);
         if (workspace.patient) {
           setPhase(workspace.patient.phase ?? treatmentPhases[0]);
+          setBottleVolumeMl(workspace.patient.treatmentBottles?.find((plan) => plan.treatment === "Rinite")?.volumeMl ?? 4);
           // A receita nova abre sempre no padrão da Rinite. A dose do último
           // tratamento do paciente não pode alterar essa configuração inicial.
           setDrops(2);
@@ -273,6 +277,7 @@ export default function MedicalPatientPage() {
     setSelectedFormula(availableFormulas[0]);
     setPhase(patient?.phase ?? treatmentPhases[0]);
     setBottles(vaccineType === "imunobacteriana" ? 4 : 1);
+    setBottleVolumeMl(patient?.treatmentBottles?.find((plan) => plan.treatment === (vaccineType === "imunobacteriana" ? "Imunobacteriana" : "Rinite"))?.volumeMl ?? 4);
     setDrops(vaccineType === "imunobacteriana" ? 4 : 2);
     setFrequency(vaccineType === "imunobacteriana" ? "todos os dias" : "3 vezes por semana");
     setCustomPosology(false);
@@ -288,6 +293,7 @@ export default function MedicalPatientPage() {
     setDurationMonths(type === "imunobacteriana" ? 6 : 36);
     setDrops(type === "imunobacteriana" ? 4 : 2);
     setFrequency(type === "imunobacteriana" ? "todos os dias" : "3 vezes por semana");
+    setBottleVolumeMl(patient?.treatmentBottles?.find((plan) => plan.treatment === (type === "imunobacteriana" ? "Imunobacteriana" : "Rinite"))?.volumeMl ?? 4);
     setCustomPosology(false);
     setPosology("");
     setSelectedPrescriptionId(null);
@@ -316,6 +322,7 @@ export default function MedicalPatientPage() {
       treatment: vaccineType === "imunobacteriana" ? "Vacina Imunobacteriana" : "Vacina Rinite",
       phase: vaccineType === "imunobacteriana" ? "" : phase,
       bottles,
+      bottleVolumeMl,
       drops,
       frequency,
       posology: currentPosology,
@@ -548,6 +555,7 @@ export default function MedicalPatientPage() {
     treatment: vaccineType === "imunobacteriana" ? "Vacina Imunobacteriana" : "Vacina Rinite",
     phase: vaccineType === "imunobacteriana" ? "" : phase,
     bottles,
+    bottleVolumeMl,
     drops,
     frequency,
     posology: currentPosology,
@@ -618,7 +626,7 @@ export default function MedicalPatientPage() {
             <div><strong>Médico:</strong> ${escapeHtml(preview.doctor)}</div>
           </div>
           <h2>RECEITA</h2>
-          <div class="section"><div class="section-title">${escapeHtml(preview.treatment.toUpperCase())}</div><p><strong>Frascos:</strong> ${escapeHtml(preview.bottles)}</p>${preview.phase ? `<p><strong>Fase:</strong> ${escapeHtml(preview.phase)}</p>` : ""}</div>
+          <div class="section"><div class="section-title">${escapeHtml(preview.treatment.toUpperCase())}</div><p><strong>Frascos:</strong> ${escapeHtml(preview.bottles)}</p><p><strong>Volume por frasco:</strong> ${preview.bottleVolumeMl ? `${escapeHtml(preview.bottleVolumeMl)} mL` : "Não informado"}</p>${preview.phase ? `<p><strong>Fase:</strong> ${escapeHtml(preview.phase)}</p>` : ""}</div>
           <div class="section"><div class="section-title">Composição</div><table><thead><tr><th>Componente</th><th>%</th></tr></thead><tbody>${formulaRows}</tbody></table></div>
           <div class="section"><div class="section-title">Posologia</div><p>${escapeHtml(preview.posology)}</p>${preview.posology.includes(sublingualUseInstructions) ? "" : `<p>${escapeHtml(sublingualUseInstructions)}</p>`}</div>
           ${preview.notes ? `<div class="section"><div class="section-title">Observações</div><p>${escapeHtml(preview.notes)}</p></div>` : ""}
@@ -884,7 +892,7 @@ export default function MedicalPatientPage() {
 
               <div className="border-b border-[#f0e8e4] py-6">
                 <h3 className="text-base font-bold text-[#a3113a]">2. {vaccineType === "rinite" ? "Fase e frascos" : "Frascos"}</h3>
-                <div className={`mt-4 grid gap-4 ${vaccineType === "rinite" ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+                <div className={`mt-4 grid gap-4 ${vaccineType === "rinite" ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
                   {vaccineType === "rinite" && <label className="text-sm text-[#544449]">Fase
                     <select value={phase} onChange={(event) => { setPhase(event.target.value); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]">
                       {treatmentPhases.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -892,6 +900,11 @@ export default function MedicalPatientPage() {
                   </label>}
                   <label className="text-sm text-[#544449]">Frascos
                     <input type="number" min={1} value={bottles} onChange={(event) => { setBottles(Number(event.target.value)); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" />
+                  </label>
+                  <label className="text-sm text-[#544449]">Volume por frasco
+                    <select value={bottleVolumeMl} onChange={(event) => { setBottleVolumeMl(Number(event.target.value) as BottleVolumeMl); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]">
+                      {bottleVolumeOptions.map((volume) => <option key={volume} value={volume}>{volume} mL</option>)}
+                    </select>
                   </label>
                   <label className="text-sm text-[#544449]">Duração
                     <select value={durationMonths} onChange={(event) => { setDurationMonths(Number(event.target.value)); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]">
@@ -977,6 +990,7 @@ export default function MedicalPatientPage() {
                 <p className="text-sm font-bold uppercase text-[#433438]">{preview.treatment}</p>
                 <div className="mt-5 space-y-2 text-sm text-[#5a4e51]">
                   <p><strong>Frascos:</strong> {preview.bottles}</p>
+                  <p><strong>Volume por frasco:</strong> {preview.bottleVolumeMl ? `${preview.bottleVolumeMl} mL` : "Não informado"}</p>
                   {preview.phase && <p><strong>Fase:</strong> {preview.phase}</p>}
                 </div>
 
@@ -1164,7 +1178,7 @@ export default function MedicalPatientPage() {
                       Emitida em {formatDate(prescription.createdAt)} · {prescription.phase}
                     </p>
                     <p className="mt-1 text-xs text-[#776b6e]">
-                      {prescription.bottles} frasco(s) · {prescription.drops} gotas · {prescription.formulas.length} componente(s)
+                      {prescription.bottles} frasco(s) · {prescription.bottleVolumeMl ? `${prescription.bottleVolumeMl} mL` : "volume não informado"} · {prescription.drops} gotas · {prescription.formulas.length} componente(s)
                     </p>
                   </div>
                   <button type="button" onClick={() => { setSelectedPrescriptionId(prescription.id); setActiveTab("receitas"); }} className="self-start rounded-xl border border-[#e6dbd6] px-4 py-3 text-xs font-semibold text-[#a3113a]">

@@ -28,6 +28,8 @@ export type DemoPatientRecord = {
   totalMonths?: number;
   lastReceivedDate?: string;
   bottlesReceived?: number;
+  /** Planejamento vigente de frascos por tratamento. O histórico fica na auditoria. */
+  treatmentBottles?: TreatmentBottlePlan[];
   drops?: number;
   phase?: string;
   delivery?: "Motoboy" | "Retirada" | "Sedex" | "Aéreo";
@@ -61,6 +63,19 @@ export type DemoPatientRecord = {
   payments?: PatientPaymentRecord[];
   notes?: string;
   abandonmentReason?: string;
+};
+
+export const bottleVolumeOptions = [4, 6, 8, 10, 12] as const;
+
+export type BottleVolumeMl = typeof bottleVolumeOptions[number];
+
+export type TreatmentBottlePlan = {
+  id: string;
+  treatment: "Rinite" | "Imunobacteriana";
+  volumeMl: BottleVolumeMl;
+  quantity: number;
+  updatedAt: string;
+  updatedBy?: string;
 };
 
 export type TreatmentPayment = {
@@ -139,6 +154,7 @@ export type DemoPrescription = {
   treatment: string;
   phase: string;
   bottles: number;
+  bottleVolumeMl?: BottleVolumeMl;
   drops: number;
   frequency: string;
   posology: string;
@@ -166,6 +182,7 @@ export type DemoBatchItem = {
   treatment: string;
   phase: string;
   bottles: number;
+  bottleVolumeMl?: BottleVolumeMl;
   formulas: PrescriptionFormula[];
   acquisitionMethod?: DemoPatientRecord["acquisitionMethod"];
   paymentMethod?: DemoPatientRecord["paymentMethod"];
@@ -222,6 +239,7 @@ export type DemoStockItem = {
   treatment: string;
   phase: string;
   bottles: number;
+  bottleVolumeMl?: BottleVolumeMl;
   formulas: PrescriptionFormula[];
   delivery?: DemoPatientRecord["delivery"];
   laboratory: string;

@@ -11,8 +11,10 @@ import {
   DemoPrescription,
   PrescriptionFormula,
   availableFormulas,
+  bottleVolumeOptions,
   treatmentPhases,
 } from "../../medico/patient-store";
+import type { BottleVolumeMl } from "../../medico/patient-store";
 import {
   confirmSecretaryBatch,
   loadSecretaryBatches,
@@ -146,6 +148,7 @@ export default function SecretariaLotesPage() {
   const [readyFormulas, setReadyFormulas] = useState<PrescriptionFormula[]>([]);
   const [readyPhase, setReadyPhase] = useState(treatmentPhases[0]);
   const [readyBottles, setReadyBottles] = useState(1);
+  const [readyBottleVolumeMl, setReadyBottleVolumeMl] = useState<BottleVolumeMl>(4);
   const [context, setContext] = useState<SecretaryContext | null>(null);
 
   const effectiveReadyFormulas = batchIndication === "bacteriana" ? immunobacterialReadyFormulas : readyFormulas;
@@ -400,6 +403,7 @@ export default function SecretariaLotesPage() {
             treatment: prescription.treatment,
             phase: prescription.phase,
             bottles: prescription.bottles,
+            bottleVolumeMl: prescription.bottleVolumeMl,
             formulas: prescription.formulas,
             acquisitionMethod: billing.acquisitionMethod,
             paymentMethod: billing.paymentMethod,
@@ -559,11 +563,13 @@ export default function SecretariaLotesPage() {
         treatment: batchIndication === "bacteriana" ? "Vacina Imunobacteriana" : "Imunoterapia para rinite",
         phase: batchIndication === "bacteriana" ? "Não se aplica" : readyPhase,
         bottles: batchIndication === "bacteriana" ? 4 : readyBottles,
+        bottleVolumeMl: readyBottleVolumeMl,
         formulas: effectiveReadyFormulas.map((formula) => ({ ...formula, id: `formula-${identifier}-${formula.id}` })),
       },
     ]);
     setError("");
     setReadyBottles(batchIndication === "bacteriana" ? 4 : 1);
+    setReadyBottleVolumeMl(4);
     if (batchIndication === "rinite") setReadyFormulas([]);
     setReadyFormulaPercentage("");
   }
@@ -708,10 +714,10 @@ export default function SecretariaLotesPage() {
   ];
 
   function printBatchReport() {
-    const rows = filteredBatches.flatMap((batch) => batch.items.map((item) => `<tr><td>${escapeReportHtml(batch.name ?? batch.code)}</td><td>${escapeReportHtml(batch.orderType === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente")}</td><td>${escapeReportHtml(batchStatuses[batch.status].label)}</td><td>${escapeReportHtml(item.patientName || "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf || "—")}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase)}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(item.doctor || "—")}</td><td>${escapeReportHtml(formatDate(batch.createdAt))}</td></tr>`)).join("");
+    const rows = filteredBatches.flatMap((batch) => batch.items.map((item) => `<tr><td>${escapeReportHtml(batch.name ?? batch.code)}</td><td>${escapeReportHtml(batch.orderType === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente")}</td><td>${escapeReportHtml(batchStatuses[batch.status].label)}</td><td>${escapeReportHtml(item.patientName || "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf || "—")}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase)}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(item.bottleVolumeMl ? `${item.bottleVolumeMl} mL` : "Não informado")}</td><td>${escapeReportHtml(item.doctor || "—")}</td><td>${escapeReportHtml(formatDate(batch.createdAt))}</td></tr>`)).join("");
     const reportWindow = window.open("", "_blank");
     if (!reportWindow) { setError("Permita a abertura de janelas para gerar o relatório."); return; }
-    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de lotes</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:10px;line-height:1.35}.actions{margin-bottom:8px}.actions button{border:0;border-radius:7px;background:#a3113a;color:#fff;padding:8px 12px;font-weight:bold}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:8px;margin-bottom:10px}.brand img{width:42px;height:42px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:16px;letter-spacing:.8px}.brand span{display:block;font-size:8px;font-weight:bold;letter-spacing:.6px;color:#66595d}h1{color:#a3113a;margin:0;font-size:17px}p{margin:5px 0}table{border-collapse:collapse;width:100%;margin-top:12px;table-layout:fixed}th,td{border:1px solid #ddd;padding:5px;text-align:left;vertical-align:top;word-break:break-word}th{background:#f1e6e8;font-size:9px}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header class="brand"><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><strong>CRA CARE</strong><span>CENTRO DE RINITE E ALERGIA</span></div></header><h1>Relatório de lotes</h1><p>Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${filteredBatches.length} lote(s)</p><table><thead><tr><th>Lote</th><th>Tipo</th><th>Status</th><th>Paciente / origem</th><th>CPF</th><th>Tratamento</th><th>Fase</th><th>Frascos</th><th>Médico</th><th>Criação</th></tr></thead><tbody>${rows || '<tr><td colspan="10">Nenhum lote no filtro atual.</td></tr>'}</tbody></table></body></html>`);
+    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de lotes</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:10px;line-height:1.35}.actions{margin-bottom:8px}.actions button{border:0;border-radius:7px;background:#a3113a;color:#fff;padding:8px 12px;font-weight:bold}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:8px;margin-bottom:10px}.brand img{width:42px;height:42px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:16px;letter-spacing:.8px}.brand span{display:block;font-size:8px;font-weight:bold;letter-spacing:.6px;color:#66595d}h1{color:#a3113a;margin:0;font-size:17px}p{margin:5px 0}table{border-collapse:collapse;width:100%;margin-top:12px;table-layout:fixed}th,td{border:1px solid #ddd;padding:5px;text-align:left;vertical-align:top;word-break:break-word}th{background:#f1e6e8;font-size:9px}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header class="brand"><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><strong>CRA CARE</strong><span>CENTRO DE RINITE E ALERGIA</span></div></header><h1>Relatório de lotes</h1><p>Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${filteredBatches.length} lote(s)</p><table><thead><tr><th>Lote</th><th>Tipo</th><th>Status</th><th>Paciente / origem</th><th>CPF</th><th>Tratamento</th><th>Fase</th><th>Frascos</th><th>Volume</th><th>Médico</th><th>Criação</th></tr></thead><tbody>${rows || '<tr><td colspan="11">Nenhum lote no filtro atual.</td></tr>'}</tbody></table></body></html>`);
     reportWindow.document.close();
     reportWindow.focus();
   }
@@ -930,7 +936,7 @@ export default function SecretariaLotesPage() {
                         <div className="mt-4 grid gap-2 text-xs text-[#6e6165] sm:grid-cols-3">
                           <span><strong>Indicação:</strong> {prescription.treatment}</span>
                           <span><strong>Fase:</strong> {prescription.phase}</span>
-                          <span><strong>Frascos:</strong> {prescription.bottles}</span>
+                          <span><strong>Frascos:</strong> {prescription.bottles} · <strong>Volume:</strong> {prescription.bottleVolumeMl ? `${prescription.bottleVolumeMl} mL` : "não informado"}</span>
                           <span><strong>Receita:</strong> {formatDate(prescription.createdAt)}</span>
                         </div>
                         <p className="mt-3 text-xs text-[#766a6d]">
@@ -986,6 +992,11 @@ export default function SecretariaLotesPage() {
                     <label className="text-sm font-semibold text-[#544449]">Quantidade de frascos
                       <input type="number" min={1} value={batchIndication === "bacteriana" ? 4 : readyBottles} readOnly={batchIndication === "bacteriana"} onChange={(event) => setReadyBottles(Number(event.target.value))} className={`mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-3 text-sm font-normal outline-none ${batchIndication === "bacteriana" ? "bg-[#f7f4f2]" : "bg-white focus:border-[#b91142]"}`} />
                     </label>
+                    <label className="text-sm font-semibold text-[#544449]">Volume por frasco
+                      <select value={readyBottleVolumeMl} onChange={(event) => setReadyBottleVolumeMl(Number(event.target.value) as BottleVolumeMl)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
+                        {bottleVolumeOptions.map((volume) => <option key={volume} value={volume}>{volume} mL</option>)}
+                      </select>
+                    </label>
                     <div className="flex items-end"><button type="button" onClick={addReadyItem} disabled={readyFormulaTotal !== 100} className="h-12 w-full rounded-xl bg-[#a3113a] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Adicionar ao lote</button></div>
                   </div>
 
@@ -993,7 +1004,7 @@ export default function SecretariaLotesPage() {
                     {readyItems.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-10 text-center"><p className="text-sm font-semibold text-[#53454a]">Nenhum frasco adicionado</p><p className="mt-2 text-xs text-[#817578]">Escolha a fórmula, a fase e a quantidade para criar o estoque de pronta entrega.</p></div>
                     ) : readyItems.map((item) => (
-                      <article key={item.prescriptionId} className="rounded-2xl border border-[#eee6e2] bg-[#fdfbf9] p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-bold text-[#433438]">{item.formulas.map((formula) => `${formula.name} (${formula.percentage}%)`).join(" · ")}</p><p className="mt-2 text-xs text-[#776b6e]">{item.phase} · {item.bottles} frasco(s) · {item.doctor}</p><span className="mt-3 inline-flex rounded-full bg-[#fff4e4] px-2.5 py-1 text-[11px] font-semibold text-[#966419]">Receita preparada · aguardando aprovação médica</span></div><button type="button" onClick={() => setReadyItems((current) => current.filter((saved) => saved.prescriptionId !== item.prescriptionId))} className="rounded-lg px-2 py-1 text-[#a3113a]" aria-label="Remover item">×</button></div></article>
+                      <article key={item.prescriptionId} className="rounded-2xl border border-[#eee6e2] bg-[#fdfbf9] p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-bold text-[#433438]">{item.formulas.map((formula) => `${formula.name} (${formula.percentage}%)`).join(" · ")}</p><p className="mt-2 text-xs text-[#776b6e]">{item.phase} · {item.bottles} frasco(s) · {item.bottleVolumeMl ?? "volume não informado"}{item.bottleVolumeMl ? " mL" : ""} · {item.doctor}</p><span className="mt-3 inline-flex rounded-full bg-[#fff4e4] px-2.5 py-1 text-[11px] font-semibold text-[#966419]">Receita preparada · aguardando aprovação médica</span></div><button type="button" onClick={() => setReadyItems((current) => current.filter((saved) => saved.prescriptionId !== item.prescriptionId))} className="rounded-lg px-2 py-1 text-[#a3113a]" aria-label="Remover item">×</button></div></article>
                     ))}
                   </div>
                 </div>
@@ -1279,7 +1290,7 @@ export default function SecretariaLotesPage() {
                                     {item.patientName}
                                   </p>
                                   <span className="text-xs font-semibold text-[#a3113a]">
-                                    {item.bottles} frasco(s)
+                                    {item.bottles} frasco(s) · {item.bottleVolumeMl ? `${item.bottleVolumeMl} mL` : "volume não informado"}
                                   </span>
                                 </div>
                                 <p className="mt-1 text-xs text-[#776b6e]">

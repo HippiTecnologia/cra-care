@@ -1,4 +1,5 @@
 import type {
+  BottleVolumeMl,
   DemoPatientRecord,
   DemoPrescription,
   ClinicalRecord,
@@ -74,6 +75,11 @@ function numberValue(record: Record<string, unknown>, key: string) {
     : typeof value === "string" && value.trim() && Number.isFinite(Number(value))
       ? Number(value)
       : undefined;
+}
+
+function bottleVolumeValue(value: unknown): BottleVolumeMl | undefined {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return [4, 6, 8, 10, 12].includes(parsed) ? parsed as BottleVolumeMl : undefined;
 }
 
 function recordValue(value: unknown): Record<string, unknown> {
@@ -159,6 +165,22 @@ export function mapMedicalPatient(
     totalMonths: numberValue(treatment, "totalMonths"),
     lastReceivedDate: stringValue(treatment, "lastReceivedDate"),
     bottlesReceived: numberValue(treatment, "bottlesReceived"),
+    treatmentBottles: Array.isArray(treatment.treatmentBottles)
+      ? treatment.treatmentBottles.flatMap((item) => {
+        const record = recordValue(item);
+        const volumeMl = bottleVolumeValue(record.volumeMl);
+        const quantity = Math.max(1, Math.trunc(numberValue(record, "quantity") ?? 1));
+        if (!volumeMl) return [];
+        return [{
+          id: stringValue(record, "id") ?? crypto.randomUUID(),
+          treatment: /bacteriana|imunobacteriana/i.test(stringValue(record, "treatment") ?? "") ? "Imunobacteriana" as const : "Rinite" as const,
+          volumeMl,
+          quantity,
+          updatedAt: stringValue(record, "updatedAt") ?? row.created_at,
+          updatedBy: stringValue(record, "updatedBy"),
+        }];
+      })
+      : undefined,
     drops: numberValue(treatment, "drops"),
     phase: stringValue(treatment, "phase"),
     delivery: validDelivery(stringValue(treatment, "delivery") ?? stringValue(address, "delivery")),
@@ -236,6 +258,7 @@ function mapPrescription(
     treatment: stringValue(content, "treatment") ?? "Imunoterapia para rinite",
     phase: stringValue(content, "phase") ?? "",
     bottles: numberValue(content, "bottles") ?? 1,
+    bottleVolumeMl: bottleVolumeValue(content.bottleVolumeMl),
     drops: numberValue(content, "drops") ?? 6,
     frequency: stringValue(content, "frequency") ?? "3 vezes por semana",
     posology: stringValue(content, "posology") ?? "",
@@ -691,6 +714,7 @@ export async function createMedicalPrescription(
     treatment: prescription.treatment,
     phase: prescription.phase,
     bottles: prescription.bottles,
+    bottleVolumeMl: prescription.bottleVolumeMl,
     drops: prescription.drops,
     frequency: prescription.frequency,
     posology: prescription.posology,
@@ -702,6 +726,7 @@ export async function createMedicalPrescription(
     patient_id: patient.id,
     doctor_profile_id: doctor.id,
     content,
+    bottle_volume_ml: prescription.bottleVolumeMl ?? null,
     signature_status: "pending",
   }).select("id, patient_id, content, signature_status, created_at").single();
   if (error || !data) throw error ?? new Error("Receita não retornada.");
@@ -747,12 +772,14 @@ export async function prepareMedicalPrescriptionSignature(
   };
   const { data, error } = await getSupabaseClient().from("prescriptions").update({
     signature_status: "ready",
+    bottle_volume_ml: prepared.bottleVolumeMl ?? null,
     content: {
       doctor: prepared.doctor,
       doctorCrm: prepared.doctorCrm,
       treatment: prepared.treatment,
       phase: prepared.phase,
       bottles: prepared.bottles,
+      bottleVolumeMl: prepared.bottleVolumeMl,
       drops: prepared.drops,
       frequency: prepared.frequency,
       posology: prepared.posology,

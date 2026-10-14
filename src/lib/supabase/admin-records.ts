@@ -214,7 +214,7 @@ export async function loadAdminDoctors(context: AdminContext) {
   const supabase = getSupabaseClient();
   const [profileResult, settingResult] = await Promise.all([
     supabase.from("profiles").select("id, full_name, crm").eq("clinic_id", context.clinicId).eq("role", "medico").order("full_name"),
-    supabase.from("doctor_commission_settings").select("doctor_profile_id, commission_per_bottle, active, updated_at").eq("clinic_id", context.clinicId),
+    supabase.from("doctor_commission_settings").select("doctor_profile_id, commission_per_bottle, commission_type, commission_4ml_value, commission_8ml_value, active, updated_at").eq("clinic_id", context.clinicId),
   ]);
   if (profileResult.error) throw profileResult.error;
   if (settingResult.error) throw settingResult.error;
@@ -227,6 +227,9 @@ export async function loadAdminDoctors(context: AdminContext) {
       crm: profile.crm ?? undefined,
       commissionRate: 0,
       commissionPerBottle: number(setting?.commission_per_bottle, COMMISSION_PER_BOTTLE),
+      commissionType: setting?.commission_type === "percentage" ? "percentage" : setting?.commission_type === "fixed" ? "fixed" : undefined,
+      commission4mlValue: setting?.commission_4ml_value === null || setting?.commission_4ml_value === undefined ? undefined : number(setting.commission_4ml_value),
+      commission8mlValue: setting?.commission_8ml_value === null || setting?.commission_8ml_value === undefined ? undefined : number(setting.commission_8ml_value),
       active: setting?.active !== false,
       updatedAt: text(setting?.updated_at, new Date().toISOString()),
     };
@@ -238,12 +241,15 @@ export async function saveAdminDoctor(context: AdminContext, doctor: AdminDoctor
     clinic_id: context.clinicId,
     doctor_profile_id: doctor.id,
     commission_per_bottle: doctor.commissionPerBottle ?? COMMISSION_PER_BOTTLE,
+    commission_type: doctor.commissionType ?? null,
+    commission_4ml_value: doctor.commission4mlValue ?? null,
+    commission_8ml_value: doctor.commission8mlValue ?? null,
     active: doctor.active,
     updated_by: context.id,
     updated_at: new Date().toISOString(),
   }, { onConflict: "clinic_id,doctor_profile_id" });
   if (error) throw error;
-  await writeAudit(context, "médico", doctor.id, "Edição de honorário", `${doctor.name} · honorário de R$ ${(doctor.commissionPerBottle ?? COMMISSION_PER_BOTTLE).toFixed(2)} por frasco`);
+  await writeAudit(context, "médico", doctor.id, "Edição de honorário", `${doctor.name} · 4 mL: ${doctor.commission4mlValue ?? "sem regra"} · 8 mL: ${doctor.commission8mlValue ?? "sem regra"} · modo ${doctor.commissionType === "percentage" ? "percentual" : doctor.commissionType === "fixed" ? "valor fixo" : "não definido"}`);
 }
 
 function saleStatus(patient: DemoPatientRecord): AdminSaleSnapshot["status"] {
@@ -268,6 +274,7 @@ function treatmentLabel(patient: DemoPatientRecord) {
 type PrescriptionSummary = {
   bottleCount: number;
   treatment: string;
+  bottleVolumeMl?: number;
 };
 
 function prescriptionTreatment(value: unknown) {
@@ -294,12 +301,14 @@ function summarizePrescriptions(rows: Record<string, unknown>[]) {
     seenTreatments.add(key);
 
     const bottles = Math.max(1, number(content.bottles, 1));
+    const volume = [4, 6, 8, 10, 12].includes(number(content.bottleVolumeMl)) ? number(content.bottleVolumeMl) : undefined;
     const current = summaries.get(patientId);
     const labels = new Set((current?.treatment ?? "").split(" + ").filter(Boolean));
     if (treatment) labels.add(treatment);
     summaries.set(patientId, {
       bottleCount: (current?.bottleCount ?? 0) + bottles,
       treatment: Array.from(labels).join(" + "),
+      bottleVolumeMl: current ? (current.bottleVolumeMl === volume ? volume : undefined) : volume,
     });
   }
   return summaries;
@@ -367,9 +376,12 @@ function saleFromRow(row: Record<string, unknown>): AdminSaleSnapshot {
     firstPaymentDueAt: snapshot.firstPaymentDueAt ? dateText(snapshot.firstPaymentDueAt, "") || undefined : undefined,
     commissionRateSnapshot: number(snapshot.commissionRateSnapshot),
     bottleCount: number(snapshot.bottleCount) || undefined,
+    bottleVolumeMl: number(snapshot.bottleVolumeMl) || undefined,
     commissionPerBottleSnapshot: snapshot.commissionPerBottleSnapshot === undefined || snapshot.commissionPerBottleSnapshot === null
       ? undefined
       : number(snapshot.commissionPerBottleSnapshot, COMMISSION_PER_BOTTLE),
+    commissionTypeSnapshot: snapshot.commissionTypeSnapshot === "percentage" ? "percentage" : snapshot.commissionTypeSnapshot === "fixed" ? "fixed" : undefined,
+    commissionRuleValueSnapshot: snapshot.commissionRuleValueSnapshot === undefined || snapshot.commissionRuleValueSnapshot === null ? undefined : number(snapshot.commissionRuleValueSnapshot),
     status: ["ativa", "concluida", "cancelada"].includes(text(row.status, text(snapshot.status)))
       ? text(row.status, text(snapshot.status)) as AdminSaleSnapshot["status"]
       : "ativa",
@@ -463,7 +475,11 @@ export async function synchronizeAdminSales(
       firstPaymentDueAt: patient.paymentDueDate ?? addMonthsToDate(patient.startDate ?? patient.createdAt, 1),
       commissionRateSnapshot: doctor?.commissionRate ?? 0,
       bottleCount: prescribed?.bottleCount ?? bottlesForMethod(patient.acquisitionMethod ?? selectedMethod.name),
-      commissionPerBottleSnapshot: doctor?.commissionPerBottle ?? COMMISSION_PER_BOTTLE,
+      bottleVolumeMl: prescribed?.bottleVolumeMl,
+      commissionTypeSnapshot: [4, 8].includes(prescribed?.bottleVolumeMl ?? 0) ? doctor?.commissionType : undefined,
+      commissionRuleValueSnapshot: prescribed?.bottleVolumeMl === 4
+        ? doctor?.commission4mlValue
+        : prescribed?.bottleVolumeMl === 8 ? doctor?.commission8mlValue : undefined,
       status: saleStatus(patient),
     };
     const { error } = await supabase.from("admin_sales").insert({

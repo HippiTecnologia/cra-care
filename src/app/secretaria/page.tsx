@@ -5,9 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  bottleVolumeOptions,
   treatmentPhases,
 } from "../medico/patient-store";
-import type { DemoPatientRecord, DemoPrescription, PatientPaymentRecord } from "../medico/patient-store";
+import type { BottleVolumeMl, DemoPatientRecord, DemoPrescription, PatientPaymentRecord, TreatmentBottlePlan } from "../medico/patient-store";
 import { createDefaultPortalState, type PatientPortalState } from "../paciente/patient-portal-store";
 import { patientUsername } from "../../lib/auth/credentials";
 import {
@@ -50,6 +51,7 @@ type Patient = {
   totalMonths: number;
   lastReceivedDate: string;
   bottlesReceived: number;
+  treatmentBottles: TreatmentBottlePlan[];
   drops: number;
   phase: string;
   delivery: DeliveryMethod;
@@ -69,6 +71,7 @@ type Patient = {
   acquisitionMethod?: AcquisitionMethod;
   paymentMethod?: PaymentMethod;
   paymentInstallments?: number;
+  contractValue?: number;
   payments?: PatientPaymentRecord[];
   notes?: string;
   abandonmentReason?: string;
@@ -99,6 +102,7 @@ type NewPatientForm = {
   totalMonths: number;
   lastReceivedDate: string;
   bottlesReceived: number;
+  treatmentBottles: TreatmentBottlePlan[];
   drops: number;
   phase: string;
   delivery: DeliveryMethod;
@@ -106,6 +110,7 @@ type NewPatientForm = {
   acquisitionMethod: AcquisitionMethod;
   paymentMethod: PaymentMethod;
   paymentInstallments: number;
+  contractValue: number;
   payments: PatientPaymentRecord[];
   notes: string;
   abandonmentReason: string;
@@ -200,6 +205,7 @@ function createEmptyPatientForm(): NewPatientForm {
     totalMonths: 36,
     lastReceivedDate: today,
     bottlesReceived: 0,
+    treatmentBottles: [],
     drops: 6,
     phase: phaseOptions[0],
     delivery: "Retirada",
@@ -207,6 +213,7 @@ function createEmptyPatientForm(): NewPatientForm {
     acquisitionMethod: "Por frasco",
     paymentMethod: "A definir",
     paymentInstallments: 1,
+    contractValue: 0,
     payments: [],
     notes: "",
     abandonmentReason: "",
@@ -270,6 +277,7 @@ function patientFromMedicalRecord(record: DemoPatientRecord): Patient {
     totalMonths: record.totalMonths ?? defaults.totalMonths,
     lastReceivedDate: record.lastReceivedDate ?? defaults.lastReceivedDate,
     bottlesReceived: record.bottlesReceived ?? defaults.bottlesReceived,
+    treatmentBottles: record.treatmentBottles ?? [],
     drops: record.drops ?? defaults.drops,
     phase: record.phase ?? defaults.phase,
     delivery: record.delivery ?? defaults.delivery,
@@ -277,6 +285,7 @@ function patientFromMedicalRecord(record: DemoPatientRecord): Patient {
     acquisitionMethod: record.acquisitionMethod ?? defaults.acquisitionMethod,
     paymentMethod: record.paymentMethod ?? defaults.paymentMethod,
     paymentInstallments: record.paymentInstallments ?? 1,
+    contractValue: record.contractValue,
     payments: record.payments ?? [],
     notes: record.notes ?? "",
     abandonmentReason: record.abandonmentReason ?? "",
@@ -464,6 +473,43 @@ export default function SecretariaPage() {
     setFormError("");
   }
 
+  function addTreatmentBottlePlan() {
+    const treatment = /bacteriana|imunobacteriana/i.test(newPatient.treatment) ? "Imunobacteriana" : "Rinite";
+    setNewPatient((current) => ({
+      ...current,
+      treatmentBottles: [...current.treatmentBottles, {
+        id: crypto.randomUUID(),
+        treatment,
+        volumeMl: 4,
+        quantity: 1,
+        updatedAt: new Date().toISOString(),
+        updatedBy: context?.fullName,
+      }],
+    }));
+    setFormError("");
+  }
+
+  function updateTreatmentBottlePlan(id: string, changes: Partial<Pick<TreatmentBottlePlan, "treatment" | "volumeMl" | "quantity">>) {
+    setNewPatient((current) => ({
+      ...current,
+      treatmentBottles: current.treatmentBottles.map((plan) => plan.id === id ? {
+        ...plan,
+        ...changes,
+        quantity: Math.max(1, changes.quantity ?? plan.quantity),
+        updatedAt: new Date().toISOString(),
+        updatedBy: context?.fullName,
+      } : plan),
+    }));
+    setFormError("");
+  }
+
+  function removeTreatmentBottlePlan(id: string) {
+    setNewPatient((current) => ({
+      ...current,
+      treatmentBottles: current.treatmentBottles.filter((plan) => plan.id !== id),
+    }));
+  }
+
   function closePatientForm() {
     setShowPatientForm(false);
     setEditingPatientId(null);
@@ -496,6 +542,7 @@ export default function SecretariaPage() {
       totalMonths: patient.totalMonths,
       lastReceivedDate: patient.lastReceivedDate,
       bottlesReceived: patient.bottlesReceived,
+      treatmentBottles: patient.treatmentBottles,
       drops: patient.drops,
       phase: patient.phase,
       delivery: patient.delivery,
@@ -503,6 +550,7 @@ export default function SecretariaPage() {
       acquisitionMethod: patient.acquisitionMethod ?? "Por frasco",
       paymentMethod: patient.paymentMethod ?? "A definir",
       paymentInstallments: patient.paymentInstallments ?? 1,
+      contractValue: patient.contractValue ?? 0,
       payments: patient.payments ?? [],
       notes: patient.notes ?? "",
       abandonmentReason: patient.abandonmentReason ?? "",
@@ -612,6 +660,7 @@ export default function SecretariaPage() {
       totalMonths: newPatient.totalMonths,
       lastReceivedDate: newPatient.lastReceivedDate,
       bottlesReceived: newPatient.bottlesReceived,
+      treatmentBottles: newPatient.treatmentBottles,
       drops: newPatient.drops,
       phase: newPatient.phase,
       delivery: newPatient.delivery,
@@ -631,6 +680,7 @@ export default function SecretariaPage() {
       acquisitionMethod: newPatient.acquisitionMethod,
       paymentMethod: newPatient.paymentMethod,
       paymentInstallments: newPatient.paymentMethod === "Cartão de crédito" ? Math.max(1, newPatient.paymentInstallments) : undefined,
+      contractValue: Math.max(0, newPatient.contractValue),
       payments: newPatient.payments,
       notes: newPatient.notes.trim(),
       abandonmentReason: newPatient.status === "desistente" ? newPatient.abandonmentReason.trim() : undefined,
@@ -1010,7 +1060,7 @@ export default function SecretariaPage() {
                       </span>
                     </div>
 
-                    <div className="space-y-3">
+                    <div className="max-h-[760px] space-y-3 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
                       {columnPatients.length === 0 && (
                         <div className="rounded-2xl border border-dashed border-[#dcd2cc] px-4 py-6 text-center text-xs text-[#8c8184]">
                           Nenhum paciente nesta coluna.
@@ -1427,6 +1477,35 @@ export default function SecretariaPage() {
                     </label>
                   )}
                 </div>
+                <div className="mt-5 rounded-2xl border border-[#eadfd9] bg-[#fcfaf8] p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-bold text-[#433438]">Frascos vinculados ao tratamento</h4>
+                      <p className="mt-1 text-xs text-[#817578]">Defina tratamento, volume e quantidade. Cada alteração fica registrada no histórico de auditoria.</p>
+                    </div>
+                    <button type="button" onClick={addTreatmentBottlePlan} className="rounded-xl border border-[#a3113a] bg-white px-4 py-2 text-xs font-bold text-[#a3113a]">+ Adicionar frasco</button>
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {newPatient.treatmentBottles.length === 0 ? <p className="rounded-xl border border-dashed border-[#dfd5d0] px-4 py-5 text-center text-xs text-[#817578]">Nenhum plano de frascos cadastrado.</p> : newPatient.treatmentBottles.map((plan) => (
+                      <div key={plan.id} className="grid gap-3 rounded-xl bg-white p-3 sm:grid-cols-[1fr_140px_120px_auto] sm:items-end">
+                        <label className="text-xs font-semibold text-[#66595d]">Tratamento
+                          <select value={plan.treatment} onChange={(event) => updateTreatmentBottlePlan(plan.id, { treatment: event.target.value as TreatmentBottlePlan["treatment"] })} className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] bg-white px-3 text-sm font-normal">
+                            <option>Rinite</option><option>Imunobacteriana</option>
+                          </select>
+                        </label>
+                        <label className="text-xs font-semibold text-[#66595d]">Volume
+                          <select value={plan.volumeMl} onChange={(event) => updateTreatmentBottlePlan(plan.id, { volumeMl: Number(event.target.value) as BottleVolumeMl })} className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] bg-white px-3 text-sm font-normal">
+                            {bottleVolumeOptions.map((volume) => <option key={volume} value={volume}>{volume} mL</option>)}
+                          </select>
+                        </label>
+                        <label className="text-xs font-semibold text-[#66595d]">Quantidade
+                          <input type="number" min={1} value={plan.quantity} onChange={(event) => updateTreatmentBottlePlan(plan.id, { quantity: Number(event.target.value) })} className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm font-normal" />
+                        </label>
+                        <button type="button" onClick={() => removeTreatmentBottlePlan(plan.id)} className="h-10 rounded-lg bg-[#fff1f3] px-3 text-xs font-bold text-[#a3113a]">Remover</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </section>
 
               <section className="border-t border-[#f0e8e4] pt-6">
@@ -1534,42 +1613,45 @@ export default function SecretariaPage() {
               </section>
 
               <section className="border-t border-[#f0e8e4] pt-6">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div>
                     <h3 className="text-base font-bold text-[#a3113a]">Financeiro do paciente</h3>
                     <p className="mt-1 text-xs text-[#817578]">Registre os valores efetivamente pagos pelo paciente.</p>
                   </div>
-                  <div className="rounded-2xl bg-[#edf8f3] px-4 py-3 text-right">
-                    <p className="text-xs text-[#187157]">Total pago</p>
-                    <p className="mt-1 text-xl font-bold text-[#187157]">
-                      {formatCurrency(newPatient.payments.reduce((total, payment) => total + payment.amount, 0))}
-                    </p>
+                  <div className="grid grid-cols-3 gap-2 text-right">
+                    <div className="rounded-xl bg-[#f5f0ed] px-3 py-2"><p className="text-[10px] text-[#716569]">Total</p><p className="mt-0.5 text-sm font-bold text-[#433438]">{formatCurrency(newPatient.contractValue)}</p></div>
+                    <div className="rounded-xl bg-[#edf8f3] px-3 py-2"><p className="text-[10px] text-[#187157]">Pago</p><p className="mt-0.5 text-sm font-bold text-[#187157]">{formatCurrency(newPatient.payments.reduce((total, payment) => total + payment.amount, 0))}</p></div>
+                    <div className="rounded-xl bg-[#fff4e4] px-3 py-2"><p className="text-[10px] text-[#966419]">Saldo</p><p className="mt-0.5 text-sm font-bold text-[#966419]">{formatCurrency(Math.max(0, newPatient.contractValue - newPatient.payments.reduce((total, payment) => total + payment.amount, 0)))}</p></div>
                   </div>
                 </div>
 
-                <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <label className="text-xs font-semibold text-[#544449]">
+                    Valor total contratado (R$)
+                    <input type="number" min="0" step="0.01" value={newPatient.contractValue || ""} onChange={(event) => updateNewPatient("contractValue", Number(event.target.value))} placeholder="0,00" className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm font-normal outline-none focus:border-[#b91142]" />
+                  </label>
                   <label className="text-sm font-medium text-[#544449]">
                     Valor pago (R$)
-                    <input type="number" min="0.01" step="0.01" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} placeholder="0,00" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" />
+                    <input type="number" min="0.01" step="0.01" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} placeholder="0,00" className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142]" />
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
                     Data do pagamento
-                    <input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" />
+                    <input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142]" />
                   </label>
-                  <label className="text-sm font-medium text-[#544449] lg:col-span-2">
+                  <label className="text-sm font-medium text-[#544449]">
                     Observação
-                    <input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: pagamento do 2º frasco" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" />
+                    <input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: 2º frasco" className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142]" />
                   </label>
                 </div>
-                <button type="button" onClick={addPayment} className="mt-4 rounded-xl bg-[#187157] px-5 py-3 text-sm font-semibold text-white">
+                <button type="button" onClick={addPayment} className="mt-3 rounded-lg bg-[#187157] px-4 py-2.5 text-xs font-semibold text-white">
                   Adicionar pagamento
                 </button>
 
-                <div className="mt-5 space-y-3">
+                <div className="mt-4 space-y-2">
                   {newPatient.payments.length === 0 ? (
                     <p className="rounded-2xl border border-dashed border-[#e6dbd6] px-4 py-5 text-center text-sm text-[#817578]">Nenhum pagamento registrado.</p>
                   ) : newPatient.payments.map((payment) => (
-                    <article key={payment.id} className="flex flex-col gap-3 rounded-2xl bg-[#fbf5f2] p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <article key={payment.id} className="flex flex-col gap-2 rounded-xl bg-[#fbf5f2] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <p className="text-sm font-bold text-[#433438]">{formatCurrency(payment.amount)}</p>
                         <p className="mt-1 text-xs text-[#716569]">{formatDate(payment.paidAt)} · {payment.method}{payment.installments ? ` · ${payment.installments}x` : ""}</p>

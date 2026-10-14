@@ -29,6 +29,9 @@ export type AdminDoctor = {
   crm?: string;
   commissionRate: number;
   commissionPerBottle?: number;
+  commissionType?: "fixed" | "percentage";
+  commission4mlValue?: number;
+  commission8mlValue?: number;
   active: boolean;
   updatedAt: string;
 };
@@ -53,7 +56,10 @@ export type AdminSaleSnapshot = {
   firstPaymentDueAt?: string;
   commissionRateSnapshot: number;
   bottleCount?: number;
+  bottleVolumeMl?: number;
   commissionPerBottleSnapshot?: number;
+  commissionTypeSnapshot?: "fixed" | "percentage";
+  commissionRuleValueSnapshot?: number;
   status: "ativa" | "concluida" | "cancelada";
 };
 

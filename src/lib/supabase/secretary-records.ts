@@ -1,4 +1,5 @@
 import type {
+  BottleVolumeMl,
   DemoBatch,
   DemoBatchItem,
   DemoInvoice,
@@ -36,6 +37,16 @@ export type SecretaryDoctor = {
   username?: string;
 };
 
+export type TeamNotification = {
+  id: string;
+  patientId?: string;
+  title: string;
+  message: string;
+  href: string;
+  createdAt: string;
+  readAt?: string;
+};
+
 type PrescriptionRow = {
   id: string;
   patient_id: string;
@@ -58,6 +69,11 @@ function text(value: unknown, fallback = "") {
 function number(value: unknown, fallback = 0) {
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function bottleVolume(value: unknown): BottleVolumeMl | undefined {
+  const parsed = number(value);
+  return [4, 6, 8, 10, 12].includes(parsed) ? parsed as BottleVolumeMl : undefined;
 }
 
 function manualNotificationFromValue(value: unknown): PatientManualNotification | null {
@@ -99,6 +115,7 @@ function prescriptionFromRow(
     treatment: text(content.treatment, "Imunoterapia para rinite"),
     phase: text(content.phase),
     bottles: number(content.bottles, 1),
+    bottleVolumeMl: bottleVolume(content.bottleVolumeMl),
     drops: number(content.drops, 6),
     frequency: text(content.frequency, "3 vezes por semana"),
     posology: text(content.posology),
@@ -152,6 +169,32 @@ export async function loadSecretaryDoctors(context?: SecretaryContext) {
     specialty: row.specialty ?? "",
     username: row.username ?? undefined,
   }));
+}
+
+export async function loadTeamNotifications(context: SecretaryContext) {
+  const { data, error } = await getSupabaseClient().from("team_notifications")
+    .select("id, patient_id, title, message, href, created_at, read_at")
+    .eq("clinic_id", context.clinicId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) throw error;
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map((row): TeamNotification => ({
+    id: text(row.id),
+    patientId: text(row.patient_id) || undefined,
+    title: text(row.title),
+    message: text(row.message),
+    href: text(row.href, "/secretaria"),
+    createdAt: text(row.created_at),
+    readAt: text(row.read_at) || undefined,
+  }));
+}
+
+export async function markTeamNotificationRead(context: SecretaryContext, notificationId: string) {
+  const { error } = await getSupabaseClient().from("team_notifications").update({
+    read_at: new Date().toISOString(),
+    read_by: context.id,
+  }).eq("id", notificationId).eq("clinic_id", context.clinicId);
+  if (error) throw error;
 }
 
 function paymentFromRow(row: Record<string, unknown>): PatientPaymentRecord {
@@ -228,6 +271,7 @@ function patientPayload(patient: DemoPatientRecord, existing: MedicalPatientRow)
       totalMonths: patient.totalMonths ?? 0,
       lastReceivedDate: patient.lastReceivedDate ?? "",
       bottlesReceived: patient.bottlesReceived ?? 0,
+      treatmentBottles: patient.treatmentBottles ?? existingTreatment.treatmentBottles ?? [],
       drops: patient.drops ?? 0,
       phase: patient.phase ?? "",
       delivery: patient.delivery ?? "Retirada",
@@ -275,6 +319,17 @@ export async function saveSecretaryPatient(
     .eq("id", patient.id)
     .eq("clinic_id", context.clinicId);
   if (error) throw error;
+
+  const previousPlans = Array.isArray(objectValue((existing as unknown as MedicalPatientRow).treatment).treatmentBottles)
+    ? objectValue((existing as unknown as MedicalPatientRow).treatment).treatmentBottles
+    : [];
+  if (JSON.stringify(previousPlans) !== JSON.stringify(patient.treatmentBottles ?? [])) {
+    void audit(context, "update", "patient_treatment_bottles", patient.id, {
+      patientName: patient.name,
+      previous: previousPlans,
+      current: patient.treatmentBottles ?? [],
+    });
+  }
 
   const payments = patient.payments ?? [];
   const { data: savedPayments, error: paymentReadError } = await supabase
@@ -600,6 +655,7 @@ function batchItemFromRow(row: Record<string, unknown>): DemoBatchItem {
     treatment: text(metadata.treatment),
     phase: text(metadata.phase),
     bottles: number(row.bottles, number(metadata.bottles, 1)),
+    bottleVolumeMl: bottleVolume(row.bottle_volume_ml) ?? bottleVolume(metadata.bottleVolumeMl),
     formulas: Array.isArray(metadata.formulas) ? metadata.formulas as PrescriptionFormula[] : [],
   };
 }
@@ -676,6 +732,7 @@ export async function saveSecretaryBatch(context: SecretaryContext, batch: DemoB
       patient_id: item.patientId && isUuid(item.patientId) ? item.patientId : null,
       prescription_id: item.prescriptionId && isUuid(item.prescriptionId) ? item.prescriptionId : null,
       bottles: item.bottles,
+      bottle_volume_ml: item.bottleVolumeMl ?? null,
       metadata: item,
     })));
     if (itemError) throw itemError;
@@ -699,6 +756,7 @@ function stockFromRow(row: Record<string, unknown>): DemoStockItem {
     treatment: text(metadata.treatment),
     phase: text(metadata.phase),
     bottles: number(metadata.bottles, 1),
+    bottleVolumeMl: bottleVolume(row.volume_ml) ?? bottleVolume(metadata.bottleVolumeMl),
     formulas: Array.isArray(metadata.formulas) ? metadata.formulas as PrescriptionFormula[] : [],
     laboratory: text(metadata.laboratory),
     receivedAt: text(row.received_at, text(metadata.receivedAt)),
@@ -742,6 +800,7 @@ export async function saveSecretaryStockItem(context: SecretaryContext, item: De
     bottle_number: bottleNumber,
     received_at: item.receivedAt ? item.receivedAt.slice(0, 10) : null,
     status: item.status,
+    volume_ml: item.bottleVolumeMl ?? null,
     reserved_at: item.reservedAt ?? null,
     delivered_at: item.deliveredAt ?? null,
     checked_by: item.checkedBy,
@@ -790,6 +849,7 @@ export async function confirmSecretaryBatch(
       treatment: item.treatment,
       phase: item.phase,
       bottles: item.bottles,
+      bottleVolumeMl: item.bottleVolumeMl,
       formulas: item.formulas,
       delivery: patient?.delivery,
       laboratory: batch.laboratory,

@@ -6,8 +6,11 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { PatientManualNotification } from "../../paciente/patient-portal-store";
 import {
   createSecretaryNotification,
+  loadTeamNotifications,
   loadSecretaryNotifications,
   loadSecretaryPatients,
+  markTeamNotificationRead,
+  type TeamNotification,
   type SecretaryContext,
 } from "../../../lib/supabase/secretary-records";
 import type { DemoPatientRecord } from "../../medico/patient-store";
@@ -19,6 +22,7 @@ export default function SecretariaNotificationsPage() {
   const [context, setContext] = useState<SecretaryContext | null>(null);
   const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
   const [notifications, setNotifications] = useState<Record<string, PatientManualNotification[]>>({});
+  const [teamNotifications, setTeamNotifications] = useState<TeamNotification[]>([]);
   const [recipient, setRecipient] = useState("todos");
   const [icon, setIcon] = useState("📣");
   const [title, setTitle] = useState("");
@@ -36,10 +40,14 @@ export default function SecretariaNotificationsPage() {
   async function load() {
     try {
       const workspace = await loadSecretaryPatients();
-      const loadedNotifications = await loadSecretaryNotifications(workspace.patients.map((patient) => patient.id));
+      const [loadedNotifications, loadedTeamNotifications] = await Promise.all([
+        loadSecretaryNotifications(workspace.patients.map((patient) => patient.id)),
+        loadTeamNotifications(workspace.context),
+      ]);
       setContext(workspace.context);
       setPatients(workspace.patients);
       setNotifications(loadedNotifications);
+      setTeamNotifications(loadedTeamNotifications);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível carregar as notificações.");
     }
@@ -88,7 +96,7 @@ export default function SecretariaNotificationsPage() {
 
   const patientName = (patientId: string) => patients.find((patient) => patient.id === patientId)?.name ?? "Paciente";
   const doctors = Array.from(new Set(patients.map((patient) => patient.doctor).filter(Boolean)));
-  const filteredPatients = useMemo(() => patients.filter((patient) => {
+  const filteredPatients = patients.filter((patient) => {
     const searchable = `${patient.name} ${patient.cpf}`.toLocaleLowerCase();
     if (search && !searchable.includes(search.toLocaleLowerCase())) return false;
     if (doctorFilter !== "todos" && patient.doctor !== doctorFilter) return false;
@@ -96,8 +104,14 @@ export default function SecretariaNotificationsPage() {
     if (birthdayMonth !== "todos" && String(new Date(`${patient.birthDate}T12:00:00`).getMonth() + 1) !== birthdayMonth) return false;
     if (orderDate && !patient.createdAt.startsWith(orderDate)) return false;
     return true;
-  }), [birthdayMonth, doctorFilter, orderDate, patients, search, statusFilter]);
+  });
   const toggleRecipient = (patientId: string) => setSelectedRecipients((current) => current.includes(patientId) ? current.filter((id) => id !== patientId) : [...current, patientId]);
+  const openTeamNotification = (notification: TeamNotification) => {
+    if (!context || notification.readAt) return;
+    void markTeamNotificationRead(context, notification.id).then(() => {
+      setTeamNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, readAt: new Date().toISOString() } : item));
+    });
+  };
 
   return (
     <main className="min-h-screen bg-[#f8f5f2] text-[#34292d]">
@@ -127,6 +141,11 @@ export default function SecretariaNotificationsPage() {
 
           {message && <div className="mb-5 rounded-2xl border border-[#cfe9df] bg-[#edf8f3] px-4 py-3 text-sm text-[#187157]">{message}</div>}
           {error && <div role="alert" className="mb-5 rounded-2xl border border-[#f3d5d8] bg-[#fff2f3] px-4 py-3 text-sm text-[#a3113a]">{error}</div>}
+
+          <section className="mb-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
+            <div className="flex flex-wrap items-end justify-between gap-3"><div><h2 className="text-xl font-bold text-[#433438]">Avisos internos da equipe</h2><p className="mt-1 text-sm text-[#817578]">Conclusões registradas pelos médicos, sem notificações duplicadas.</p></div><span className="rounded-full bg-[#fff0f3] px-3 py-1 text-xs font-bold text-[#a3113a]">{teamNotifications.filter((item) => !item.readAt).length} não lido(s)</span></div>
+            <div className="mt-5 grid gap-3 lg:grid-cols-2">{teamNotifications.length === 0 ? <p className="rounded-2xl border border-dashed border-[#e6dbd6] p-6 text-center text-sm text-[#817578] lg:col-span-2">Nenhum aviso interno recebido.</p> : teamNotifications.map((item) => <Link key={item.id} href={item.href} onClick={() => openTeamNotification(item)} className={`rounded-2xl border p-4 transition hover:border-[#d9b4bf] ${item.readAt ? "border-[#eee6e2] bg-[#fdfbf9]" : "border-[#e8b8c4] bg-[#fff5f7]"}`}><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-bold text-[#433438]">{item.title}</h3><p className="mt-2 text-sm text-[#66595d]">{item.message}</p></div>{!item.readAt && <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-[#b91142]" />}</div><p className="mt-3 text-[11px] text-[#817578]">{new Date(item.createdAt).toLocaleString("pt-BR")} · abrir paciente →</p></Link>)}</div>
+          </section>
 
           <div className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
             <form onSubmit={submit} className="rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
