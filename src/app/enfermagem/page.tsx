@@ -352,6 +352,10 @@ export default function NursingPage() {
     readableStyle.textContent = "html{background:#3a3a3a}body{font-size:10px;width:190mm;min-height:277mm;height:auto;margin:18px auto;padding:10mm;background:#fff;box-shadow:0 4px 24px #1118}.patient{font-size:10px;line-height:15px}th{font-size:8.5px;padding:4px 3px}td{font-size:8.7px;line-height:11px;padding:3px 4px}.reaction{font-size:10.5px;font-weight:700;text-align:center;letter-spacing:1px}.reaction.no-reaction{font-size:8.5px;letter-spacing:0}.battery h2{font-size:10px;padding:5px 8px}.legend{font-size:9px;line-height:13px}.signatures{font-size:9px;margin-top:64px}@media print{html,body{background:white}body{padding:0;width:auto;min-height:0;margin:0;box-shadow:none}}";
     printable.document.head.append(readableStyle);
     printable.document.close();
+    if (openPrintDialog) {
+      printable.focus();
+      window.setTimeout(() => printable.print(), 250);
+    }
   }
 
   function printPatchReport(report: SavedReport, openPrintDialog = true) {
@@ -382,6 +386,10 @@ export default function NursingPage() {
     readableStyle.textContent = "html{background:#3a3a3a}body{font-size:10.5px;width:188mm;min-height:275mm;height:auto;margin:18px auto;padding:11mm;background:#fff;box-shadow:0 4px 24px #1118}.patient{font-size:10.5px;line-height:17px}th{font-size:9px;padding:6px}td{font-size:11px;line-height:14px;padding:8px 7px}.battery h2,.details h2{font-size:10.5px;padding:7px 9px}.details h3{font-size:11px}.details p{font-size:9.5px;line-height:13px}.details article{margin:8px 0;padding:10px;border:1px solid #e2d8d5;border-radius:8px;background:#fffafa;break-inside:avoid}.details article p:first-of-type{margin-bottom:14px}@media print{html,body{background:white}body{padding:0;width:auto;min-height:0;margin:0;box-shadow:none}}";
     printable.document.head.append(readableStyle);
     printable.document.close();
+    if (openPrintDialog) {
+      printable.focus();
+      window.setTimeout(() => printable.print(), 250);
+    }
   }
 
   return <main data-exams-area className="min-h-screen bg-[#f8f5f2] text-[#34292d]"><div className="min-h-screen lg:grid lg:grid-cols-[270px_1fr]">
