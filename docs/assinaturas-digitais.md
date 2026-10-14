@@ -25,6 +25,12 @@ O médico acessa **Assinatura Digital**, abre o documento e autoriza. A secretá
 
 Não foram inventados endpoints para Soluti, A1 ou A3. Ativar uma variável sem o conector correspondente não produz assinatura e nenhum mock é marcado como válido.
 
+### Validação A1 / ICP-Brasil
+
+O Hippi Assinador A1 assina somente no computador do médico. Antes de aceitar o retorno, o CRA Care compara o PDF assinado com o PDF preparado, confere a assinatura CMS e confirma que o certificado usado é o mesmo vinculado ao médico. Em seguida, o servidor valida a cadeia até uma raiz ICP-Brasil configurada e consulta as listas de certificados revogados (CRL) publicadas pelas ACs.
+
+Para habilitar essa última etapa, gere as raízes públicas atualizadas com `npm run icp:trust-store` e cadastre o conteúdo completo gerado no Vercel em `ICP_BRASIL_TRUSTED_ROOTS_PEM`, tanto em **Production** quanto em **Preview**. Faça um novo deploy após salvar. Sem essa variável, ou se uma CRL não puder ser consultada, o documento permanece em `signing` e o QR Code não informa que ele é autêntico.
+
 ## Banco e armazenamento
 
 - `digital_signatures`: estado e evidências da assinatura.

@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { authenticatedSignatureUser, requestMetadata } from "../../../lib/signatures/auth";
 import { writeSignatureAudit } from "../../../lib/signatures/audit";
+import { prepareA1Pdf } from "../../../lib/signatures/a1";
 import { buildVerifiablePrescriptionPdf, loadPrescriptionDocument } from "../../../lib/signatures/documents";
 import { getSignatureProvider, listSignatureProviders } from "../../../lib/signatures/providers";
 import { allowSignatureRequest } from "../../../lib/signatures/rate-limit";
@@ -60,7 +61,10 @@ export async function POST(request: NextRequest) {
     const { data: existing } = await (admin.from("digital_signatures") as any).select("*").eq("clinic_id", user.clinicId).eq("document_type", body.documentType).eq("document_id", body.documentId).eq("signer_user_id", signerId).maybeSingle();
     if (existing?.status === "signed") return NextResponse.json({ error: "Este documento já está assinado." }, { status: 409 });
     const validationCode = existing?.validation_code ?? randomBytes(16).toString("hex").toUpperCase();
-    const pdf = await buildVerifiablePrescriptionPdf(source.document, validationCode);
+    const generatedPdf = await buildVerifiablePrescriptionPdf(source.document, validationCode);
+    // The A1 connector must sign this exact prepared file. Keeping the placeholder
+    // here lets the server later prove that no byte outside the CMS envelope changed.
+    const pdf = provider.key === "a1" ? await prepareA1Pdf(Buffer.from(generatedPdf)) : generatedPdf;
     const documentHash = createHash("sha256").update(pdf).digest("hex");
     const signatureId = existing?.id ?? randomUUID();
     const storagePath = `${user.clinicId}/${signatureId}/original-${documentHash.slice(0, 12)}.pdf`;
