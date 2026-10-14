@@ -9,6 +9,7 @@
     "lint": "eslint",
     "a1:sign": "node scripts/a1-sign-pdf.mjs",
     "icp:trust-store": "node scripts/icp-brasil-trust-store.mjs",
+    "icp:env": "node scripts/icp-brasil-trust-store.mjs --env-file icp-brasil-roots.env",
     "hippi:a1": "node scripts/hippi-assinador-a1.mjs",
     "hippi:dev": "electron .",
     "hippi:dist": "electron-builder --win nsis",

@@ -29,7 +29,7 @@ Não foram inventados endpoints para Soluti, A1 ou A3. Ativar uma variável sem 
 
 O Hippi Assinador A1 assina somente no computador do médico. Antes de aceitar o retorno, o CRA Care compara o PDF assinado com o PDF preparado, confere a assinatura CMS e confirma que o certificado usado é o mesmo vinculado ao médico. Em seguida, o servidor valida a cadeia até uma raiz ICP-Brasil configurada e consulta as listas de certificados revogados (CRL) publicadas pelas ACs.
 
-Para habilitar essa última etapa, gere as raízes públicas atualizadas com `npm run icp:trust-store` e cadastre o conteúdo completo gerado no Vercel em `ICP_BRASIL_TRUSTED_ROOTS_PEM`, tanto em **Production** quanto em **Preview**. Faça um novo deploy após salvar. Sem essa variável, ou se uma CRL não puder ser consultada, o documento permanece em `signing` e o QR Code não informa que ele é autêntico.
+Para habilitar essa última etapa, execute `npm run icp:env`. Isso cria o arquivo público `icp-brasil-roots.env` com as raízes atualizadas. No Vercel, use **Settings → Environment Variables → Import .env** e importe esse arquivo, selecionando **Production** e depois repetindo para **Preview**. Faça um novo deploy após salvar. Sem essa variável, ou se uma CRL não puder ser consultada, o documento permanece em `signing` e o QR Code não informa que ele é autêntico.
 
 ## Banco e armazenamento
 

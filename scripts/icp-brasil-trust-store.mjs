@@ -1,6 +1,7 @@
 // Downloads only the current ICP-Brasil root certificates published by ITI.
 // The output is public PEM data and is intended for ICP_BRASIL_TRUSTED_ROOTS_PEM.
 import { execFile } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -42,4 +43,14 @@ const certificates = await Promise.all(rootUrls.map(async (url) => {
   return toPem(bytes);
 }));
 
-process.stdout.write(`${certificates.join("\n")}\n`);
+const pem = `${certificates.join("\n")}\n`;
+const outputPath = process.argv[2] === "--env-file" ? process.argv[3] : undefined;
+
+if (outputPath) {
+  if (!outputPath || outputPath.startsWith("-") || !outputPath.endsWith(".env")) throw new Error("Informe um arquivo .env para exportar as raízes ICP-Brasil.");
+  const escapedPem = pem.replace(/\\/g, "\\\\").replace(/\n/g, "\\n");
+  await writeFile(outputPath, `ICP_BRASIL_TRUSTED_ROOTS_PEM="${escapedPem}"\n`, "utf8");
+  process.stdout.write(`Arquivo criado: ${outputPath}\n`);
+} else {
+  process.stdout.write(pem);
+}
