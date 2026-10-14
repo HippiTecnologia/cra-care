@@ -48,6 +48,14 @@ export async function createNursingPatient(profile: NursingProfile, input: { nam
   return data.id as string;
 }
 
+export async function updateNursingPatient(profile: NursingProfile, patientId: string, input: { name: string; cpf: string; birthDate: string; phone?: string }) {
+  const { error } = await (getSupabaseClient().from("patients") as any)
+    .update({ full_name: input.name.trim(), cpf: input.cpf.replace(/\D/g, ""), birth_date: input.birthDate, phone: input.phone?.trim() || null })
+    .eq("id", patientId)
+    .eq("clinic_id", profile.clinicId);
+  if (error) throw error;
+}
+
 export async function createNursingReport(profile: NursingProfile, input: { patientId: string; doctorId?: string; reportType: "prick_test" | "patch_test"; content: Record<string, unknown> }) {
   const { error } = await (getSupabaseClient().from("nursing_reports") as any).insert({ clinic_id: profile.clinicId, patient_id: input.patientId, nurse_profile_id: profile.id, doctor_profile_id: input.doctorId, report_type: input.reportType, content: input.content });
   if (error) throw error;
@@ -56,6 +64,14 @@ export async function createNursingReport(profile: NursingProfile, input: { pati
 export async function updateNursingReport(profile: NursingProfile, reportId: string, content: Record<string, unknown>, doctorId?: string) {
   const { error } = await (getSupabaseClient().from("nursing_reports") as any)
     .update({ content, doctor_profile_id: doctorId ?? null })
+    .eq("id", reportId)
+    .eq("clinic_id", profile.clinicId);
+  if (error) throw error;
+}
+
+export async function deleteNursingReport(profile: NursingProfile, reportId: string) {
+  const { error } = await (getSupabaseClient().from("nursing_reports") as any)
+    .delete()
     .eq("id", reportId)
     .eq("clinic_id", profile.clinicId);
   if (error) throw error;

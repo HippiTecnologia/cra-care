@@ -104,6 +104,7 @@ function statusLabel(patient: DemoPatientRecord) {
     return "Aguardando cadastro da secretaria";
   }
 
+  if (patient.status === "em-alta") return "Em alta · aguardando Secretaria";
   if (patient.status === "concluido") return "Tratamento concluído";
   if (patient.status === "desistente") return "Tratamento interrompido";
 
@@ -507,14 +508,14 @@ export default function MedicalPatientPage() {
   }
 
   async function completeTreatment() {
-    if (!patient || !doctor || patient.status === "concluido") return;
+    if (!patient || !doctor || ["em-alta", "concluido"].includes(patient.status ?? "")) return;
     if (!window.confirm("Confirmar que o paciente concluiu o tratamento?")) return;
     setPatientSaving(true);
     try {
       const saved = await completeMedicalPatientTreatment(doctor, patient.id);
       setPatient(saved);
       setError("");
-      setMessage("Tratamento concluído. O paciente foi movido para a coluna Paciente concluído.");
+      setMessage("Tratamento encaminhado para alta. A Secretaria foi avisada para concluir o cadastro.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível concluir o tratamento.");
     } finally {
@@ -748,7 +749,7 @@ export default function MedicalPatientPage() {
             <button type="button" onClick={() => setEditingPatientData((current) => !current)} className="rounded-full border border-white/35 bg-white/10 px-4 py-2 text-xs font-semibold hover:bg-white/20">
               {editingPatientData ? "Cancelar edição" : "Editar dados"}
             </button>
-            {patient.status !== "concluido" && (
+            {!["em-alta", "concluido"].includes(patient.status ?? "") && (
               <button type="button" onClick={() => void completeTreatment()} disabled={patientSaving} className="rounded-full bg-white px-4 py-2 text-xs font-bold text-[#a3113a] disabled:opacity-50">
                 Paciente concluiu
               </button>

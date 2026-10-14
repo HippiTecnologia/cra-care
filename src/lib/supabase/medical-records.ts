@@ -96,6 +96,7 @@ function validStatus(value: string): DemoPatientRecord["status"] {
     "bacteriana",
     "tentar-novamente",
     "perdido",
+    "em-alta",
     "concluido",
     "desistente",
     "laudo",
@@ -595,7 +596,7 @@ export async function completeMedicalPatientTreatment(
   patientId: string,
 ) {
   const { data, error } = await getSupabaseClient().from("patients")
-    .update({ status: "concluido", updated_at: new Date().toISOString() })
+    .update({ status: "em-alta", updated_at: new Date().toISOString() })
     .eq("id", patientId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id)
     .select("*").single();
   if (error || !data) throw error ?? new Error("Não foi possível concluir o tratamento.");

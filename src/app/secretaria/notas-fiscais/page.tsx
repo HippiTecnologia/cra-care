@@ -10,6 +10,8 @@ import {
 } from "../../medico/patient-store";
 import {
   loadSecretaryContext,
+  confirmSecretaryInvoice,
+  assignSecretaryInvoice,
   loadSecretaryInvoices,
   loadSecretaryPatients,
   removeSecretaryInvoice,
@@ -37,6 +39,7 @@ export default function SecretariaNotasFiscaisPage() {
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [context, setContext] = useState<SecretaryContext | null>(null);
+  const [pendingPatientIds, setPendingPatientIds] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let active = true;
@@ -131,34 +134,16 @@ export default function SecretariaNotasFiscaisPage() {
         normalizedText.includes(normalizeCpf(record.cpf)),
       );
 
-      if (matchingPatients.length === 0) {
-        throw new Error("Nenhum CPF de paciente cadastrado foi encontrado dentro do PDF. Confira se o documento possui texto pesquisável.");
-      }
-
-      if (matchingPatients.length > 1) {
-        throw new Error("O PDF contém CPFs de mais de um paciente cadastrado. Confira o documento antes de importar.");
-      }
-
-      const patient = matchingPatients[0];
-      if (invoices.some((invoice) => invoice.patientId === patient.id && invoice.fileName.toLowerCase() === file.name.toLowerCase())) {
-        throw new Error("Este arquivo já foi vinculado ao paciente. Renomeie-o ou remova a versão anterior.");
-      }
-
-      const invoice: DemoInvoice = {
-        id: crypto.randomUUID(),
-        patientId: patient.id,
-        patientName: patient.name,
-        patientCpf: patient.cpf,
-        fileName: file.name,
-        fileData: await readFile(file),
-        fileSize: file.size,
-        uploadedAt: new Date().toISOString(),
-        uploadedBy: "Secretaria CRA",
-      };
       if (!context) throw new Error("A sessão da Secretaria ainda não foi carregada.");
-      const savedInvoice = await saveSecretaryInvoice(context, invoice);
-      setInvoices((current) => [savedInvoice, ...current.filter((item) => item.id !== savedInvoice.id)]);
-      setMessage(`${file.name} vinculado automaticamente a ${patient.name}.`);
+      const fileData = await readFile(file);
+      const targets = matchingPatients.length ? matchingPatients : [{ id: "", name: "Pendente de identificação", cpf: "" }];
+      const status: DemoInvoice["assignmentStatus"] = matchingPatients.length === 0 ? "pendente" : matchingPatients.length === 1 ? "vinculada" : "em_analise";
+      const savedInvoices = await Promise.all(targets.map((patient) => saveSecretaryInvoice(context, {
+        id: crypto.randomUUID(), patientId: patient.id, patientName: patient.name, patientCpf: patient.cpf,
+        fileName: file.name, fileData, fileSize: file.size, uploadedAt: new Date().toISOString(), uploadedBy: "Secretaria CRA", assignmentStatus: status,
+      })));
+      setInvoices((current) => [...savedInvoices, ...current]);
+      setMessage(status === "vinculada" ? `${file.name} vinculado automaticamente a ${matchingPatients[0].name}.` : status === "em_analise" ? `${file.name} apareceu para ${matchingPatients.length} pacientes e aguarda confirmação da Secretaria.` : `${file.name} foi salvo como pendente para vinculação manual.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível armazenar a nota neste navegador.");
     } finally {
@@ -176,6 +161,26 @@ export default function SecretariaNotasFiscaisPage() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível remover a nota fiscal.");
     }
+  }
+
+  async function confirmInvoice(invoice: DemoInvoice) {
+    if (!context) return;
+    try {
+      await confirmSecretaryInvoice(context, invoice.id);
+      setInvoices((current) => current.map((item) => item.id === invoice.id ? { ...item, assignmentStatus: "vinculada" } : item));
+      setMessage(`Nota confirmada para ${invoice.patientName}.`);
+    } catch { setError("Não foi possível confirmar a vinculação da nota."); }
+  }
+
+  async function assignInvoice(invoice: DemoInvoice) {
+    if (!context) return;
+    const patient = patients.find((item) => item.id === pendingPatientIds[invoice.id]);
+    if (!patient) { setError("Selecione o paciente para vincular a nota."); return; }
+    try {
+      await assignSecretaryInvoice(context, invoice.id, patient);
+      setInvoices((current) => current.map((item) => item.id === invoice.id ? { ...item, patientId: patient.id, patientName: patient.name, patientCpf: patient.cpf, assignmentStatus: "vinculada" } : item));
+      setMessage(`Nota vinculada a ${patient.name}.`);
+    } catch { setError("Não foi possível vincular a nota."); }
   }
 
   return (
@@ -216,6 +221,7 @@ export default function SecretariaNotasFiscaisPage() {
 
             <section className="mt-6 rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-xl font-bold text-[#433438]">Documentos vinculados</h2><p className="mt-1 text-sm text-[#817578]">{invoices.length} nota(s) fiscal(is)</p></div><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar paciente, CPF ou arquivo" className="h-11 rounded-xl border border-[#e9dfda] px-4 text-sm outline-none focus:border-[#b91142]" /></div>
+              {invoices.some((invoice) => invoice.assignmentStatus !== "vinculada") && <div className="mt-5 rounded-2xl border border-[#f1d8a6] bg-[#fff9ec] p-4"><h3 className="font-bold text-[#76521e]">Notas pendentes de análise</h3><div className="mt-3 space-y-2">{invoices.filter((invoice) => invoice.assignmentStatus !== "vinculada").map((invoice) => <div key={`review-${invoice.id}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white p-3 text-sm"><span><strong>{invoice.fileName}</strong> · {invoice.patientName}</span>{invoice.assignmentStatus === "em_analise" ? <button type="button" onClick={() => void confirmInvoice(invoice)} className="rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-bold text-white">Confirmar vínculo</button> : <span className="flex flex-wrap gap-2"><select value={pendingPatientIds[invoice.id] ?? ""} onChange={(event) => setPendingPatientIds((current) => ({ ...current, [invoice.id]: event.target.value }))} className="rounded-lg border border-[#e2d5cb] px-2 py-2 text-xs"><option value="">Localizar paciente</option>{patients.map((patient) => <option key={patient.id} value={patient.id}>{patient.name}</option>)}</select><button type="button" onClick={() => void assignInvoice(invoice)} className="rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-bold text-white">Vincular</button></span>}</div>)}</div></div>}
               <div className="mt-6 space-y-3">
                 {filteredInvoices.length === 0 ? <p className="rounded-2xl border border-dashed border-[#e6dbd6] px-5 py-10 text-center text-sm text-[#817578]">Nenhuma nota fiscal encontrada.</p> : filteredInvoices.map((invoice) => (
                   <article key={invoice.id} className="flex flex-col gap-4 rounded-2xl bg-[#fbf5f2] p-4 sm:flex-row sm:items-center sm:justify-between">

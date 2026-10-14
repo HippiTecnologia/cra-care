@@ -254,7 +254,7 @@ export async function saveAdminDoctor(context: AdminContext, doctor: AdminDoctor
 
 function saleStatus(patient: DemoPatientRecord): AdminSaleSnapshot["status"] {
   if (patient.status === "desistente" || patient.status === "perdido") return "cancelada";
-  if (patient.status === "concluido") return "concluida";
+  if (patient.status === "em-alta" || patient.status === "concluido") return "concluida";
   return "ativa";
 }
 
@@ -443,7 +443,7 @@ export async function synchronizeAdminSales(
   for (const patient of patients) {
     if (sales.some((sale) => sale.patientId === patient.id)) continue;
     const hasFinancialHistory = Boolean(patient.contractValue || patient.payments?.length);
-    const soldStatus = ["com-pedido", "ativo", "bacteriana", "concluido", "desistente"].includes(patient.status ?? "em-conversa");
+    const soldStatus = ["com-pedido", "ativo", "bacteriana", "em-alta", "concluido", "desistente"].includes(patient.status ?? "em-conversa");
     if (patient.registrationStatus !== "completed" || (!soldStatus && !hasFinancialHistory)) continue;
     const selectedMethod = methodForPatient(patient, methods);
     if (!selectedMethod) continue;

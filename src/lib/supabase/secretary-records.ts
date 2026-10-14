@@ -203,6 +203,7 @@ function paymentFromRow(row: Record<string, unknown>): PatientPaymentRecord {
     treatment: /bacteriana|imunobacteriana/i.test(text(row.treatment))
       ? "Imunobacteriana"
       : text(row.treatment) ? "Rinite" : undefined,
+    bottlePlanId: text(row.bottle_reference) || undefined,
     amount: number(row.amount),
     paidAt: text(row.paid_at) || text(row.due_at),
     method: text(row.payment_method, "A definir"),
@@ -357,6 +358,7 @@ export async function saveSecretaryPatient(
       asaas_reference: payment.asaasReference ?? null,
       notes: payment.notes ?? null,
       treatment: payment.treatment ?? null,
+      bottle_reference: payment.bottlePlanId ?? null,
     };
     if (isUuid(payment.id)) {
       const { error: paymentError } = await supabase.from("payments").upsert({ id: payment.id, ...payload });
@@ -888,6 +890,7 @@ export async function loadSecretaryInvoices(context?: SecretaryContext) {
     fileSize: number(row.file_size),
     uploadedAt: text(row.created_at),
     uploadedBy: text(row.uploaded_by),
+    assignmentStatus: text(row.assignment_status) === "em_analise" ? "em_analise" : text(row.assignment_status) === "pendente" ? "pendente" : "vinculada",
   }));
 }
 
@@ -895,17 +898,38 @@ export async function saveSecretaryInvoice(context: SecretaryContext, invoice: D
   const { error } = await getSupabaseClient().from("invoice_documents").insert({
     id: isUuid(invoice.id) ? invoice.id : undefined,
     clinic_id: context.clinicId,
-    patient_id: invoice.patientId,
+    patient_id: isUuid(invoice.patientId) ? invoice.patientId : null,
     patient_name: invoice.patientName,
     patient_cpf: invoice.patientCpf,
     file_name: invoice.fileName,
     file_data: invoice.fileData,
     file_size: invoice.fileSize,
     uploaded_by: invoice.uploadedBy,
+    assignment_status: invoice.assignmentStatus ?? "vinculada",
   });
   if (error) throw error;
   void audit(context, "upload", "invoice", invoice.id, { patientId: invoice.patientId, fileName: invoice.fileName });
   return invoice;
+}
+
+export async function confirmSecretaryInvoice(context: SecretaryContext, invoiceId: string) {
+  const { error } = await getSupabaseClient().from("invoice_documents")
+    .update({ assignment_status: "vinculada" })
+    .eq("id", invoiceId)
+    .eq("clinic_id", context.clinicId);
+  if (error) throw error;
+  void audit(context, "confirm", "invoice", invoiceId);
+}
+
+export async function assignSecretaryInvoice(context: SecretaryContext, invoiceId: string, patient: Pick<DemoPatientRecord, "id" | "name" | "cpf">) {
+  const { error } = await getSupabaseClient().from("invoice_documents").update({
+    patient_id: patient.id,
+    patient_name: patient.name,
+    patient_cpf: patient.cpf,
+    assignment_status: "vinculada",
+  }).eq("id", invoiceId).eq("clinic_id", context.clinicId);
+  if (error) throw error;
+  void audit(context, "assign", "invoice", invoiceId, { patientId: patient.id });
 }
 
 export async function removeSecretaryInvoice(context: SecretaryContext, invoiceId: string) {

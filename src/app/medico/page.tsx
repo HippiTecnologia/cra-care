@@ -16,7 +16,7 @@ import {
 } from "../../lib/supabase/medical-records";
 
 type DoctorSection = "dashboard" | "pacientes" | "evolucao";
-type DoctorPatientFilter = "todos" | "ativo" | "com-pedido" | "tentar-novamente" | "concluido" | "perdido" | "desistente";
+type DoctorPatientFilter = "todos" | "ativo" | "com-pedido" | "tentar-novamente" | "em-alta" | "concluido" | "perdido" | "desistente";
 
 function formatCpf(value: string) {
   const digits = value.replace(/\D/g, "").slice(0, 11);
@@ -117,6 +117,7 @@ export default function MedicoPage() {
   const statusMetrics = [
     { id: "ativo" as const, label: "Pacientes ativos", color: "#24846b" },
     { id: "com-pedido" as const, label: "Com pedido", color: "#a3113a" },
+    { id: "em-alta" as const, label: "Em alta", color: "#6c61a8" },
     { id: "concluido" as const, label: "Concluídos", color: "#3d76a5" },
     { id: "perdido" as const, label: "Perdidos", color: "#8b7d80" },
     { id: "desistente" as const, label: "Desistentes", color: "#a86a32" },

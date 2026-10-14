@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { ReactNode, useEffect, useMemo, useState } from "react";
-import { openDemoInvoicePdf } from "../../medico/patient-store";
+import { bottleVolumeOptions, openDemoInvoicePdf } from "../../medico/patient-store";
 import type {
+  BottleVolumeMl,
   DemoInvoice,
   DemoPatientRecord,
   DemoPrescription,
   DemoStockItem,
   PatientPaymentRecord,
+  TreatmentBottlePlan,
 } from "../../medico/patient-store";
 import { buildBottleHistory } from "../../paciente/bottle-history";
 import {
@@ -47,6 +49,7 @@ const statusOptions: Array<[NonNullable<DemoPatientRecord["status"]>, string]> =
   ["tentar-novamente", "Tentar novamente"],
   ["perdido", "Perdido"],
   ["desistente", "Desistente"],
+  ["em-alta", "Em alta"],
   ["concluido", "Concluído"],
 ];
 
@@ -123,11 +126,13 @@ export default function PatientRecordsPage() {
   const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
   const [paymentNotes, setPaymentNotes] = useState("");
   const [paymentReference, setPaymentReference] = useState("");
+  const [paymentBottlePlanId, setPaymentBottlePlanId] = useState("");
   const [installmentNumber, setInstallmentNumber] = useState(1);
   const [financialTrack, setFinancialTrack] = useState<TreatmentTrack>("Rinite");
   const [editingBottle, setEditingBottle] = useState<number | null>(null);
   const [bottleReason, setBottleReason] = useState("");
   const [bottleDraft, setBottleDraft] = useState<{ receivedAt: string; startedAt: string; finishedAt: string; status: "recebido" | "em-uso" | "finalizado" }>({ receivedAt: "", startedAt: "", finishedAt: "", status: "recebido" });
+  const [referenceNow] = useState(() => new Date());
 
   useEffect(() => {
     let active = true;
@@ -172,7 +177,15 @@ export default function PatientRecordsPage() {
   const invoices = patient ? invoiceRecords.filter((item) => item.patientId === patient.id) : [];
   const stock = patient ? stockRecords.filter((item) => item.patientId === patient.id) : [];
   const bottleHistory = patient && portal ? buildBottleHistory(patient, portal, stock) : [];
-  const treatmentTracks = Array.from(new Set(prescriptions.map((item) => treatmentTrack(item.treatment))));
+  const overdueBottles = bottleHistory.filter((item) => {
+    if (item.status !== "em-uso" || !item.startedAt) return false;
+    const startedAt = new Date(`${item.startedAt.slice(0, 10)}T12:00:00`);
+    return !Number.isNaN(startedAt.getTime()) && referenceNow.getTime() - startedAt.getTime() >= 30 * 24 * 60 * 60 * 1000;
+  });
+  const treatmentTracks = Array.from(new Set([
+    ...prescriptions.map((item) => treatmentTrack(item.treatment)),
+    ...(patient?.treatmentBottles ?? []).map((item) => item.treatment),
+  ]));
   const visibleTreatmentTracks: TreatmentTrack[] = treatmentTracks.length
     ? treatmentTracks
     : patient?.treatment ? [treatmentTrack(patient.treatment)] : [];
@@ -189,9 +202,47 @@ export default function PatientRecordsPage() {
   );
   const totalPaid = activePayments.reduce((sum, item) => sum + item.amount, 0);
   const remaining = Math.max(0, activeContractValue - totalPaid);
+  const activeBottlePlans = (draft?.treatmentBottles ?? patient?.treatmentBottles ?? []).filter((item) => item.treatment === activeFinancialTrack);
 
   function updateDraft<K extends keyof DemoPatientRecord>(key: K, value: DemoPatientRecord[K]) {
     setDraft((current) => current ? { ...current, [key]: value } : current);
+  }
+
+  function addTreatmentBottlePlan() {
+    setDraft((current) => {
+      if (!current) return current;
+      const treatment = /bacteriana|imunobacteriana/i.test(current.treatment ?? "") ? "Imunobacteriana" : "Rinite";
+      const plan: TreatmentBottlePlan = {
+        id: crypto.randomUUID(),
+        treatment,
+        volumeMl: 4,
+        quantity: 1,
+        updatedAt: new Date().toISOString(),
+        updatedBy: context?.fullName,
+      };
+      return { ...current, treatmentBottles: [...(current.treatmentBottles ?? []), plan] };
+    });
+    setEditing(true);
+  }
+
+  function updateTreatmentBottlePlan(id: string, changes: Partial<Pick<TreatmentBottlePlan, "treatment" | "volumeMl" | "quantity">>) {
+    setDraft((current) => current ? {
+      ...current,
+      treatmentBottles: (current.treatmentBottles ?? []).map((plan) => plan.id === id ? {
+        ...plan,
+        ...changes,
+        quantity: Math.max(1, changes.quantity ?? plan.quantity),
+        updatedAt: new Date().toISOString(),
+        updatedBy: context?.fullName,
+      } : plan),
+    } : current);
+  }
+
+  function removeTreatmentBottlePlan(id: string) {
+    setDraft((current) => current ? {
+      ...current,
+      treatmentBottles: (current.treatmentBottles ?? []).filter((plan) => plan.id !== id),
+    } : current);
   }
 
   async function fillAddressFromZipCode(value: string) {
@@ -255,6 +306,7 @@ export default function PatientRecordsPage() {
     const payment: PatientPaymentRecord = {
       id: crypto.randomUUID(),
       treatment: activeFinancialTrack,
+      bottlePlanId: paymentBottlePlanId || undefined,
       amount: parsed,
       paidAt: new Date(`${paidAt}T12:00:00`).toISOString(),
       method: activeDraftPayment?.paymentMethod ?? (legacyFinancialAllowed ? draft.paymentMethod : undefined) ?? "A definir",
@@ -273,6 +325,7 @@ export default function PatientRecordsPage() {
       setAmount("");
       setPaymentNotes("");
       setPaymentReference("");
+      setPaymentBottlePlanId("");
       setInstallmentNumber(1);
       setMessage(`Pagamento de ${activeFinancialTrack} registrado no Supabase pela Secretaria.`);
     } catch {
@@ -413,6 +466,7 @@ export default function PatientRecordsPage() {
             ].map(([label, value]) => <DataCard key={label} label={label} value={value} />)}</div>}</div>}
 
             {tab === "tratamento" && <div className="mt-6 space-y-5">
+              {overdueBottles.length > 0 && <section className="rounded-2xl border border-[#f1cf8f] bg-[#fff8e8] p-4 text-sm text-[#76521e]"><strong>Atenção: frasco em uso há 30 dias ou mais.</strong><p className="mt-1">{overdueBottles.map((item) => `${treatmentTrack(item.treatment)} · frasco ${item.number}`).join(" · ")}. Confira a evolução ou registre a troca do frasco.</p></section>}
               {visibleTreatmentTracks.length > 0 ? <div className="grid gap-5 xl:grid-cols-2">{visibleTreatmentTracks.map((track) => {
                 const trackPrescriptions = prescriptions.filter((item) => treatmentTrack(item.treatment) === track);
                 const latest = trackPrescriptions[0];
@@ -422,6 +476,14 @@ export default function PatientRecordsPage() {
                 const received = trackStock.reduce((sum, item) => sum + item.bottles, 0);
                 return <article key={track} className={`rounded-3xl border p-5 ${track === "Rinite" ? "border-[#ead5dc] bg-[#fff9fb]" : "border-[#d9e4f3] bg-[#f7faff]"}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.14em] text-[#a3113a]">Tratamento independente</p><h3 className="mt-1 text-xl font-bold">{track}</h3></div><span className="rounded-full bg-white px-3 py-1 text-xs font-semibold ring-1 ring-[#e5dfe1]">{trackPrescriptions.length} receita(s)</span></div><div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4"><Metric label="Recebidos" value={String(received)} /><Metric label="Iniciados" value={String(trackBottles.filter((item) => item.startedAt).length)} /><Metric label="Concluídos" value={String(trackBottles.filter((item) => item.status === "finalizado").length)} /><Metric label="Frasco atual" value={current ? String(current.number) : "Nenhum"} /></div><div className="mt-4 rounded-2xl bg-white p-4 text-sm leading-6"><p><strong>Última receita:</strong> {latest ? formatDate(latest.createdAt) : "Não informada"}</p><p><strong>Fase:</strong> {latest?.phase || (track === "Imunobacteriana" ? "Não se aplica" : "Não informada")}</p><p><strong>Posologia:</strong> {latest?.posology || "Não informada"}</p><p><strong>Frascos prescritos:</strong> {latest?.bottles ?? 0}</p></div></article>;
               })}</div> : <Info title="Tratamentos">Nenhuma receita de Rinite ou Imunobacteriana registrada.</Info>}
+              <section className="rounded-2xl border border-[#eee5e0] bg-[#fffdfc] p-4 sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div><h3 className="font-bold">Frascos do tratamento</h3><p className="mt-1 text-xs text-[#817578]">Volume e quantidade previstos para cada tratamento do paciente.</p></div>
+                  <button type="button" onClick={addTreatmentBottlePlan} className="rounded-xl border border-[#a3113a] bg-white px-4 py-2 text-xs font-bold text-[#a3113a]">+ Adicionar frasco</button>
+                </div>
+                {(patient.treatmentBottles ?? []).length === 0 && !editing ? <p className="mt-4 rounded-xl border border-dashed border-[#dfd5d0] px-4 py-5 text-center text-sm text-[#817578]">Nenhum frasco planejado. Use “Adicionar frasco” para cadastrar.</p> : null}
+                {editing ? <div className="mt-4 space-y-2">{(draft.treatmentBottles ?? []).map((plan) => <div key={plan.id} className="grid gap-2 rounded-xl border border-[#eadfd9] bg-white p-3 sm:grid-cols-[1fr_130px_110px_auto] sm:items-end"><Field label="Tratamento"><select value={plan.treatment} onChange={(event) => updateTreatmentBottlePlan(plan.id, { treatment: event.target.value as TreatmentBottlePlan["treatment"] })} className={inputClass}><option value="Rinite">Rinite</option><option value="Imunobacteriana">Imunobacteriana</option></select></Field><Field label="Volume"><select value={plan.volumeMl} onChange={(event) => updateTreatmentBottlePlan(plan.id, { volumeMl: Number(event.target.value) as BottleVolumeMl })} className={inputClass}>{bottleVolumeOptions.map((volume) => <option key={volume} value={volume}>{volume} mL</option>)}</select></Field><Field label="Quantidade"><input type="number" min={1} value={plan.quantity} onChange={(event) => updateTreatmentBottlePlan(plan.id, { quantity: Number(event.target.value) })} className={inputClass} /></Field><button type="button" onClick={() => removeTreatmentBottlePlan(plan.id)} className="h-11 rounded-xl bg-[#fff1f3] px-3 text-xs font-bold text-[#a3113a]">Remover</button></div>)}{(draft.treatmentBottles ?? []).length === 0 && <p className="rounded-xl border border-dashed border-[#dfd5d0] px-4 py-4 text-center text-sm text-[#817578]">Adicione um frasco para este tratamento.</p>}<div className="flex justify-end"><button type="button" onClick={() => saveDraft("Frascos do tratamento")} className={primaryButtonClass}>Salvar frascos</button></div></div> : <div className="mt-4 flex flex-wrap gap-2">{(patient.treatmentBottles ?? []).map((plan) => <span key={plan.id} className="rounded-xl bg-[#f6efec] px-3 py-2 text-sm font-semibold text-[#66595d]">{plan.treatment} · {plan.quantity} frasco(s) de {plan.volumeMl} mL</span>)}</div>}
+              </section>
               {editing && <div className="grid gap-4 rounded-2xl border border-[#eee5e0] p-5 sm:grid-cols-2"><Field label="Status geral do cadastro"><select value={draft.status ?? "em-conversa"} onChange={(event) => updateDraft("status", event.target.value as DemoPatientRecord["status"])} className={inputClass}>{statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field><Field label="Método de recebimento"><select value={draft.delivery ?? "Retirada"} onChange={(event) => updateDraft("delivery", event.target.value as DemoPatientRecord["delivery"])} className={inputClass}>{["Motoboy", "Retirada", "Sedex", "Aéreo"].map((value) => <option key={value}>{value}</option>)}</select></Field>{draft.status === "desistente" && <Field label="Motivo da desistência" wide><textarea rows={3} value={draft.abandonmentReason ?? ""} onChange={(event) => updateDraft("abandonmentReason", event.target.value)} className={textareaClass} /></Field>}<div className="flex justify-end sm:col-span-2"><button type="button" onClick={() => saveDraft("Dados do tratamento")} className={primaryButtonClass}>Salvar dados gerais</button></div></div>}
               <Info title="Observações dos médicos">{prescriptions.filter((item) => item.notes.trim()).map((item) => `${formatDate(item.createdAt)} · ${item.doctor}\n${item.notes}`).join("\n\n") || "Nenhuma observação médica registrada nas receitas."}</Info>
               <div className="rounded-2xl bg-[#fbf7f5] p-5"><h3 className="font-bold">Histórico completo de receitas e fórmulas ({prescriptions.length})</h3><div className="mt-4 space-y-3">{prescriptions.map((item) => <article key={item.id} className="rounded-xl border border-[#eadfd9] bg-white p-4 text-sm"><div className="flex flex-wrap justify-between gap-2"><strong>{treatmentTrack(item.treatment)} · {formatDate(item.createdAt)}{item.phase ? ` · ${item.phase}` : ""}</strong><span>{item.bottles} frasco(s)</span></div><p className="mt-2 text-[#66595d]">{item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ")}</p><p className="mt-2 text-xs text-[#817578]">{item.posology} · {item.doctor} · CRM {item.doctorCrm}</p></article>)}{prescriptions.length === 0 && <p className="text-sm text-[#817578]">Nenhuma receita registrada.</p>}</div></div>
@@ -437,8 +499,8 @@ export default function PatientRecordsPage() {
               <div className="rounded-2xl border border-[#eee5e0] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Condições financeiras de {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">Estes dados pertencem exclusivamente a este tratamento.</p></div>{!editing && <button type="button" onClick={() => setEditing(true)} className="rounded-xl border border-[#e5d9d4] px-4 py-2 text-xs font-bold text-[#a3113a]">Editar financeiro</button>}</div>
                 {editing ? <><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={primaryButtonClass}>Salvar financeiro de {activeFinancialTrack}</button></div></> : <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3"><DataCard label="Método de aquisição" value={`${activeTreatmentPayment?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido"}${activeTreatmentPayment?.methodSnapshotVersion ? ` · versão ${activeTreatmentPayment.methodSnapshotVersion}` : ""}`} /><DataCard label="Condição escolhida" value={activeTreatmentPayment?.agreedCondition ?? (legacyFinancialAllowed ? patient.agreedCondition : undefined) ?? "Não definida"} /><DataCard label="Forma de pagamento" value={activeTreatmentPayment?.paymentMethod ?? (legacyFinancialAllowed ? patient.paymentMethod : undefined) ?? "Não definida"} /><DataCard label="Parcelas" value={(activeTreatmentPayment?.installments ?? (legacyFinancialAllowed ? patient.paymentInstallments : undefined)) ? `${activeTreatmentPayment?.installments ?? patient.paymentInstallments}x` : "Não informado"} /><DataCard label="Desconto registrado" value={money(activeTreatmentPayment?.discountAmount ?? (legacyFinancialAllowed ? patient.discountAmount : undefined) ?? 0)} /><DataCard label="Vencimento" value={formatDate(activeTreatmentPayment?.dueDate ?? (legacyFinancialAllowed ? patient.paymentDueDate : undefined))} /><DataCard label="Referência ASAAS" value={activeTreatmentPayment?.asaasReference ?? (legacyFinancialAllowed ? patient.asaasReference : undefined) ?? "Não informada"} /><DataCard label="Observações" value={activeTreatmentPayment?.notes ?? (legacyFinancialAllowed ? patient.financialNotes : undefined) ?? "Nenhuma"} /></div>}
               </div>
-              <div className="rounded-2xl border border-[#eee5e0] p-5"><h3 className="font-bold">Registrar valor pago · {activeFinancialTrack}</h3><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Field label="Valor pago (R$)"><input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" className={inputClass} /></Field><Field label="Data do pagamento"><input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} className={inputClass} /></Field><Field label="Parcela atual"><input type="number" min={1} value={installmentNumber} onChange={(event) => setInstallmentNumber(Math.max(1, Number(event.target.value)))} className={inputClass} /></Field><Field label="Referência ASAAS"><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} className={inputClass} /></Field><Field label="Observação" wide><input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: pagamento do 2º frasco" className={inputClass} /></Field></div><button type="button" onClick={addPayment} className="mt-4 rounded-xl bg-[#187157] px-5 py-3 text-sm font-semibold text-white">Registrar pagamento de {activeFinancialTrack}</button></div>
-              <div className="rounded-2xl bg-[#fbf7f5] p-5"><h3 className="font-bold">Histórico de pagamentos de {activeFinancialTrack} ({activePayments.length})</h3><div className="mt-4 space-y-3">{activePayments.map((item) => <article key={item.id} className="flex flex-col gap-3 rounded-xl border border-[#eadfd9] bg-white p-4 sm:flex-row sm:items-center sm:justify-between"><div><strong>{money(item.amount)}</strong><p className="mt-1 text-xs text-[#817578]">{item.treatment ?? activeFinancialTrack} · {formatDate(item.paidAt)} · {item.method}{item.installments ? ` · ${item.installmentNumber ?? 1}/${item.installments}` : ""}{item.asaasReference ? ` · ASAAS ${item.asaasReference}` : ""}</p>{item.notes && <p className="mt-2 text-sm text-[#66595d]">{item.notes}</p>}</div><button type="button" onClick={() => removePayment(item.id)} className="self-start rounded-lg bg-[#fff1f3] px-3 py-2 text-xs font-semibold text-[#a3113a]">Remover</button></article>)}{!activePayments.length && <p className="text-sm text-[#817578]">Nenhum pagamento de {activeFinancialTrack} registrado.</p>}</div></div>
+              <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><span className="text-xs text-[#817578]">Vincule ao frasco quando aplicável.</span></div><div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5"><Field label="Valor pago (R$)"><input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" className={inputClass} /></Field><Field label="Data"><input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} className={inputClass} /></Field><Field label="Parcela"><input type="number" min={1} value={installmentNumber} onChange={(event) => setInstallmentNumber(Math.max(1, Number(event.target.value)))} className={inputClass} /></Field><Field label="Frasco"><select value={paymentBottlePlanId} onChange={(event) => setPaymentBottlePlanId(event.target.value)} className={inputClass}><option value="">Não vincular</option>{activeBottlePlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.quantity}x {plan.volumeMl} mL</option>)}</select></Field><Field label="Referência ASAAS"><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} className={inputClass} /></Field><Field label="Observação" wide><input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: pagamento do 2º frasco" className={inputClass} /></Field></div><button type="button" onClick={addPayment} className="mt-3 rounded-xl bg-[#187157] px-4 py-2.5 text-sm font-semibold text-white">Registrar pagamento</button></div>
+              <div className="rounded-2xl bg-[#fbf7f5] p-4"><h3 className="font-bold">Histórico de pagamentos de {activeFinancialTrack} ({activePayments.length})</h3><div className="mt-3 space-y-2">{activePayments.map((item) => { const linkedPlan = (patient.treatmentBottles ?? []).find((plan) => plan.id === item.bottlePlanId); return <article key={item.id} className="flex flex-col gap-2 rounded-xl border border-[#eadfd9] bg-white p-3 sm:flex-row sm:items-center sm:justify-between"><div><strong>{money(item.amount)}</strong><p className="mt-1 text-xs text-[#817578]">{item.treatment ?? activeFinancialTrack} · {formatDate(item.paidAt)} · {item.method}{item.installments ? ` · ${item.installmentNumber ?? 1}/${item.installments}` : ""}{linkedPlan ? ` · Frasco ${linkedPlan.volumeMl} mL` : ""}{item.asaasReference ? ` · ASAAS ${item.asaasReference}` : ""}</p>{item.notes && <p className="mt-1 text-sm text-[#66595d]">{item.notes}</p>}</div><button type="button" onClick={() => removePayment(item.id)} className="self-start rounded-lg bg-[#fff1f3] px-3 py-2 text-xs font-semibold text-[#a3113a]">Remover</button></article>; })}{!activePayments.length && <p className="text-sm text-[#817578]">Nenhum pagamento de {activeFinancialTrack} registrado.</p>}</div></div>
               {!legacyFinancialAllowed && unassignedPayments.length > 0 && <Info title={`Pagamentos antigos sem tratamento definido (${unassignedPayments.length})`}>Esses registros anteriores foram preservados, mas não entram nos totais de Rinite nem de Imunobacteriana para evitar mistura. A Secretaria poderá identificá-los antes de vinculá-los ao tratamento correto.</Info>}
               <div className="rounded-2xl bg-[#fbf7f5] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Notas fiscais ({invoices.length})</h3><p className="mt-1 text-xs text-[#817578]">Documentos vinculados automaticamente ao CPF.</p></div><Link href="/secretaria/notas-fiscais" className="rounded-xl border border-[#e5d9d4] px-4 py-2 text-xs font-bold text-[#a3113a]">Gerenciar notas</Link></div><div className="mt-4 space-y-3">{invoices.map((invoice) => <article key={invoice.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#eadfd9] bg-white p-4"><div><strong className="text-sm">{invoice.fileName}</strong><p className="mt-1 text-xs text-[#817578]">Enviada em {formatDate(invoice.uploadedAt, true)}</p></div><button type="button" onClick={() => { if (!openDemoInvoicePdf(invoice)) setMessage("Permita a abertura de janelas para visualizar o PDF."); }} className="rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-semibold text-white">Abrir PDF</button></article>)}{invoices.length === 0 && <p className="text-sm text-[#817578]">Nenhuma nota fiscal vinculada.</p>}</div></div>
             </div>}

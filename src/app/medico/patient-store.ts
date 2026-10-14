@@ -41,6 +41,7 @@ export type DemoPatientRecord = {
     | "tentar-novamente"
     | "perdido"
     | "concluido"
+    | "em-alta"
     | "desistente"
     | "laudo";
   acquisitionMethod?: string;
@@ -117,6 +118,7 @@ export type ClinicalRecord = {
 export type PatientPaymentRecord = {
   id: string;
   treatment?: "Rinite" | "Imunobacteriana";
+  bottlePlanId?: string;
   amount: number;
   paidAt: string;
   method: string;
@@ -137,6 +139,7 @@ export type DemoInvoice = {
   fileSize: number;
   uploadedAt: string;
   uploadedBy: string;
+  assignmentStatus?: "vinculada" | "em_analise" | "pendente";
 };
 
 export type PrescriptionFormula = {
