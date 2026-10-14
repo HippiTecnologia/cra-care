@@ -44,7 +44,7 @@ const certificates = await Promise.all(rootUrls.map(async (url) => {
 }));
 
 const pem = `${certificates.join("\n")}\n`;
-const outputPath = process.argv[2] === "--env-file" ? process.argv[3] : undefined;
+const outputPath = process.argv[2] === "--output" ? process.argv[3] : undefined;
 
 if (outputPath) {
   if (!outputPath || outputPath.startsWith("-") || !outputPath.endsWith(".env")) throw new Error("Informe um arquivo .env para exportar as raízes ICP-Brasil.");
