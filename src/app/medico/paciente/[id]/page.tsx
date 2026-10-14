@@ -32,6 +32,7 @@ import {
 import { getSupabaseClient } from "../../../../lib/supabase/client";
 import { patchSubstanceCode, patchSubstanceDetails } from "../../../../lib/patch-substances";
 import { clinicContact, sublingualUseInstructions } from "../../../../lib/clinic-info";
+import { normalizeBirthDate } from "../../../../lib/birth-date";
 
 type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes" | "laudos" | "dashboard";
 type VaccineType = "rinite" | "imunobacteriana";
@@ -766,7 +767,7 @@ export default function MedicalPatientPage() {
             <div className="mt-5 grid gap-4 md:grid-cols-3">
               <label className="text-sm font-semibold text-[#544449]">Nome completo<input value={patientDataDraft.name} onChange={(event) => setPatientDataDraft((current) => ({ ...current, name: event.target.value }))} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /></label>
               <label className="text-sm font-semibold text-[#544449]">CPF<input inputMode="numeric" maxLength={14} value={patientDataDraft.cpf} onChange={(event) => setPatientDataDraft((current) => ({ ...current, cpf: formatCpf(event.target.value) }))} placeholder="000.000.000-00" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /></label>
-              <label className="text-sm font-semibold text-[#544449]">Data de nascimento<input type="date" value={patientDataDraft.birthDate} onChange={(event) => setPatientDataDraft((current) => ({ ...current, birthDate: event.target.value }))} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /></label>
+              <label className="text-sm font-semibold text-[#544449]">Data de nascimento<input type="date" value={patientDataDraft.birthDate} onChange={(event) => setPatientDataDraft((current) => ({ ...current, birthDate: event.target.value }))} onPaste={(event) => { const date = normalizeBirthDate(event.clipboardData.getData("text")); if (!date) return; event.preventDefault(); setPatientDataDraft((current) => ({ ...current, birthDate: date })); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /><span className="mt-1 block text-xs font-normal text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span></label>
             </div>
             <button type="button" onClick={() => void savePatientBasics()} disabled={patientSaving} className="mt-5 rounded-xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{patientSaving ? "Salvando..." : "Salvar dados"}</button>
           </section>

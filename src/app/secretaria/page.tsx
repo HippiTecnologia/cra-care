@@ -11,6 +11,7 @@ import {
 import type { BottleVolumeMl, DemoPatientRecord, DemoPrescription, PatientPaymentRecord, TreatmentBottlePlan } from "../medico/patient-store";
 import { createDefaultPortalState, type PatientPortalState } from "../paciente/patient-portal-store";
 import { patientUsername } from "../../lib/auth/credentials";
+import { normalizeBirthDate } from "../../lib/birth-date";
 import {
   createSecretaryPatientAccess,
   loadSecretaryPatients,
@@ -1287,14 +1288,20 @@ export default function SecretariaPage() {
                     Data de nascimento *
                     <input
                       required
-                      readOnly
                       type="date"
                       value={newPatient.birthDate}
                       onChange={(event) =>
                         updateNewPatient("birthDate", event.target.value)
                       }
+                      onPaste={(event) => {
+                        const date = normalizeBirthDate(event.clipboardData.getData("text"));
+                        if (!date) return;
+                        event.preventDefault();
+                        updateNewPatient("birthDate", date);
+                      }}
                       className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-[#f7f4f2] px-4 text-[#786c70] outline-none"
                     />
+                    <span className="mt-1 block text-xs text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span>
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
                     Telefone / WhatsApp *

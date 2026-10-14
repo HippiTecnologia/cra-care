@@ -14,6 +14,7 @@ import {
   searchClinicPatients,
   type MedicalDoctorProfile,
 } from "../../lib/supabase/medical-records";
+import { normalizeBirthDate } from "../../lib/birth-date";
 
 type DoctorSection = "dashboard" | "pacientes" | "evolucao";
 type DoctorPatientFilter = "todos" | "ativo" | "com-pedido" | "tentar-novamente" | "em-alta" | "concluido" | "perdido" | "desistente";
@@ -450,8 +451,16 @@ export default function MedicoPage() {
                     setBirthDate(event.target.value);
                     setError("");
                   }}
+                  onPaste={(event) => {
+                    const date = normalizeBirthDate(event.clipboardData.getData("text"));
+                    if (!date) return;
+                    event.preventDefault();
+                    setBirthDate(date);
+                    setError("");
+                  }}
                   className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]"
                 />
+                <span className="mt-1 block text-xs font-normal text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span>
               </label>
               <label className="block text-sm font-medium text-[#544449]">Telefone / WhatsApp <span className="font-normal text-[#817578]">(opcional)</span><input inputMode="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="(41) 99999-9999" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /></label>
 

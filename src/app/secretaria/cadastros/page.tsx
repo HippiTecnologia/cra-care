@@ -22,6 +22,7 @@ import {
 } from "../../adm/admin-store";
 import type { AdminTreatmentMethod } from "../../adm/admin-store";
 import { loadActiveAdminMethods } from "../../../lib/supabase/admin-records";
+import { normalizeBirthDate } from "../../../lib/birth-date";
 import {
   loadSecretaryInvoices,
   loadSecretaryPatients,
@@ -443,7 +444,7 @@ export default function PatientRecordsPage() {
             {tab === "pessoais" && <div className="mt-6">{editing ? <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Nome completo *"><input required value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} className={inputClass} /></Field>
               <Field label="CPF *"><input required inputMode="numeric" maxLength={14} value={draft.cpf} onChange={(event) => updateDraft("cpf", formatCpf(event.target.value))} placeholder="000.000.000-00" className={inputClass} /></Field>
-              <Field label="Data de nascimento *"><input type="date" required value={draft.birthDate} onChange={(event) => updateDraft("birthDate", event.target.value)} className={inputClass} /></Field>
+              <Field label="Data de nascimento *"><input type="date" required value={draft.birthDate} onChange={(event) => updateDraft("birthDate", event.target.value)} onPaste={(event) => { const date = normalizeBirthDate(event.clipboardData.getData("text")); if (!date) return; event.preventDefault(); updateDraft("birthDate", date); }} className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span></Field>
               <Field label="Telefone / WhatsApp (opcional)"><input value={draft.phone ?? ""} onChange={(event) => updateDraft("phone", event.target.value)} className={inputClass} /></Field>
               <Field label="E-mail (opcional)"><input type="email" value={draft.email ?? ""} onChange={(event) => updateDraft("email", event.target.value)} placeholder="paciente@exemplo.com" className={inputClass} /></Field>
               <Field label="Médico responsável"><input value={draft.doctor} onChange={(event) => updateDraft("doctor", event.target.value)} className={inputClass} /></Field>
