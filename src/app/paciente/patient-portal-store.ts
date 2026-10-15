@@ -77,6 +77,9 @@ export type PatientPortalState = {
     startedAt?: string;
     finishedAt?: string;
     status?: "recebido" | "em-uso" | "finalizado";
+    phase?: string;
+    bottleVolumeMl?: number;
+    formulas?: Array<{ id: string; name: string; percentage: number }>;
     reason: string;
     updatedAt: string;
     updatedBy: string;

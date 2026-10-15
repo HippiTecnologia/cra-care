@@ -639,7 +639,14 @@ export async function saveSecretaryBottleAdjustment(
     started_at: adjustment.startedAt || null,
     completed_at: adjustment.finishedAt || null,
     status: adjustment.status ?? "recebido",
-    metadata: { ...objectValue(data.metadata), historyAdjustment: adjustment },
+    volume_ml: adjustment.bottleVolumeMl ?? null,
+    metadata: {
+      ...objectValue(data.metadata),
+      phase: adjustment.phase ?? text(objectValue(data.metadata).phase),
+      bottleVolumeMl: adjustment.bottleVolumeMl ?? null,
+      formulas: adjustment.formulas ?? objectValue(data.metadata).formulas ?? [],
+      historyAdjustment: adjustment,
+    },
   }).eq("id", String(data.id));
   if (updateError) throw updateError;
   void audit(context, "adjust_history", "bottle", String(data.id), { patientId, bottleNumber, reason: adjustment.reason });

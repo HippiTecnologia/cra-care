@@ -1,6 +1,8 @@
 import type {
+  BottleVolumeMl,
   DemoPatientRecord,
   DemoStockItem,
+  PrescriptionFormula,
 } from "../medico/patient-store";
 import type { PatientPortalState } from "./patient-portal-store";
 
@@ -8,6 +10,9 @@ export type BottleHistoryEntry = {
   number: number;
   prescriptionId?: string;
   treatment?: string;
+  phase?: string;
+  bottleVolumeMl?: BottleVolumeMl;
+  formulas?: PrescriptionFormula[];
   receivedAt?: string;
   startedAt?: string;
   finishedAt?: string;
@@ -58,11 +63,15 @@ export function buildBottleHistory(
     const number = index + 1;
     const bottle = portal.bottles.find((item) => item.number === number);
     const adjustment = portal.bottleHistoryAdjustments?.[number];
+    const stockItem = stock.find((item) => item.patientId === patient.id && item.bottleNumber === number);
 
     return {
       number,
       prescriptionId: bottle?.prescriptionId,
       treatment: bottle?.treatment,
+      phase: adjustment?.phase ?? stockItem?.phase,
+      bottleVolumeMl: (adjustment?.bottleVolumeMl as BottleVolumeMl | undefined) ?? stockItem?.bottleVolumeMl,
+      formulas: adjustment?.formulas ?? stockItem?.formulas,
       receivedAt: adjustment?.receivedAt ?? bottle?.receivedAt ?? receiptDates[index],
       startedAt: adjustment?.startedAt ?? bottle?.startedAt,
       finishedAt: adjustment?.finishedAt ?? bottle?.finishedAt,

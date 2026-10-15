@@ -10,6 +10,7 @@ import type {
   DemoPrescription,
   DemoStockItem,
   PatientPaymentRecord,
+  PrescriptionFormula,
 } from "../../medico/patient-store";
 import { buildBottleHistory } from "../../paciente/bottle-history";
 import {
@@ -140,10 +141,12 @@ export default function PatientRecordsPage() {
   const [financialTrack, setFinancialTrack] = useState<TreatmentTrack>("Rinite");
   const [editingBottle, setEditingBottle] = useState<number | null>(null);
   const [bottleReason, setBottleReason] = useState("");
-  const [bottleDraft, setBottleDraft] = useState<{ receivedAt: string; startedAt: string; finishedAt: string; status: "recebido" | "em-uso" | "finalizado" }>({ receivedAt: "", startedAt: "", finishedAt: "", status: "recebido" });
+  const [bottleDraft, setBottleDraft] = useState<{ receivedAt: string; startedAt: string; finishedAt: string; status: "recebido" | "em-uso" | "finalizado"; phase: string; bottleVolumeMl: BottleVolumeMl | ""; formulas: PrescriptionFormula[] }>({ receivedAt: "", startedAt: "", finishedAt: "", status: "recebido", phase: "", bottleVolumeMl: "", formulas: [] });
   const [addingBottle, setAddingBottle] = useState(false);
   const [newBottleTreatment, setNewBottleTreatment] = useState<TreatmentTrack>("Rinite");
   const [newBottleVolume, setNewBottleVolume] = useState<BottleVolumeMl>(4);
+  const [newBottlePhase, setNewBottlePhase] = useState("");
+  const [newBottleFormulas, setNewBottleFormulas] = useState<PrescriptionFormula[]>([]);
   const [newBottleReceivedAt, setNewBottleReceivedAt] = useState(() => new Date().toISOString().slice(0, 10));
   const [savingBottle, setSavingBottle] = useState(false);
   const [referenceNow] = useState(() => new Date());
@@ -387,20 +390,44 @@ export default function PatientRecordsPage() {
     if (!item) return;
     setEditingBottle(number);
     setBottleReason("");
-    setBottleDraft({ receivedAt: item.receivedAt?.slice(0, 10) ?? "", startedAt: item.startedAt?.slice(0, 10) ?? "", finishedAt: item.finishedAt?.slice(0, 10) ?? "", status: item.status });
+    setBottleDraft({ receivedAt: item.receivedAt?.slice(0, 10) ?? "", startedAt: item.startedAt?.slice(0, 10) ?? "", finishedAt: item.finishedAt?.slice(0, 10) ?? "", status: item.status, phase: item.phase ?? "", bottleVolumeMl: treatmentTrack(item.treatment) === "Imunobacteriana" ? 9 : item.bottleVolumeMl ?? "", formulas: (item.formulas ?? []).map((formula) => ({ ...formula })) });
   }
 
   function openAddBottleForm() {
     const initialTrack = visibleTreatmentTracks[0] ?? (patient?.treatment ? treatmentTrack(patient.treatment) : "Rinite");
+    const latestPrescription = prescriptionRecords
+      .filter((item) => item.patientId === patient?.id && treatmentTrack(item.treatment) === initialTrack)
+      .sort((first, second) => new Date(second.createdAt).getTime() - new Date(first.createdAt).getTime())[0];
     setNewBottleTreatment(initialTrack);
-    setNewBottleVolume(initialTrack === "Imunobacteriana" ? 9 : 4);
+    setNewBottleVolume(initialTrack === "Imunobacteriana" ? 9 : latestPrescription?.bottleVolumeMl ?? 4);
+    setNewBottlePhase(latestPrescription?.phase ?? "");
+    setNewBottleFormulas((latestPrescription?.formulas ?? []).map((formula) => ({ ...formula })));
     setNewBottleReceivedAt(new Date().toISOString().slice(0, 10));
     setAddingBottle(true);
+  }
+
+  function selectBottleTreatment(value: TreatmentTrack) {
+    setNewBottleTreatment(value);
+    const latestPrescription = prescriptionRecords
+      .filter((item) => item.patientId === patient?.id && treatmentTrack(item.treatment) === value)
+      .sort((first, second) => new Date(second.createdAt).getTime() - new Date(first.createdAt).getTime())[0];
+    setNewBottleVolume(value === "Imunobacteriana" ? 9 : latestPrescription?.bottleVolumeMl ?? 4);
+    setNewBottlePhase(latestPrescription?.phase ?? "");
+    setNewBottleFormulas((latestPrescription?.formulas ?? []).map((formula) => ({ ...formula })));
+  }
+
+  function addFormula(setFormulas: (update: (current: PrescriptionFormula[]) => PrescriptionFormula[]) => void) {
+    setFormulas((current) => [...current, { id: crypto.randomUUID(), name: "", percentage: 0 }]);
   }
 
   async function addBottleToHistory() {
     if (!patient || !context) return;
     if (!newBottleReceivedAt) { setMessage("Informe a data de recebimento do frasco."); return; }
+    if (!newBottlePhase.trim()) { setMessage("Informe a fase do frasco."); return; }
+    if (newBottleFormulas.length === 0 || newBottleFormulas.some((formula) => !formula.name.trim() || !Number.isFinite(formula.percentage) || formula.percentage <= 0)) {
+      setMessage("Informe ao menos uma fórmula com nome e concentração maior que zero.");
+      return;
+    }
     setSavingBottle(true);
     const isImmunobacterial = newBottleTreatment === "Imunobacteriana";
     const item: DemoStockItem = {
@@ -413,10 +440,10 @@ export default function PatientRecordsPage() {
       patientCpf: patient.cpf,
       doctor: patient.doctor,
       treatment: isImmunobacterial ? "Vacina Imunobacteriana" : "Vacina Rinite",
-      phase: "",
+      phase: newBottlePhase.trim(),
       bottles: 1,
       bottleVolumeMl: isImmunobacterial ? 9 : newBottleVolume,
-      formulas: [],
+      formulas: newBottleFormulas.filter((formula) => formula.name.trim()).map((formula) => ({ ...formula, name: formula.name.trim() })),
       delivery: patient.delivery,
       laboratory: "Registro manual da Secretaria",
       receivedAt: newBottleReceivedAt,
@@ -458,13 +485,20 @@ export default function PatientRecordsPage() {
     if (!portal || !editingBottle) return;
     if (!bottleReason.trim()) { setMessage("Informe o motivo do ajuste no histórico do frasco."); return; }
     if (!context || !patient) return;
-    const adjustment = { ...bottleDraft, reason: bottleReason.trim(), updatedAt: new Date().toISOString(), updatedBy: context.fullName };
+    const adjustment = { ...bottleDraft, bottleVolumeMl: bottleDraft.bottleVolumeMl === "" ? undefined : bottleDraft.bottleVolumeMl, reason: bottleReason.trim(), updatedAt: new Date().toISOString(), updatedBy: context.fullName };
     try {
       await saveSecretaryBottleAdjustment(context, patient.id, editingBottle, adjustment);
       setPortals((current) => ({
         ...current,
         [patient.id]: { ...portal, bottleHistoryAdjustments: { ...(portal.bottleHistoryAdjustments ?? {}), [editingBottle]: adjustment } },
       }));
+      setStockRecords((current) => current.map((item) => item.patientId === patient.id && item.bottleNumber === editingBottle ? {
+        ...item,
+        phase: adjustment.phase ?? item.phase,
+        bottleVolumeMl: (adjustment.bottleVolumeMl as BottleVolumeMl | undefined) ?? item.bottleVolumeMl,
+        formulas: adjustment.formulas ?? item.formulas,
+        receivedAt: adjustment.receivedAt ?? item.receivedAt,
+      } : item));
       setEditingBottle(null);
       setMessage(`Histórico do frasco ${editingBottle} atualizado no Supabase.`);
     } catch {
@@ -546,14 +580,19 @@ export default function PatientRecordsPage() {
                   <button type="button" onClick={openAddBottleForm} className="rounded-xl border border-[#a3113a] bg-white px-4 py-2 text-xs font-bold text-[#a3113a]">+ Adicionar frasco</button>
                 </div>
                 {addingBottle && <div className="mt-4 grid gap-3 rounded-xl border border-[#eadfd9] bg-white p-4 sm:grid-cols-2 lg:grid-cols-4">
-                  <Field label="Tratamento"><select value={newBottleTreatment} onChange={(event) => { const treatment = event.target.value as TreatmentTrack; setNewBottleTreatment(treatment); setNewBottleVolume(treatment === "Imunobacteriana" ? 9 : 4); }} className={inputClass}><option value="Rinite">Rinite</option><option value="Imunobacteriana">Imunobacteriana</option></select></Field>
+                  <Field label="Tratamento"><select value={newBottleTreatment} onChange={(event) => selectBottleTreatment(event.target.value as TreatmentTrack)} className={inputClass}><option value="Rinite">Rinite</option><option value="Imunobacteriana">Imunobacteriana</option></select></Field>
+                  <Field label="Fase"><input value={newBottlePhase} onChange={(event) => setNewBottlePhase(event.target.value)} placeholder="Ex.: Fase 1:10" className={inputClass} /></Field>
                   <Field label="Volume por frasco">{newBottleTreatment === "Imunobacteriana" ? <div className={`${inputClass} flex items-center bg-[#f7f4f2]`}>9 mL · fixo</div> : <select value={newBottleVolume} onChange={(event) => setNewBottleVolume(Number(event.target.value) as BottleVolumeMl)} className={inputClass}>{bottleVolumeOptions.map((volume) => <option key={volume} value={volume}>{volume} mL</option>)}</select>}</Field>
                   <Field label="Data de recebimento"><input type="date" value={newBottleReceivedAt} onChange={(event) => setNewBottleReceivedAt(event.target.value)} className={inputClass} /></Field>
-                  <div className="flex items-end gap-2"><button type="button" disabled={savingBottle} onClick={addBottleToHistory} className={`${primaryButtonClass} flex-1 disabled:opacity-60`}>{savingBottle ? "Salvando…" : "Adicionar ao histórico"}</button><button type="button" disabled={savingBottle} onClick={() => setAddingBottle(false)} className="h-11 rounded-xl border border-[#e5d9d4] px-3 text-sm font-semibold disabled:opacity-60">Cancelar</button></div>
+                  <div className="rounded-xl bg-[#fbf7f5] p-3 sm:col-span-2 lg:col-span-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">Fórmulas do frasco</strong><button type="button" onClick={() => addFormula(setNewBottleFormulas)} className="rounded-lg border border-[#e5d9d4] bg-white px-3 py-2 text-xs font-bold text-[#a3113a]">+ Adicionar fórmula</button></div>
+                    <div className="mt-2 space-y-2">{newBottleFormulas.map((formula, index) => <div key={formula.id} className="grid gap-2 sm:grid-cols-[1fr_130px_auto] sm:items-end"><Field label="Nome da fórmula"><input value={formula.name} onChange={(event) => setNewBottleFormulas((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))} placeholder="Nome" className={inputClass} /></Field><Field label="Concentração (%)"><input type="number" min={0} step="any" value={formula.percentage} onChange={(event) => setNewBottleFormulas((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, percentage: Number(event.target.value) } : item))} className={inputClass} /></Field><button type="button" onClick={() => setNewBottleFormulas((current) => current.filter((item) => item.id !== formula.id))} className="h-11 rounded-lg bg-[#fff1f3] px-3 text-xs font-bold text-[#a3113a]">Remover</button></div>)}{newBottleFormulas.length === 0 && <p className="text-xs text-[#817578]">Nenhuma fórmula adicionada.</p>}</div>
+                  </div>
+                  <div className="flex flex-wrap items-end gap-2 sm:col-span-2 lg:col-span-4"><button type="button" disabled={savingBottle} onClick={addBottleToHistory} className={`${primaryButtonClass} disabled:opacity-60`}>{savingBottle ? "Salvando…" : "Adicionar ao histórico"}</button><button type="button" disabled={savingBottle} onClick={() => setAddingBottle(false)} className="h-11 rounded-xl border border-[#e5d9d4] px-3 text-sm font-semibold disabled:opacity-60">Cancelar</button></div>
                 </div>}
-                <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm"><thead className="text-xs uppercase text-[#817578]"><tr><th className="pb-3">Tratamento</th><th className="pb-3">Frasco</th><th className="pb-3">Recebimento</th><th className="pb-3">Início</th><th className="pb-3">Conclusão</th><th className="pb-3">Status</th><th className="pb-3">Ação</th></tr></thead><tbody>{bottleHistory.slice().reverse().map((item) => <tr key={`${item.treatment ?? "tratamento"}-${item.number}`} className="border-t border-[#eadfd9]"><td className="py-3 font-bold text-[#86203b]">{treatmentTrack(item.treatment)}</td><td className="font-bold">{item.number}</td><td>{formatDate(item.receivedAt)}</td><td>{formatDate(item.startedAt)}</td><td>{formatDate(item.finishedAt)}</td><td>{item.status === "finalizado" ? "Concluído" : item.status === "em-uso" ? "Em uso" : "Recebido"}</td><td><button type="button" onClick={() => openBottleEditor(item.number)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-[#a3113a] ring-1 ring-[#e9dfda]">Ajustar</button></td></tr>)}</tbody></table>{bottleHistory.length === 0 && <p className="py-5 text-sm text-[#817578]">Nenhum frasco recebido.</p>}</div>
+                <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[1150px] text-left text-sm"><thead className="text-xs uppercase text-[#817578]"><tr><th className="pb-3">Tratamento</th><th className="pb-3">Frasco</th><th className="pb-3">Fase</th><th className="pb-3">Fórmula</th><th className="pb-3">mL</th><th className="pb-3">Recebimento</th><th className="pb-3">Início</th><th className="pb-3">Conclusão</th><th className="pb-3">Status</th><th className="pb-3">Ação</th></tr></thead><tbody>{bottleHistory.slice().reverse().map((item) => <tr key={`${item.treatment ?? "tratamento"}-${item.number}`} className="border-t border-[#eadfd9]"><td className="py-3 font-bold text-[#86203b]">{treatmentTrack(item.treatment)}</td><td className="font-bold">{item.number}</td><td>{item.phase || "—"}</td><td>{item.formulas?.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ") || "—"}</td><td>{item.bottleVolumeMl ? `${item.bottleVolumeMl} mL` : "—"}</td><td>{formatDate(item.receivedAt)}</td><td>{formatDate(item.startedAt)}</td><td>{formatDate(item.finishedAt)}</td><td>{item.status === "finalizado" ? "Concluído" : item.status === "em-uso" ? "Em uso" : "Recebido"}</td><td><button type="button" onClick={() => openBottleEditor(item.number)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-[#a3113a] ring-1 ring-[#e9dfda]">Editar</button></td></tr>)}</tbody></table>{bottleHistory.length === 0 && <p className="py-5 text-sm text-[#817578]">Nenhum frasco recebido.</p>}</div>
               </div>
-              <Info title={`Pedidos e entregas (${stock.length})`}>{stock.map((item) => `${treatmentTrack(item.treatment)} · ${item.batchCode} — ${item.bottles} frasco(s) — ${item.status} — recebido no estoque em ${formatDate(item.receivedAt)} — entregue em ${formatDate(item.deliveredAt)}`).join("\n") || "Nenhum pedido ou entrega registrado."}</Info>
+              <Info title={`Pedidos e entregas (${stock.length})`}>{stock.map((item) => `${treatmentTrack(item.treatment)} · ${item.batchCode} — ${item.bottles} frasco(s)${item.phase ? ` — ${item.phase}` : ""}${item.formulas?.length ? ` — ${item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ")}` : ""}${item.bottleVolumeMl ? ` — ${item.bottleVolumeMl} mL` : ""} — ${item.status} — recebido no estoque em ${formatDate(item.receivedAt)} — entregue em ${formatDate(item.deliveredAt)}`).join("\n") || "Nenhum pedido ou entrega registrado."}</Info>
             </div>}
 
             {tab === "financeiro" && <div className="mt-4 space-y-3">
@@ -570,7 +609,9 @@ export default function PatientRecordsPage() {
           </section> : <section className="rounded-3xl border border-[#eee5e0] bg-white p-12 text-center text-sm text-[#817578]">Selecione um paciente para abrir o cadastro completo.</section>}
         </div>
       </div>
-      {editingBottle && <div className="fixed inset-0 z-[100] flex items-end bg-[#29151b]/55 p-3 sm:items-center sm:justify-center"><div role="dialog" aria-modal="true" className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl sm:p-7"><div className="flex items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-wide text-[#a3113a]">Ajuste administrativo</p><h2 className="mt-1 text-xl font-bold">Frasco {editingBottle}</h2></div><button type="button" onClick={() => setEditingBottle(null)} className="rounded-full bg-[#f7f1ee] px-3 py-2">×</button></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Data de recebimento"><input type="date" value={bottleDraft.receivedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, receivedAt: event.target.value }))} className={inputClass} /></Field><Field label="Data de início"><input type="date" value={bottleDraft.startedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, startedAt: event.target.value }))} className={inputClass} /></Field><Field label="Data de conclusão"><input type="date" value={bottleDraft.finishedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, finishedAt: event.target.value }))} className={inputClass} /></Field><Field label="Status"><select value={bottleDraft.status} onChange={(event) => setBottleDraft((item) => ({ ...item, status: event.target.value as typeof item.status }))} className={inputClass}><option value="recebido">Recebido</option><option value="em-uso">Em uso</option><option value="finalizado">Concluído</option></select></Field><Field label="Motivo do ajuste *" wide><textarea rows={3} value={bottleReason} onChange={(event) => setBottleReason(event.target.value)} placeholder="Ex.: paciente iniciou em outra data." className={textareaClass} /></Field></div><div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><button type="button" onClick={() => setEditingBottle(null)} className="rounded-xl border border-[#e6dbd6] px-4 py-3 text-sm font-semibold">Cancelar</button><button type="button" onClick={saveBottleAdjustment} className={primaryButtonClass}>Salvar ajuste</button></div></div></div>}
+      {editingBottle && <div className="fixed inset-0 z-[100] flex items-end bg-[#29151b]/55 p-3 sm:items-center sm:justify-center"><div role="dialog" aria-modal="true" className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl sm:p-7"><div className="flex items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-wide text-[#a3113a]">Editar frasco</p><h2 className="mt-1 text-xl font-bold">Frasco {editingBottle}</h2></div><button type="button" onClick={() => setEditingBottle(null)} className="rounded-full bg-[#f7f1ee] px-3 py-2">×</button></div><div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Fase"><input value={bottleDraft.phase} onChange={(event) => setBottleDraft((item) => ({ ...item, phase: event.target.value }))} className={inputClass} /></Field><Field label="Volume por frasco">{treatmentTrack(bottleHistory.find((item) => item.number === editingBottle)?.treatment) === "Imunobacteriana" ? <div className={`${inputClass} flex items-center bg-[#f7f4f2]`}>9 mL · fixo</div> : <select value={bottleDraft.bottleVolumeMl} onChange={(event) => setBottleDraft((item) => ({ ...item, bottleVolumeMl: event.target.value ? Number(event.target.value) as BottleVolumeMl : item.bottleVolumeMl }))} className={inputClass}><option value="">Não informado</option>{bottleVolumeOptions.map((volume) => <option key={volume} value={volume}>{volume} mL</option>)}</select>}</Field><Field label="Data de recebimento"><input type="date" value={bottleDraft.receivedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, receivedAt: event.target.value }))} className={inputClass} /></Field><Field label="Data de início"><input type="date" value={bottleDraft.startedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, startedAt: event.target.value }))} className={inputClass} /></Field><Field label="Data de conclusão"><input type="date" value={bottleDraft.finishedAt} onChange={(event) => setBottleDraft((item) => ({ ...item, finishedAt: event.target.value }))} className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Deixe em branco se ainda estiver em andamento.</span></Field><Field label="Status"><select value={bottleDraft.status} onChange={(event) => setBottleDraft((item) => ({ ...item, status: event.target.value as typeof item.status }))} className={inputClass}><option value="recebido">Recebido</option><option value="em-uso">Em uso</option><option value="finalizado">Concluído</option></select></Field>
+        <div className="rounded-xl bg-[#fbf7f5] p-3 sm:col-span-2"><div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">Fórmulas</strong><button type="button" onClick={() => addFormula((update) => setBottleDraft((current) => ({ ...current, formulas: update(current.formulas) })))} className="rounded-lg border border-[#e5d9d4] bg-white px-3 py-2 text-xs font-bold text-[#a3113a]">+ Adicionar fórmula</button></div><div className="mt-2 space-y-2">{bottleDraft.formulas.map((formula, index) => <div key={formula.id} className="grid gap-2 sm:grid-cols-[1fr_130px_auto] sm:items-end"><Field label="Nome da fórmula"><input value={formula.name} onChange={(event) => setBottleDraft((current) => ({ ...current, formulas: current.formulas.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item) }))} className={inputClass} /></Field><Field label="Concentração (%)"><input type="number" min={0} step="any" value={formula.percentage} onChange={(event) => setBottleDraft((current) => ({ ...current, formulas: current.formulas.map((item, itemIndex) => itemIndex === index ? { ...item, percentage: Number(event.target.value) } : item) }))} className={inputClass} /></Field><button type="button" onClick={() => setBottleDraft((current) => ({ ...current, formulas: current.formulas.filter((item) => item.id !== formula.id) }))} className="h-11 rounded-lg bg-[#fff1f3] px-3 text-xs font-bold text-[#a3113a]">Remover</button></div>)}{bottleDraft.formulas.length === 0 && <p className="text-xs text-[#817578]">Nenhuma fórmula informada.</p>}</div></div>
+        <Field label="Motivo do ajuste *" wide><textarea rows={3} value={bottleReason} onChange={(event) => setBottleReason(event.target.value)} placeholder="Ex.: atualização da fase, fórmula ou data de início." className={textareaClass} /></Field></div><div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><button type="button" onClick={() => setEditingBottle(null)} className="rounded-xl border border-[#e6dbd6] px-4 py-3 text-sm font-semibold">Cancelar</button><button type="button" onClick={saveBottleAdjustment} className={primaryButtonClass}>Salvar alterações</button></div></div></div>}
     </main>
   );
 }
