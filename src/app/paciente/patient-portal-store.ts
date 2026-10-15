@@ -84,6 +84,8 @@ export type PatientPortalState = {
     updatedAt: string;
     updatedBy: string;
   }>;
+  /** Frascos manuais arquivados pela Secretaria; os números não são reutilizados. */
+  deletedBottleNumbers?: number[];
 };
 
 export function normalizeCpf(value: string) {

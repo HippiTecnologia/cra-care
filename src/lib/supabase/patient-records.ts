@@ -204,7 +204,9 @@ export async function loadPatientWorkspace(): Promise<PatientWorkspace> {
   const doctor = doctorResult.data as { full_name?: string; crm?: string | null } | null;
   const patient = mapMedicalPatient(row, doctor?.full_name ?? "Médico não vinculado");
   const portal = createDefaultPortalState(row.id);
-  portal.bottles = ((bottleResult.data ?? []) as unknown as Record<string, unknown>[]).map(bottleFromRow);
+  portal.bottles = ((bottleResult.data ?? []) as unknown as Record<string, unknown>[])
+    .filter((item) => objectValue(item.metadata).manuallyDeleted !== true)
+    .map(bottleFromRow);
   portal.assessments = ((assessmentResult.data ?? []) as unknown as Record<string, unknown>[]).map(assessmentFromRow);
   portal.useRecords = ((useResult.data ?? []) as unknown as Record<string, unknown>[]).map((item) => ({
     id: text(item.id),

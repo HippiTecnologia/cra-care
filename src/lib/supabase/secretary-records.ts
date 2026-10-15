@@ -485,13 +485,18 @@ export async function loadSecretaryPortals(patientIds: string[]) {
   for (const row of (bottleResult.data ?? []) as unknown as Record<string, unknown>[]) {
     const patientId = text(row.patient_id);
     if (!result[patientId]) continue;
-    result[patientId].bottles.push(bottleFromRow(row));
     const metadata = objectValue(row.metadata);
+    const bottleNumber = number(row.bottle_number);
+    if (metadata.manuallyDeleted === true) {
+      result[patientId].deletedBottleNumbers = [...new Set([...(result[patientId].deletedBottleNumbers ?? []), bottleNumber])];
+      continue;
+    }
+    result[patientId].bottles.push(bottleFromRow(row));
     const adjustment = objectValue(metadata.historyAdjustment);
     if (Object.keys(adjustment).length) {
       result[patientId].bottleHistoryAdjustments = {
         ...(result[patientId].bottleHistoryAdjustments ?? {}),
-        [number(row.bottle_number)]: adjustment as PatientPortalState["bottleHistoryAdjustments"] extends Record<number, infer Entry> ? Entry : never,
+        [bottleNumber]: adjustment as PatientPortalState["bottleHistoryAdjustments"] extends Record<number, infer Entry> ? Entry : never,
       };
     }
   }
@@ -784,10 +789,12 @@ export async function loadSecretaryStock(context?: SecretaryContext) {
     .eq("clinic_id", current.clinicId)
     .order("received_at", { ascending: false });
   if (error) throw error;
-  return ((data ?? []) as unknown as Record<string, unknown>[]).map(stockFromRow);
+  return ((data ?? []) as unknown as Record<string, unknown>[])
+    .filter((row) => objectValue(row.metadata).manuallyDeleted !== true)
+    .map(stockFromRow);
 }
 
-export async function saveSecretaryStockItem(context: SecretaryContext, item: DemoStockItem) {
+export async function saveSecretaryStockItem(context: SecretaryContext, item: DemoStockItem, previousBottleCount = 0) {
   const supabase = getSupabaseClient();
   const id = isUuid(item.id) ? item.id : crypto.randomUUID();
   let bottleNumber = 1;
@@ -799,7 +806,7 @@ export async function saveSecretaryStockItem(context: SecretaryContext, item: De
     if (existingResult.error) throw existingResult.error;
     if (latestResult.error) throw latestResult.error;
     const existingNumber = number(existingResult.data?.bottle_number, 0);
-    bottleNumber = existingNumber || number(latestResult.data?.bottle_number, 0) + 1;
+    bottleNumber = existingNumber || Math.max(number(latestResult.data?.bottle_number, 0), previousBottleCount) + 1;
   }
   const { error } = await supabase.from("bottles").upsert({
     id,
@@ -818,6 +825,33 @@ export async function saveSecretaryStockItem(context: SecretaryContext, item: De
   });
   if (error) throw error;
   return { ...item, id, bottleNumber };
+}
+
+export async function deleteSecretaryManualBottle(
+  context: SecretaryContext,
+  patientId: string,
+  bottleId: string,
+) {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from("bottles")
+    .select("id, bottle_number, metadata")
+    .eq("id", bottleId)
+    .eq("patient_id", patientId)
+    .eq("clinic_id", context.clinicId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Frasco não encontrado.");
+  const metadata = objectValue(data.metadata);
+  if (text(metadata.batchCode) !== "ADICIONADO MANUALMENTE") {
+    throw new Error("Somente frascos registrados manualmente podem ser excluídos por esta ação.");
+  }
+  const deletedAt = new Date().toISOString();
+  const { error: updateError } = await supabase.from("bottles").update({
+    metadata: { ...metadata, manuallyDeleted: true, manuallyDeletedAt: deletedAt, manuallyDeletedBy: context.fullName },
+  }).eq("id", bottleId).eq("patient_id", patientId).eq("clinic_id", context.clinicId);
+  if (updateError) throw updateError;
+  void audit(context, "delete_manual", "bottle", bottleId, { patientId, bottleNumber: number(data.bottle_number), deletedAt });
+  return { bottleNumber: number(data.bottle_number) };
 }
 
 export async function confirmSecretaryBatch(

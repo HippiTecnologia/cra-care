@@ -399,6 +399,7 @@ export async function loadDoctorPortalStates(
   for (const row of (bottleResult.data ?? []) as unknown as Record<string, unknown>[]) {
     const patientId = String(row.patient_id ?? "");
     if (!result[patientId]) continue;
+    if (recordValue(row.metadata).manuallyDeleted === true) continue;
     const rawStatus = String(row.status ?? "").toLowerCase();
     result[patientId].bottles.push({
       id: String(row.id),
@@ -652,7 +653,9 @@ export async function loadMedicalPatientWorkspace(patientId: string) {
     missedImmunotherapy: row.missed_immunotherapy as PatientAssessment["missedImmunotherapy"],
     rescueMedication: row.rescue_medication as PatientAssessment["rescueMedication"],
   }));
-  const bottles = ((bottleResult.data ?? []) as unknown as Record<string, unknown>[]).map((row): PatientBottle => {
+  const bottles = ((bottleResult.data ?? []) as unknown as Record<string, unknown>[])
+    .filter((row) => recordValue(row.metadata).manuallyDeleted !== true)
+    .map((row): PatientBottle => {
     const rawStatus = String(row.status ?? "").toLowerCase();
     return {
       id: String(row.id),

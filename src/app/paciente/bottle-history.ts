@@ -24,7 +24,9 @@ export function buildBottleHistory(
   portal: PatientPortalState,
   stock: DemoStockItem[],
 ): BottleHistoryEntry[] {
-  const total = Math.max(patient.bottlesReceived ?? 0, portal.bottles.length);
+  const deletedBottleNumbers = new Set(portal.deletedBottleNumbers ?? []);
+  const highestBottleNumber = Math.max(0, ...portal.bottles.map((item) => item.number), ...deletedBottleNumbers);
+  const total = Math.max(patient.bottlesReceived ?? 0, portal.bottles.length, highestBottleNumber);
   const deliveredDates = stock
     .filter(
       (item) =>
@@ -77,5 +79,5 @@ export function buildBottleHistory(
       finishedAt: adjustment?.finishedAt ?? bottle?.finishedAt,
       status: adjustment?.status ?? bottle?.status ?? "recebido",
     };
-  });
+  }).filter((item) => !deletedBottleNumbers.has(item.number));
 }

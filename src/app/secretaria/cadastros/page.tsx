@@ -32,6 +32,7 @@ import {
   createSecretaryPatientAccess,
   saveSecretaryBottleAdjustment,
   saveSecretaryStockItem,
+  deleteSecretaryManualBottle,
   saveSecretaryPatient,
   type SecretaryContext,
 } from "../../../lib/supabase/secretary-records";
@@ -451,7 +452,7 @@ export default function PatientRecordsPage() {
       status: "disponivel",
     };
     try {
-      const savedBottle = await saveSecretaryStockItem(context, item);
+      const savedBottle = await saveSecretaryStockItem(context, item, patient.bottlesReceived ?? 0);
       const bottleNumber = savedBottle.bottleNumber ?? bottleHistory.length + 1;
       setStockRecords((current) => [savedBottle, ...current.filter((record) => record.id !== savedBottle.id)]);
       setPortals((current) => {
@@ -503,6 +504,33 @@ export default function PatientRecordsPage() {
       setMessage(`Histórico do frasco ${editingBottle} atualizado no Supabase.`);
     } catch {
       setMessage("Não foi possível salvar o ajuste do frasco.");
+    }
+  }
+
+  async function deleteManualBottle(number: number) {
+    if (!patient || !context) return;
+    const item = stock.find((record) => record.bottleNumber === number && record.batchCode === "ADICIONADO MANUALMENTE");
+    if (!item) return;
+    const confirmed = window.confirm(`Excluir o frasco ${number} registrado manualmente? Ele sairá do histórico e de Pedidos e entregas. Esta ação ficará registrada no sistema.`);
+    if (!confirmed) return;
+    try {
+      await deleteSecretaryManualBottle(context, patient.id, item.id);
+      setStockRecords((current) => current.filter((record) => record.id !== item.id));
+      setPortals((current) => {
+        const currentPortal = current[patient.id] ?? createDefaultPortalState(patient.id);
+        return {
+          ...current,
+          [patient.id]: {
+            ...currentPortal,
+            bottles: currentPortal.bottles.filter((bottle) => bottle.id !== item.id),
+            deletedBottleNumbers: [...new Set([...(currentPortal.deletedBottleNumbers ?? []), number])],
+            bottleHistoryAdjustments: Object.fromEntries(Object.entries(currentPortal.bottleHistoryAdjustments ?? {}).filter(([bottleNumber]) => Number(bottleNumber) !== number)),
+          },
+        };
+      });
+      setMessage(`Frasco manual ${number} excluído do histórico e de Pedidos e entregas.`);
+    } catch {
+      setMessage("Não foi possível excluir o frasco manual. Confira a conexão e tente novamente.");
     }
   }
 
@@ -561,7 +589,7 @@ export default function PatientRecordsPage() {
 
             {tab === "tratamento" && <div className="mt-6 space-y-5">
               {overdueBottles.length > 0 && <section className="rounded-2xl border border-[#f1cf8f] bg-[#fff8e8] p-4 text-sm text-[#76521e]"><strong>Atenção: frasco em uso há 30 dias ou mais.</strong><p className="mt-1">{overdueBottles.map((item) => `${treatmentTrack(item.treatment)} · frasco ${item.number}`).join(" · ")}. Confira a evolução ou registre a troca do frasco.</p></section>}
-              {visibleTreatmentTracks.length > 0 ? <div className="grid gap-5 xl:grid-cols-2">{visibleTreatmentTracks.map((track) => {
+              {visibleTreatmentTracks.length > 0 ? <div className={`grid gap-5 ${visibleTreatmentTracks.length > 1 ? "xl:grid-cols-2" : "grid-cols-1"}`}>{visibleTreatmentTracks.map((track) => {
                 const trackPrescriptions = prescriptions.filter((item) => treatmentTrack(item.treatment) === track);
                 const latest = trackPrescriptions[0];
                 const trackStock = stock.filter((item) => treatmentTrack(item.treatment) === track);
@@ -590,7 +618,10 @@ export default function PatientRecordsPage() {
                   </div>
                   <div className="flex flex-wrap items-end gap-2 sm:col-span-2 lg:col-span-4"><button type="button" disabled={savingBottle} onClick={addBottleToHistory} className={`${primaryButtonClass} disabled:opacity-60`}>{savingBottle ? "Salvando…" : "Adicionar ao histórico"}</button><button type="button" disabled={savingBottle} onClick={() => setAddingBottle(false)} className="h-11 rounded-xl border border-[#e5d9d4] px-3 text-sm font-semibold disabled:opacity-60">Cancelar</button></div>
                 </div>}
-                <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[1150px] text-left text-sm"><thead className="text-xs uppercase text-[#817578]"><tr><th className="pb-3">Tratamento</th><th className="pb-3">Frasco</th><th className="pb-3">Fase</th><th className="pb-3">Fórmula</th><th className="pb-3">mL</th><th className="pb-3">Recebimento</th><th className="pb-3">Início</th><th className="pb-3">Conclusão</th><th className="pb-3">Status</th><th className="pb-3">Ação</th></tr></thead><tbody>{bottleHistory.slice().reverse().map((item) => <tr key={`${item.treatment ?? "tratamento"}-${item.number}`} className="border-t border-[#eadfd9]"><td className="py-3 font-bold text-[#86203b]">{treatmentTrack(item.treatment)}</td><td className="font-bold">{item.number}</td><td>{item.phase || "—"}</td><td>{item.formulas?.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ") || "—"}</td><td>{item.bottleVolumeMl ? `${item.bottleVolumeMl} mL` : "—"}</td><td>{formatDate(item.receivedAt)}</td><td>{formatDate(item.startedAt)}</td><td>{formatDate(item.finishedAt)}</td><td>{item.status === "finalizado" ? "Concluído" : item.status === "em-uso" ? "Em uso" : "Recebido"}</td><td><button type="button" onClick={() => openBottleEditor(item.number)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-[#a3113a] ring-1 ring-[#e9dfda]">Editar</button></td></tr>)}</tbody></table>{bottleHistory.length === 0 && <p className="py-5 text-sm text-[#817578]">Nenhum frasco recebido.</p>}</div>
+                <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[1150px] text-left text-sm"><thead className="text-xs uppercase text-[#817578]"><tr><th className="pb-3">Tratamento</th><th className="pb-3">Frasco</th><th className="pb-3">Fase</th><th className="pb-3">Fórmula</th><th className="pb-3">mL</th><th className="pb-3">Recebimento</th><th className="pb-3">Início</th><th className="pb-3">Conclusão</th><th className="pb-3">Status</th><th className="pb-3">Ação</th></tr></thead><tbody>{bottleHistory.slice().reverse().map((item) => {
+                  const manualRecord = stock.find((record) => record.bottleNumber === item.number && record.batchCode === "ADICIONADO MANUALMENTE");
+                  return <tr key={`${item.treatment ?? "tratamento"}-${item.number}`} className="border-t border-[#eadfd9]"><td className="py-3 font-bold text-[#86203b]">{treatmentTrack(item.treatment)}</td><td className="font-bold">{item.number}</td><td>{item.phase || "—"}</td><td>{item.formulas?.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ") || "—"}</td><td>{item.bottleVolumeMl ? `${item.bottleVolumeMl} mL` : "—"}</td><td>{formatDate(item.receivedAt)}</td><td>{formatDate(item.startedAt)}</td><td>{formatDate(item.finishedAt)}</td><td>{item.status === "finalizado" ? "Concluído" : item.status === "em-uso" ? "Em uso" : "Recebido"}</td><td><div className="flex items-center gap-2"><button type="button" onClick={() => openBottleEditor(item.number)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-[#a3113a] ring-1 ring-[#e9dfda]">Editar</button>{manualRecord && <button type="button" onClick={() => void deleteManualBottle(item.number)} className="rounded-lg bg-[#fff1f3] px-3 py-2 text-xs font-bold text-[#a3113a] ring-1 ring-[#f3c8d3]">Excluir</button>}</div></td></tr>;
+                })}</tbody></table>{bottleHistory.length === 0 && <p className="py-5 text-sm text-[#817578]">Nenhum frasco recebido.</p>}</div>
               </div>
               <Info title={`Pedidos e entregas (${stock.length})`}>{stock.map((item) => `${treatmentTrack(item.treatment)} · ${item.batchCode} — ${item.bottles} frasco(s)${item.phase ? ` — ${item.phase}` : ""}${item.formulas?.length ? ` — ${item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ")}` : ""}${item.bottleVolumeMl ? ` — ${item.bottleVolumeMl} mL` : ""} — ${item.status} — recebido no estoque em ${formatDate(item.receivedAt)} — entregue em ${formatDate(item.deliveredAt)}`).join("\n") || "Nenhum pedido ou entrega registrado."}</Info>
             </div>}
