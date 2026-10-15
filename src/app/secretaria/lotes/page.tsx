@@ -195,43 +195,46 @@ export default function SecretariaLotesPage() {
     return saved;
   }
 
-  function getBillingRequirement(patient: DemoPatientRecord, prescription: DemoPrescription) {
+  function getBillingRequirement(patient: DemoPatientRecord, prescription: DemoPrescription, additionalBottles = 0) {
     const track = indicationForTreatment(prescription.treatment) === "bacteriana" ? "Imunobacteriana" : "Rinite";
     const trackFinancial = patient.treatmentPayments?.find((payment) => payment.treatment === track);
     const patientTracks = new Set(prescriptions.filter((item) => item.patientId === patient.id).map((item) => indicationForTreatment(item.treatment)));
     const legacyFinancialAllowed = patientTracks.size <= 1;
-    const financialConfigured = Boolean(trackFinancial) || legacyFinancialAllowed;
+    const bottlesIncluded = trackFinancial?.bottlesIncluded;
+    const financialConfigured = Boolean(trackFinancial?.acquisitionMethod)
+      && Number.isInteger(bottlesIncluded)
+      && (bottlesIncluded ?? 0) > 0;
     const acquisitionMethod = trackFinancial?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido";
     const paymentMethod = trackFinancial?.paymentMethod ?? (legacyFinancialAllowed ? patient.paymentMethod : undefined) ?? "A definir";
     const pendingBatchBottles = batches.reduce((total, batch) => total + batch.items
       .filter((item) => item.patientId === patient.id && indicationForTreatment(item.treatment) === indicationForTreatment(prescription.treatment))
       .reduce((count, item) => count + item.bottles, 0), 0);
-    const nextBottleNumber = pendingBatchBottles + 1;
-    const bottleNumbers = Array.from({ length: Math.max(1, Math.trunc(prescription.bottles)) }, (_, index) => nextBottleNumber + index);
-    const renewalBottle = bottleNumbers.find((number) => number > 2 && (number - 1) % 2 === 0);
-    const recurringAsaas = acquisitionMethod === "Recorrente — ASAAS";
-    const isImmunobacterial = track === "Imunobacteriana";
+    const previouslyPaidAdditionalBottles = batches.reduce((total, batch) => total + batch.items
+      .filter((item) => item.patientId === patient.id && indicationForTreatment(item.treatment) === indicationForTreatment(prescription.treatment))
+      .reduce((count, item) => count + (item.additionalPaidBottles ?? 0), 0), 0);
+    const nextBottleNumber = pendingBatchBottles + additionalBottles + 1;
+    const lastBottleNumber = nextBottleNumber + Math.max(1, Math.trunc(prescription.bottles)) - 1;
+    const totalCoveredBottles = (bottlesIncluded ?? 0) + previouslyPaidAdditionalBottles;
+    const bottlesBeforeThisPrescription = nextBottleNumber - 1;
+    const excessBeforeThisPrescription = Math.max(0, bottlesBeforeThisPrescription - totalCoveredBottles);
+    const excessAfterThisPrescription = Math.max(0, lastBottleNumber - totalCoveredBottles);
+    const bottlesBeyondAllowance = Number.isInteger(bottlesIncluded) ? excessAfterThisPrescription - excessBeforeThisPrescription : 0;
+    const recurringAsaas = (trackFinancial?.methodCategory === "Recorrente" && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas"))
+      || acquisitionMethod === "Recorrente — ASAAS";
     const prescriptionPaymentConfirmed = batches.some((batch) => batch.items.some((item) =>
       item.prescriptionId === prescription.id && Boolean(item.paymentConfirmedAt || item.asaasConfirmedAt),
     ));
-    const paymentRequired = isImmunobacterial
-      ? !prescriptionPaymentConfirmed && !recurringAsaas
-      : !recurringAsaas && (acquisitionMethod === "Por frasco" || Boolean(renewalBottle));
-    const asaasRequired = isImmunobacterial
-      ? !prescriptionPaymentConfirmed && (recurringAsaas || paymentMethod === "Asaas")
-      : recurringAsaas || (paymentRequired && paymentMethod === "Asaas");
-    const explanation = isImmunobacterial
-      ? prescriptionPaymentConfirmed
-        ? `Pagamento já confirmado para esta receita. Os ${prescription.bottles} frasco(s) permanecem liberados sem nova cobrança.`
-        : `Pagamento primário desta receita: uma confirmação libera todos os ${prescription.bottles} frasco(s). Uma nova cobrança ocorrerá somente com uma nova receita.`
-      : recurringAsaas
-        ? "Pagamento recorrente: confirme no ASAAS se a cobrança está em dia."
-        : acquisitionMethod === "Por frasco"
-          ? "Cada novo frasco precisa de pagamento confirmado."
-          : paymentRequired
-            ? `Novo pagamento necessário: o pedido inclui o ${renewalBottle}º frasco.`
-            : `Frasco ${nextBottleNumber} incluído no pagamento do tratamento.`;
-    return { track, financialConfigured, acquisitionMethod, paymentMethod, paymentStatus: trackFinancial?.paymentStatus ?? (legacyFinancialAllowed ? patient.paymentStatus : undefined), nextBottleNumber, paymentRequired, asaasRequired, explanation };
+    const paymentRequired = bottlesBeyondAllowance > 0 && !prescriptionPaymentConfirmed;
+    const asaasRequired = !prescriptionPaymentConfirmed && (recurringAsaas || paymentRequired && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas"));
+    const paymentStatus = trackFinancial?.paymentStatus ?? (legacyFinancialAllowed ? patient.paymentStatus : undefined);
+    const explanation = !financialConfigured
+      ? "Selecione uma modalidade e informe quantos frascos o valor cobre no Financeiro do paciente."
+      : paymentRequired
+        ? `Pagamento adicional necessário: ${bottlesBeyondAllowance} frasco(s) ultrapassam os ${bottlesIncluded} cobertos pelo valor cadastrado.`
+        : recurringAsaas
+          ? "Confirme no ASAAS se a cobrança recorrente está em dia."
+        : `Frascos ${nextBottleNumber} a ${lastBottleNumber} dentro do limite de ${totalCoveredBottles} frasco(s) já coberto(s).`;
+    return { track, financialConfigured, acquisitionMethod, paymentMethod, paymentStatus, bottlesIncluded, totalCoveredBottles, bottlesBeyondAllowance, nextBottleNumber, lastBottleNumber, paymentRequired, asaasRequired, explanation };
   }
 
   const patientById = useMemo(
@@ -279,6 +282,20 @@ export default function SecretariaLotesPage() {
     selectedIds.includes(prescription.id),
   );
 
+  function getSelectedBillingRows() {
+    const bottleOffsets = new Map<string, number>();
+    return selectedPrescriptions.flatMap((prescription) => {
+      const patient = patientById.get(prescription.patientId);
+      if (!patient) return [];
+      const track = indicationForTreatment(prescription.treatment) === "bacteriana" ? "Imunobacteriana" : "Rinite";
+      const key = `${patient.id}:${track}`;
+      const additionalBottles = bottleOffsets.get(key) ?? 0;
+      const billing = getBillingRequirement(patient, prescription, additionalBottles);
+      bottleOffsets.set(key, additionalBottles + prescription.bottles);
+      return [{ prescription, patient, billing }];
+    });
+  }
+
   const selectedBottleCount = orderType === "pronta-entrega"
     ? readyItems.reduce((total, item) => total + item.bottles, 0)
     : selectedPrescriptions.reduce((total, prescription) => total + prescription.bottles, 0);
@@ -303,7 +320,7 @@ export default function SecretariaLotesPage() {
       return;
     }
     if (patient && !getBillingRequirement(patient, prescription).financialConfigured) {
-      setError(`Configure o financeiro de ${getBillingRequirement(patient, prescription).track} para ${patient.name}. O pagamento do outro tratamento não libera esta receita.`);
+      setError(`No Financeiro de ${getBillingRequirement(patient, prescription).track} de ${patient.name}, selecione o método de aquisição e informe quantos frascos o valor cobre.`);
       return;
     }
 
@@ -338,45 +355,27 @@ export default function SecretariaLotesPage() {
   }
 
   function validateSelectedPayments() {
-    const missingFinancial = orderType === "pedido-paciente"
-      ? selectedPrescriptions.find((prescription) => {
-          const patient = patientById.get(prescription.patientId);
-          return !patient || !getBillingRequirement(patient, prescription).financialConfigured;
-        })
-      : undefined;
+    const billingRows = orderType === "pedido-paciente" ? getSelectedBillingRows() : [];
+    const missingFinancial = billingRows.find(({ billing }) => !billing.financialConfigured);
     if (missingFinancial) {
-      const patient = patientById.get(missingFinancial.patientId);
-      const billing = patient ? getBillingRequirement(patient, missingFinancial) : undefined;
-      setError(`Configure o financeiro de ${billing?.track ?? "este tratamento"} para ${patient?.name ?? "o paciente"}. Pagamentos de outro tratamento não serão aceitos.`);
+      setError(`No Financeiro de ${missingFinancial.billing.track} de ${missingFinancial.patient.name}, selecione uma modalidade e preencha quantos frascos o valor cobre.`);
       return false;
     }
-    const delinquent = orderType === "pedido-paciente"
-      ? selectedPrescriptions.find((prescription) => {
-          const patient = patientById.get(prescription.patientId);
-          return patient ? getBillingRequirement(patient, prescription).paymentStatus === "Vencido" : false;
-        })
-      : undefined;
+    const delinquent = billingRows.find(({ billing }) => billing.paymentStatus === "Vencido");
     if (delinquent) {
-      const patient = patientById.get(delinquent.patientId);
-      setError(`${patient?.name ?? "Paciente"} está inadimplente. Regularize a situação financeira antes de incluir no lote.`);
+      setError(`${delinquent.patient.name} está inadimplente. Regularize a situação financeira antes de incluir no lote.`);
       return false;
     }
-    const missingPayment = orderType === "pedido-paciente"
-      ? selectedPrescriptions.find((prescription) => {
-          const patient = patientById.get(prescription.patientId);
-          if (!patient) return true;
-          const billing = getBillingRequirement(patient, prescription);
-          const confirmation = paymentConfirmations[prescription.id];
-          return (billing.paymentRequired && !confirmation?.payment) || (billing.asaasRequired && !confirmation?.asaas);
-        })
-      : undefined;
+    const missingPayment = billingRows.find(({ prescription, billing }) => {
+      const confirmation = paymentConfirmations[prescription.id];
+      return (billing.paymentRequired && !confirmation?.payment) || (billing.asaasRequired && !confirmation?.asaas);
+    });
 
     if (missingPayment) {
-      const patient = patientById.get(missingPayment.patientId);
-      const billing = patient ? getBillingRequirement(patient, missingPayment) : undefined;
-      setError(billing?.asaasRequired && !paymentConfirmations[missingPayment.id]?.asaas
-        ? `Confirmar no ASAAS se o pagamento de ${patient?.name} está em dia.`
-        : `Confirme o pagamento de ${patient?.name ?? "todos os pacientes"} antes de incluir no lote.`);
+      const confirmation = paymentConfirmations[missingPayment.prescription.id];
+      setError(missingPayment.billing.asaasRequired && !confirmation?.asaas
+        ? `Confirme no ASAAS se o pagamento de ${missingPayment.patient.name} está em dia.`
+        : `Confirme o pagamento adicional de ${missingPayment.billing.bottlesBeyondAllowance} frasco(s) de ${missingPayment.patient.name} antes de incluir no lote.`);
       return false;
     }
 
@@ -384,12 +383,8 @@ export default function SecretariaLotesPage() {
   }
 
   function createSelectedPatientItems(): DemoBatchItem[] {
-    return selectedPrescriptions.flatMap(
-      (prescription) => {
-        const patient = patientById.get(prescription.patientId);
-
-        if (!patient) return [];
-        const billing = getBillingRequirement(patient, prescription);
+    return getSelectedBillingRows().flatMap(
+      ({ prescription, patient, billing }) => {
         const confirmedAt = new Date().toISOString();
 
         return [
@@ -409,6 +404,7 @@ export default function SecretariaLotesPage() {
             paymentMethod: billing.paymentMethod,
             billingBottleNumber: billing.nextBottleNumber,
             paymentRequired: billing.paymentRequired,
+            additionalPaidBottles: billing.paymentRequired ? billing.bottlesBeyondAllowance : 0,
             paymentConfirmedAt: billing.paymentRequired ? confirmedAt : undefined,
             asaasConfirmedAt: billing.asaasRequired ? confirmedAt : undefined,
           },
@@ -1058,20 +1054,17 @@ export default function SecretariaLotesPage() {
               {orderType === "pedido-paciente" && selectedPrescriptions.length > 0 && (
                 <div className="mt-5 space-y-3">
                   <h3 className="text-sm font-bold text-[#433438]">Conferência financeira</h3>
-                  {selectedPrescriptions.map((prescription) => {
-                    const patient = patientById.get(prescription.patientId);
-                    if (!patient) return null;
-                    const billing = getBillingRequirement(patient, prescription);
+                  {getSelectedBillingRows().map(({ prescription, patient, billing }) => {
                     const confirmation = paymentConfirmations[prescription.id] ?? { payment: false, asaas: false };
 
                     return (
                       <div key={prescription.id} className={`rounded-2xl border p-4 ${billing.paymentStatus === "Vencido" ? "border-[#f0bcc5] bg-[#fff2f3]" : billing.paymentRequired ? "border-[#f0dfc0] bg-[#fff9ef]" : "border-[#d7e9df] bg-[#f5fbf7]"}`}>
                         <p className="text-xs font-bold text-[#433438]">{patient.name}</p>
-                        <p className="mt-1 text-xs text-[#66595d]">{billing.acquisitionMethod} · {billing.track === "Imunobacteriana" ? `receita com ${prescription.bottles} frasco(s)` : `${billing.nextBottleNumber}º frasco`}</p>
+                        <p className="mt-1 text-xs text-[#66595d]">{billing.acquisitionMethod} · frascos {billing.nextBottleNumber} a {billing.lastBottleNumber}</p>
                         <p className={`mt-2 text-xs font-bold ${billing.paymentStatus === "Vencido" ? "text-[#a3113a]" : "text-[#187157]"}`}>{billing.paymentStatus === "Vencido" ? `● ${indicationLabel(indicationForTreatment(prescription.treatment))} INADIMPLENTE — não liberar até regularizar` : `● ${indicationLabel(indicationForTreatment(prescription.treatment))} EM DIA`}</p>
                         <p className={`mt-2 text-xs font-semibold ${billing.paymentRequired ? "text-[#966419]" : "text-[#187157]"}`}>{billing.explanation}</p>
                         {billing.paymentRequired && (
-                          <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-[#544449]"><input type="checkbox" checked={confirmation.payment} onChange={(event) => setPaymentConfirmations((current) => ({ ...current, [prescription.id]: { ...confirmation, payment: event.target.checked } }))} className="mt-0.5 accent-[#a3113a]" />{billing.track === "Imunobacteriana" ? "Confirmo o pagamento primário desta receita inteira." : "Confirmo que a cobrança deste frasco foi realizada e paga."}</label>
+                          <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-[#544449]"><input type="checkbox" checked={confirmation.payment} onChange={(event) => setPaymentConfirmations((current) => ({ ...current, [prescription.id]: { ...confirmation, payment: event.target.checked } }))} className="mt-0.5 accent-[#a3113a]" />Confirmo que o pagamento adicional dos {billing.bottlesBeyondAllowance} frasco(s) que excedem o limite cadastrado foi realizado.</label>
                         )}
                         {billing.asaasRequired && (
                           <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl bg-[#eef3ff] p-3 text-xs text-[#3c5da0]"><input type="checkbox" checked={confirmation.asaas} onChange={(event) => setPaymentConfirmations((current) => ({ ...current, [prescription.id]: { ...confirmation, asaas: event.target.checked } }))} className="mt-0.5 accent-[#3c5da0]" /><span><strong>Confirmar no ASAAS se o pagamento está em dia.</strong><br />Verifiquei diretamente no ASAAS e o pagamento está regular.</span></label>

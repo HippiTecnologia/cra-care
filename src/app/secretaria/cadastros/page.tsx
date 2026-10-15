@@ -317,7 +317,12 @@ export default function PatientRecordsPage() {
       asaasReference: paymentReference.trim() || undefined,
       notes: paymentNotes.trim() || undefined,
     };
-    const updated = { ...draft, paymentStatus: "Em dia" as const, payments: [payment, ...(patient.payments ?? [])] };
+    const updated = {
+      ...draft,
+      paymentStatus: "Em dia" as const,
+      treatmentPayments: (draft.treatmentPayments ?? []).map((item) => item.treatment === activeFinancialTrack ? { ...item, paymentStatus: "Em dia" as const } : item),
+      payments: [payment, ...(patient.payments ?? [])],
+    };
     if (!context) return;
     try {
       await saveSecretaryPatient(context, updated);
@@ -365,19 +370,24 @@ export default function PatientRecordsPage() {
       if (!current) return current;
       const payments = [...(current.treatmentPayments ?? [])];
       const index = payments.findIndex((item) => item.treatment === track);
+      const previous: NonNullable<DemoPatientRecord["treatmentPayments"]>[number] = index >= 0 ? payments[index] : { treatment: track };
+      const sameMethod = previous.methodSnapshotId === method.id;
+      const installmentCount = condition === "À vista" ? 1 : method.category === "Recorrente" ? method.billingPeriodMonths : method.maxInstallments;
       const next = {
-        ...(index >= 0 ? payments[index] : { treatment: track }),
+        ...previous,
         treatment: track,
         acquisitionMethod: method.name,
+        methodCategory: method.category,
+        bottlesIncluded: sameMethod ? previous.bottlesIncluded : undefined,
         agreedCondition: condition,
         methodSnapshotId: method.id,
         methodSnapshotVersion: method.version,
         contractValue: agreedValue,
-        installmentValue: condition === "À vista" ? agreedValue : agreedValue / Math.max(1, method.maxInstallments),
+        installmentValue: agreedValue / Math.max(1, installmentCount),
         discountAmount: Math.max(0, total - agreedValue),
         paymentMethod: method.paymentMethod,
-        installments: condition === "À vista" ? 1 : method.maxInstallments,
-        paymentStatus: "Pendente" as const,
+        installments: installmentCount,
+        paymentStatus: sameMethod ? previous.paymentStatus ?? "Pendente" : "Pendente" as const,
       };
       if (index >= 0) payments[index] = next; else payments.push(next);
       return { ...current, treatmentPayments: payments };
@@ -496,9 +506,8 @@ export default function PatientRecordsPage() {
             {tab === "financeiro" && <div className="mt-4 space-y-3">
               <div className="rounded-2xl border border-[#eee5e0] bg-[#fffdfc] p-4"><p className="text-xs font-bold uppercase tracking-[.14em] text-[#a3113a]">Financeiro por tratamento</p><div className="mt-3 flex flex-wrap gap-2">{visibleTreatmentTracks.map((track) => <button key={track} type="button" onClick={() => { setFinancialTrack(track); setEditing(false); setDraft(patient); }} className={`rounded-xl px-4 py-3 text-sm font-semibold ${activeFinancialTrack === track ? "bg-[#a3113a] text-white" : "bg-[#f6efec] text-[#716569]"}`}>{track}</button>)}</div></div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><Metric label={`Total · ${activeFinancialTrack}`} value={money(activeContractValue)} /><Metric label="Pago" value={money(totalPaid)} /><Metric label="Saldo" value={money(remaining)} /><Metric label="Status" value={activeTreatmentPayment?.paymentStatus ?? (legacyFinancialAllowed ? patient.paymentStatus : undefined) ?? "A definir"} /></div>
-              <div className="rounded-2xl border border-[#eee5e0] bg-[#fffdfc] p-5"><h3 className="font-bold">Condições disponíveis para {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">A escolha será vinculada somente a este tratamento.</p><div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">{adminMethods.map((method) => { const total = treatmentMethodTotal(method); return <article key={method.id} className="rounded-2xl border border-[#eadfd9] bg-white p-4"><p className="text-[10px] font-bold uppercase tracking-wide text-[#a3113a]">{method.category}</p><h4 className="mt-1 font-bold">{method.name}</h4><p className="mt-3 text-lg font-bold text-[#86203b]">{method.category === "Recorrente" ? `${money(method.value)}/mês` : money(total)}</p><p className="mt-1 text-xs text-[#817578]">{method.paymentMethod} · até {method.maxInstallments}x · versão {method.version}</p><div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => chooseMethod(method, "Parcelado", activeFinancialTrack)} className="rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-bold text-white">Parcelado: {money(total)}</button>{method.cashValue && <button type="button" onClick={() => chooseMethod(method, "À vista", activeFinancialTrack)} className="rounded-lg bg-[#187157] px-3 py-2 text-xs font-bold text-white">À vista: {money(method.cashValue)}</button>}</div></article>; })}</div></div>
               <div className="rounded-2xl border border-[#eee5e0] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Condições financeiras de {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">Estes dados pertencem exclusivamente a este tratamento.</p></div>{!editing && <button type="button" onClick={() => setEditing(true)} className="rounded-xl border border-[#e5d9d4] px-4 py-2 text-xs font-bold text-[#a3113a]">Editar financeiro</button>}</div>
-                {editing ? <><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={primaryButtonClass}>Salvar financeiro de {activeFinancialTrack}</button></div></> : <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3"><DataCard label="Método de aquisição" value={`${activeTreatmentPayment?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido"}${activeTreatmentPayment?.methodSnapshotVersion ? ` · versão ${activeTreatmentPayment.methodSnapshotVersion}` : ""}`} /><DataCard label="Condição escolhida" value={activeTreatmentPayment?.agreedCondition ?? (legacyFinancialAllowed ? patient.agreedCondition : undefined) ?? "Não definida"} /><DataCard label="Forma de pagamento" value={activeTreatmentPayment?.paymentMethod ?? (legacyFinancialAllowed ? patient.paymentMethod : undefined) ?? "Não definida"} /><DataCard label="Parcelas" value={(activeTreatmentPayment?.installments ?? (legacyFinancialAllowed ? patient.paymentInstallments : undefined)) ? `${activeTreatmentPayment?.installments ?? patient.paymentInstallments}x` : "Não informado"} /><DataCard label="Desconto registrado" value={money(activeTreatmentPayment?.discountAmount ?? (legacyFinancialAllowed ? patient.discountAmount : undefined) ?? 0)} /><DataCard label="Vencimento" value={formatDate(activeTreatmentPayment?.dueDate ?? (legacyFinancialAllowed ? patient.paymentDueDate : undefined))} /><DataCard label="Referência ASAAS" value={activeTreatmentPayment?.asaasReference ?? (legacyFinancialAllowed ? patient.asaasReference : undefined) ?? "Não informada"} /><DataCard label="Observações" value={activeTreatmentPayment?.notes ?? (legacyFinancialAllowed ? patient.financialNotes : undefined) ?? "Nenhuma"} /></div>}
+                {editing ? <><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} methods={adminMethods} onSelectMethod={(method, condition) => chooseMethod(method, condition, activeFinancialTrack)} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={primaryButtonClass}>Salvar financeiro de {activeFinancialTrack}</button></div></> : <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3"><DataCard label="Método de aquisição" value={`${activeTreatmentPayment?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido"}${activeTreatmentPayment?.methodSnapshotVersion ? ` · versão ${activeTreatmentPayment.methodSnapshotVersion}` : ""}`} /><DataCard label="Condição escolhida" value={activeTreatmentPayment?.agreedCondition ?? (legacyFinancialAllowed ? patient.agreedCondition : undefined) ?? "Não definida"} /><DataCard label="Forma de pagamento" value={activeTreatmentPayment?.paymentMethod ?? (legacyFinancialAllowed ? patient.paymentMethod : undefined) ?? "Não definida"} /><DataCard label="Parcelas" value={(activeTreatmentPayment?.installments ?? (legacyFinancialAllowed ? patient.paymentInstallments : undefined)) ? `${activeTreatmentPayment?.installments ?? patient.paymentInstallments}x` : "Não informado"} /><DataCard label="Desconto registrado" value={money(activeTreatmentPayment?.discountAmount ?? (legacyFinancialAllowed ? patient.discountAmount : undefined) ?? 0)} /><DataCard label="Vencimento" value={formatDate(activeTreatmentPayment?.dueDate ?? (legacyFinancialAllowed ? patient.paymentDueDate : undefined))} /><DataCard label="Frascos cobertos por este valor" value={activeTreatmentPayment?.bottlesIncluded ? String(activeTreatmentPayment.bottlesIncluded) : "Não informado"} /><DataCard label="Referência ASAAS" value={activeTreatmentPayment?.asaasReference ?? (legacyFinancialAllowed ? patient.asaasReference : undefined) ?? "Não informada"} /><DataCard label="Observações" value={activeTreatmentPayment?.notes ?? (legacyFinancialAllowed ? patient.financialNotes : undefined) ?? "Nenhuma"} /></div>}
               </div>
               <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><span className="text-xs text-[#817578]">Vincule ao frasco quando aplicável.</span></div><div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5"><Field label="Valor pago (R$)"><input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" className={inputClass} /></Field><Field label="Data"><input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} className={inputClass} /></Field><Field label="Parcela"><input type="number" min={1} value={installmentNumber} onChange={(event) => setInstallmentNumber(Math.max(1, Number(event.target.value)))} className={inputClass} /></Field><Field label="Frasco"><select value={paymentBottlePlanId} onChange={(event) => setPaymentBottlePlanId(event.target.value)} className={inputClass}><option value="">Não vincular</option>{activeBottlePlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.quantity}x {plan.volumeMl} mL</option>)}</select></Field><Field label="Referência ASAAS"><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} className={inputClass} /></Field><Field label="Observação" wide><input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: pagamento do 2º frasco" className={inputClass} /></Field></div><button type="button" onClick={addPayment} className="mt-3 rounded-xl bg-[#187157] px-4 py-2.5 text-sm font-semibold text-white">Registrar pagamento</button></div>
               <div className="rounded-2xl bg-[#fbf7f5] p-4"><h3 className="font-bold">Histórico de pagamentos de {activeFinancialTrack} ({activePayments.length})</h3><div className="mt-3 space-y-2">{activePayments.map((item) => { const linkedPlan = (patient.treatmentBottles ?? []).find((plan) => plan.id === item.bottlePlanId); return <article key={item.id} className="flex flex-col gap-2 rounded-xl border border-[#eadfd9] bg-white p-3 sm:flex-row sm:items-center sm:justify-between"><div><strong>{money(item.amount)}</strong><p className="mt-1 text-xs text-[#817578]">{item.treatment ?? activeFinancialTrack} · {formatDate(item.paidAt)} · {item.method}{item.installments ? ` · ${item.installmentNumber ?? 1}/${item.installments}` : ""}{linkedPlan ? ` · Frasco ${linkedPlan.volumeMl} mL` : ""}{item.asaasReference ? ` · ASAAS ${item.asaasReference}` : ""}</p>{item.notes && <p className="mt-1 text-sm text-[#66595d]">{item.notes}</p>}</div><button type="button" onClick={() => removePayment(item.id)} className="self-start rounded-lg bg-[#fff1f3] px-3 py-2 text-xs font-semibold text-[#a3113a]">Remover</button></article>; })}{!activePayments.length && <p className="text-sm text-[#817578]">Nenhum pagamento de {activeFinancialTrack} registrado.</p>}</div></div>
@@ -533,17 +542,19 @@ function Metric({ label, value }: { label: string; value: string }) {
   return <div className="rounded-xl bg-[#fbf7f5] px-3 py-2.5"><p className="text-[10px] uppercase tracking-wide text-[#817578]">{label}</p><p className="mt-1 text-base font-bold text-[#a3113a]">{value}</p></div>;
 }
 
-function TreatmentPaymentEditor({ patient, track, onChange }: {
+function TreatmentPaymentEditor({ patient, track, methods, onSelectMethod, onChange }: {
   patient: DemoPatientRecord;
   track: TreatmentTrack;
+  methods: AdminTreatmentMethod[];
+  onSelectMethod: (method: AdminTreatmentMethod, condition: "À vista" | "Parcelado") => void;
   onChange: (update: (current: DemoPatientRecord) => DemoPatientRecord) => void;
 }) {
-  function updatePayment(field: "acquisitionMethod" | "agreedCondition" | "contractValue" | "installments" | "installmentValue" | "paymentMethod" | "paymentStatus" | "dueDate" | "asaasReference" | "notes", value: string | number) {
+  function updatePayment(field: "agreedCondition" | "contractValue" | "installments" | "installmentValue" | "paymentMethod" | "paymentStatus" | "dueDate" | "bottlesIncluded" | "asaasReference" | "notes", value: string | number | undefined) {
     onChange((current) => {
       const payments = [...(current.treatmentPayments ?? [])];
       const index = payments.findIndex((payment) => payment.treatment === track);
       const previous = index >= 0 ? payments[index] : { treatment: track, paymentMethod: current.paymentMethod, dueDate: current.paymentDueDate, agreedCondition: current.agreedCondition };
-      const next = { ...previous, [field]: value };
+      const next = { ...previous, [field]: value } as NonNullable<DemoPatientRecord["treatmentPayments"]>[number];
       if (field === "contractValue") next.installmentValue = Number(value) / Math.max(1, next.installments ?? 1);
       if (field === "installments") next.installmentValue = (next.contractValue ?? 0) / Math.max(1, Number(value));
       if (field === "installmentValue") next.contractValue = Number(value) * Math.max(1, next.installments ?? 1);
@@ -553,5 +564,46 @@ function TreatmentPaymentEditor({ patient, track, onChange }: {
   }
 
   const payment = patient.treatmentPayments?.find((item) => item.treatment === track);
-  return <div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Método de aquisição"><input value={payment?.acquisitionMethod ?? ""} onChange={(event) => updatePayment("acquisitionMethod", event.target.value)} className={inputClass} /></Field><Field label="Condição"><select value={payment?.agreedCondition ?? "Parcelado"} onChange={(event) => updatePayment("agreedCondition", event.target.value)} className={inputClass}><option>Parcelado</option><option>À vista</option></select></Field><Field label="Forma de pagamento"><select value={payment?.paymentMethod ?? "A definir"} onChange={(event) => updatePayment("paymentMethod", event.target.value)} className={inputClass}>{paymentOptions.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Situação do pagamento"><select value={payment?.paymentStatus ?? "A definir"} onChange={(event) => updatePayment("paymentStatus", event.target.value)} className={inputClass}>{paymentStatusOptions.map((value) => <option key={value}>{value}</option>)}</select></Field><Field label="Valor total (R$)"><input type="number" min={0} step="0.01" value={payment?.contractValue ?? ""} onChange={(event) => updatePayment("contractValue", Number(event.target.value))} className={inputClass} /></Field><Field label="Parcelas"><input type="number" min={1} value={payment?.installments ?? 1} onChange={(event) => updatePayment("installments", Math.max(1, Number(event.target.value)))} className={inputClass} /></Field><Field label="Valor por parcela"><input type="number" min={0} step="0.01" value={payment?.installmentValue ?? ""} onChange={(event) => updatePayment("installmentValue", Number(event.target.value))} className={inputClass} /></Field><Field label="Vencimento"><input type="date" value={payment?.dueDate ?? ""} onChange={(event) => updatePayment("dueDate", event.target.value)} className={inputClass} /></Field><Field label="Referência ASAAS"><input value={payment?.asaasReference ?? ""} onChange={(event) => updatePayment("asaasReference", event.target.value)} className={inputClass} /></Field><Field label="Observações" wide><textarea rows={3} value={payment?.notes ?? ""} onChange={(event) => updatePayment("notes", event.target.value)} className={textareaClass} /></Field></div>;
+  const selectedMethod = methods.find((method) => method.id === payment?.methodSnapshotId)
+    ?? methods.find((method) => method.name === payment?.acquisitionMethod);
+  const usesAsaas = (payment?.paymentMethod ?? "").toLocaleLowerCase("pt-BR").includes("asaas");
+  const installmentLimit = selectedMethod
+    ? selectedMethod.category === "Recorrente" ? selectedMethod.billingPeriodMonths : selectedMethod.maxInstallments
+    : Math.max(1, payment?.installments ?? 1);
+  const installmentsLabel = selectedMethod?.category === "Recorrente" ? "Meses de cobrança" : "Parcelas";
+
+  return <div className="mt-5 grid gap-4 sm:grid-cols-2">
+    <Field label="Método de aquisição">
+      <select value={selectedMethod?.id ?? ""} onChange={(event) => {
+        const method = methods.find((item) => item.id === event.target.value);
+        if (method) onSelectMethod(method, "Parcelado");
+      }} className={inputClass}>
+        <option value="">Selecione uma modalidade</option>
+        {methods.map((method) => <option key={method.id} value={method.id}>{method.name} · {method.category}</option>)}
+      </select>
+      {selectedMethod && <span className="mt-1 block text-xs text-[#817578]">Modalidade {selectedMethod.version} · {selectedMethod.paymentMethod} · até {installmentLimit} {selectedMethod.category === "Recorrente" ? "mês(es)" : "parcela(s)"}</span>}
+      {!methods.length && <span className="mt-1 block text-xs text-[#a3113a]">Nenhuma modalidade ativa cadastrada.</span>}
+    </Field>
+    <Field label="Condição">
+      <select value={payment?.agreedCondition ?? "Parcelado"} onChange={(event) => {
+        const condition = event.target.value as "À vista" | "Parcelado";
+        if (selectedMethod) onSelectMethod(selectedMethod, condition);
+        else updatePayment("agreedCondition", condition);
+      }} className={inputClass}>
+        <option value="Parcelado">Parcelado</option>
+        {selectedMethod?.cashValue && <option value="À vista">À vista</option>}
+      </select>
+    </Field>
+    <Field label="Forma de pagamento definida pela modalidade"><select value={payment?.paymentMethod ?? "A definir"} onChange={(event) => updatePayment("paymentMethod", event.target.value)} disabled={Boolean(selectedMethod)} className={`${inputClass} disabled:bg-[#f7f4f2]`}>
+      {Array.from(new Set([payment?.paymentMethod ?? "A definir", ...paymentOptions])).map((value) => <option key={value}>{value}</option>)}
+    </select></Field>
+    <Field label="Situação do pagamento"><select value={payment?.paymentStatus ?? "A definir"} onChange={(event) => updatePayment("paymentStatus", event.target.value)} className={inputClass}>{paymentStatusOptions.map((value) => <option key={value}>{value}</option>)}</select></Field>
+    <Field label={selectedMethod?.category === "Recorrente" ? "Valor do período (R$)" : "Valor total (R$)"><input type="number" min={0} step="0.01" value={payment?.contractValue ?? ""} onChange={(event) => updatePayment("contractValue", Number(event.target.value))} className={inputClass} /></Field>
+    <Field label={installmentsLabel}><input type="number" min={1} max={installmentLimit} value={payment?.installments ?? 1} onChange={(event) => updatePayment("installments", Math.min(installmentLimit, Math.max(1, Number(event.target.value))))} className={inputClass} /></Field>
+    <Field label="Valor por parcela (R$)"><input type="number" min={0} step="0.01" value={payment?.installmentValue ?? ""} onChange={(event) => updatePayment("installmentValue", Number(event.target.value))} className={inputClass} /></Field>
+    <Field label="Vencimento"><input type="date" value={payment?.dueDate ?? ""} onChange={(event) => updatePayment("dueDate", event.target.value)} className={inputClass} /></Field>
+    <div className="sm:col-start-2"><Field label="Quantidade de frascos cobertos por este valor"><input type="number" min={1} step={1} value={payment?.bottlesIncluded ?? ""} onChange={(event) => updatePayment("bottlesIncluded", event.target.value === "" ? undefined : Math.max(1, Math.trunc(Number(event.target.value))))} placeholder="Preencha a quantidade" className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Deixe vazio até confirmar quantos frascos esse valor cobre.</span></Field></div>
+    {usesAsaas && <Field label="Referência ASAAS"><input value={payment?.asaasReference ?? ""} onChange={(event) => updatePayment("asaasReference", event.target.value)} className={inputClass} /></Field>}
+    <Field label="Observações" wide><textarea rows={3} value={payment?.notes ?? ""} onChange={(event) => updatePayment("notes", event.target.value)} className={textareaClass} /></Field>
+  </div>;
 }

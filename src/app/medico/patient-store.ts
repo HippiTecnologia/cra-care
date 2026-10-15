@@ -82,7 +82,10 @@ export type TreatmentBottlePlan = {
 export type TreatmentPayment = {
   treatment: "Rinite" | "Imunobacteriana";
   acquisitionMethod?: string;
+  methodCategory?: "Método" | "Recorrente" | "Plano de 6 meses" | "Por frasco";
   contractValue?: number;
+  /** Número total de frascos cobertos pelo valor desta condição financeira. */
+  bottlesIncluded?: number;
   installments?: number;
   installmentValue?: number;
   paymentMethod?: string;
@@ -191,6 +194,8 @@ export type DemoBatchItem = {
   paymentMethod?: DemoPatientRecord["paymentMethod"];
   billingBottleNumber?: number;
   paymentRequired?: boolean;
+  /** Frascos extras pagos além da cobertura financeira base cadastrada. */
+  additionalPaidBottles?: number;
   paymentConfirmedAt?: string;
   asaasConfirmedAt?: string;
   preparedBy?: string;
