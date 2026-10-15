@@ -42,6 +42,14 @@ function treatmentTrack(value?: string): TreatmentTrack {
   return /bacteriana|imunobacteriana/i.test(value ?? "") ? "Imunobacteriana" : "Rinite";
 }
 
+function sixMonthDueDate(): string {
+  const today = new Date();
+  const targetMonth = today.getMonth() + 6;
+  const lastDay = new Date(today.getFullYear(), targetMonth + 1, 0).getDate();
+  const dueDate = new Date(today.getFullYear(), targetMonth, Math.min(today.getDate(), lastDay));
+  return `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, "0")}-${String(dueDate.getDate()).padStart(2, "0")}`;
+}
+
 const statusOptions: Array<[NonNullable<DemoPatientRecord["status"]>, string]> = [
   ["com-pedido", "Com pedido"],
   ["em-conversa", "Em conversa"],
@@ -279,7 +287,15 @@ export default function PatientRecordsPage() {
     }
     if (!context) { setMessage("Sessão da Secretaria não identificada."); return; }
     try {
-      const completedPatient: DemoPatientRecord = { ...draft, registrationStatus: "completed" };
+      const patientDraft = section.startsWith("Financeiro")
+        ? {
+            ...draft,
+            treatmentPayments: (draft.treatmentPayments ?? []).map((item) => item.treatment === activeFinancialTrack && !item.dueDate
+              ? { ...item, dueDate: sixMonthDueDate() }
+              : item),
+          }
+        : draft;
+      const completedPatient: DemoPatientRecord = { ...patientDraft, registrationStatus: "completed" };
       const savedPatient = await saveSecretaryPatient(context, completedPatient);
       let patientWithAccess = completedPatient;
       let accessMessage = "";
@@ -383,6 +399,7 @@ export default function PatientRecordsPage() {
         methodSnapshotId: method.id,
         methodSnapshotVersion: method.version,
         contractValue: agreedValue,
+        dueDate: previous.dueDate ?? sixMonthDueDate(),
         installmentValue: agreedValue / Math.max(1, installmentCount),
         discountAmount: Math.max(0, total - agreedValue),
         paymentMethod: method.paymentMethod,
@@ -594,14 +611,14 @@ function TreatmentPaymentEditor({ patient, track, methods, onSelectMethod, onCha
         {selectedMethod?.cashValue && <option value="À vista">À vista</option>}
       </select>
     </Field>
-    <Field label="Forma de pagamento definida pela modalidade"><select value={payment?.paymentMethod ?? "A definir"} onChange={(event) => updatePayment("paymentMethod", event.target.value)} disabled={Boolean(selectedMethod)} className={`${inputClass} disabled:bg-[#f7f4f2]`}>
+    <Field label="Forma de pagamento"><select value={payment?.paymentMethod ?? "A definir"} onChange={(event) => updatePayment("paymentMethod", event.target.value)} className={inputClass}>
       {Array.from(new Set([payment?.paymentMethod ?? "A definir", ...paymentOptions])).map((value) => <option key={value}>{value}</option>)}
     </select></Field>
     <Field label="Situação do pagamento"><select value={payment?.paymentStatus ?? "A definir"} onChange={(event) => updatePayment("paymentStatus", event.target.value)} className={inputClass}>{paymentStatusOptions.map((value) => <option key={value}>{value}</option>)}</select></Field>
     <Field label={selectedMethod?.category === "Recorrente" ? "Valor do período (R$)" : "Valor total (R$)"}><input type="number" min={0} step="0.01" value={payment?.contractValue ?? ""} onChange={(event) => updatePayment("contractValue", Number(event.target.value))} className={inputClass} /></Field>
     <Field label={installmentsLabel}><input type="number" min={1} max={installmentLimit} value={payment?.installments ?? 1} onChange={(event) => updatePayment("installments", Math.min(installmentLimit, Math.max(1, Number(event.target.value))))} className={inputClass} /></Field>
     <Field label="Valor por parcela (R$)"><input type="number" min={0} step="0.01" value={payment?.installmentValue ?? ""} onChange={(event) => updatePayment("installmentValue", Number(event.target.value))} className={inputClass} /></Field>
-    <Field label="Vencimento"><input type="date" value={payment?.dueDate ?? ""} onChange={(event) => updatePayment("dueDate", event.target.value)} className={inputClass} /></Field>
+    <Field label="Vencimento"><input type="date" value={payment?.dueDate ?? sixMonthDueDate()} onChange={(event) => updatePayment("dueDate", event.target.value)} className={inputClass} /></Field>
     <div className="sm:col-start-2"><Field label="Quantidade de frascos cobertos por este valor"><input type="number" min={1} step={1} value={payment?.bottlesIncluded ?? ""} onChange={(event) => updatePayment("bottlesIncluded", event.target.value === "" ? undefined : Math.max(1, Math.trunc(Number(event.target.value))))} placeholder="Preencha a quantidade" className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Deixe vazio até confirmar quantos frascos esse valor cobre.</span></Field></div>
     {usesAsaas && <Field label="Referência ASAAS"><input value={payment?.asaasReference ?? ""} onChange={(event) => updatePayment("asaasReference", event.target.value)} className={inputClass} /></Field>}
     <Field label="Observações" wide><textarea rows={3} value={payment?.notes ?? ""} onChange={(event) => updatePayment("notes", event.target.value)} className={textareaClass} /></Field>
