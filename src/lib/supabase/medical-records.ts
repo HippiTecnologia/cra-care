@@ -79,7 +79,7 @@ function numberValue(record: Record<string, unknown>, key: string) {
 
 function bottleVolumeValue(value: unknown): BottleVolumeMl | undefined {
   const parsed = typeof value === "number" ? value : Number(value);
-  return [4, 6, 8, 10, 12].includes(parsed) ? parsed as BottleVolumeMl : undefined;
+  return [4, 6, 8, 9, 10, 12].includes(parsed) ? parsed as BottleVolumeMl : undefined;
 }
 
 function recordValue(value: unknown): Record<string, unknown> {

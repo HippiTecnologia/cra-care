@@ -301,7 +301,7 @@ function summarizePrescriptions(rows: Record<string, unknown>[]) {
     seenTreatments.add(key);
 
     const bottles = Math.max(1, number(content.bottles, 1));
-    const volume = [4, 6, 8, 10, 12].includes(number(content.bottleVolumeMl)) ? number(content.bottleVolumeMl) : undefined;
+    const volume = [4, 6, 8, 9, 10, 12].includes(number(content.bottleVolumeMl)) ? number(content.bottleVolumeMl) : undefined;
     const current = summaries.get(patientId);
     const labels = new Set((current?.treatment ?? "").split(" + ").filter(Boolean));
     if (treatment) labels.add(treatment);

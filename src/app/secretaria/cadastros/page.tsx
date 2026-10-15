@@ -10,7 +10,6 @@ import type {
   DemoPrescription,
   DemoStockItem,
   PatientPaymentRecord,
-  TreatmentBottlePlan,
 } from "../../medico/patient-store";
 import { buildBottleHistory } from "../../paciente/bottle-history";
 import {
@@ -31,6 +30,7 @@ import {
   loadSecretaryStock,
   createSecretaryPatientAccess,
   saveSecretaryBottleAdjustment,
+  saveSecretaryStockItem,
   saveSecretaryPatient,
   type SecretaryContext,
 } from "../../../lib/supabase/secretary-records";
@@ -141,6 +141,11 @@ export default function PatientRecordsPage() {
   const [editingBottle, setEditingBottle] = useState<number | null>(null);
   const [bottleReason, setBottleReason] = useState("");
   const [bottleDraft, setBottleDraft] = useState<{ receivedAt: string; startedAt: string; finishedAt: string; status: "recebido" | "em-uso" | "finalizado" }>({ receivedAt: "", startedAt: "", finishedAt: "", status: "recebido" });
+  const [addingBottle, setAddingBottle] = useState(false);
+  const [newBottleTreatment, setNewBottleTreatment] = useState<TreatmentTrack>("Rinite");
+  const [newBottleVolume, setNewBottleVolume] = useState<BottleVolumeMl>(4);
+  const [newBottleReceivedAt, setNewBottleReceivedAt] = useState(() => new Date().toISOString().slice(0, 10));
+  const [savingBottle, setSavingBottle] = useState(false);
   const [referenceNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -215,43 +220,6 @@ export default function PatientRecordsPage() {
 
   function updateDraft<K extends keyof DemoPatientRecord>(key: K, value: DemoPatientRecord[K]) {
     setDraft((current) => current ? { ...current, [key]: value } : current);
-  }
-
-  function addTreatmentBottlePlan() {
-    setDraft((current) => {
-      if (!current) return current;
-      const treatment = /bacteriana|imunobacteriana/i.test(current.treatment ?? "") ? "Imunobacteriana" : "Rinite";
-      const plan: TreatmentBottlePlan = {
-        id: crypto.randomUUID(),
-        treatment,
-        volumeMl: 4,
-        quantity: 1,
-        updatedAt: new Date().toISOString(),
-        updatedBy: context?.fullName,
-      };
-      return { ...current, treatmentBottles: [...(current.treatmentBottles ?? []), plan] };
-    });
-    setEditing(true);
-  }
-
-  function updateTreatmentBottlePlan(id: string, changes: Partial<Pick<TreatmentBottlePlan, "treatment" | "volumeMl" | "quantity">>) {
-    setDraft((current) => current ? {
-      ...current,
-      treatmentBottles: (current.treatmentBottles ?? []).map((plan) => plan.id === id ? {
-        ...plan,
-        ...changes,
-        quantity: Math.max(1, changes.quantity ?? plan.quantity),
-        updatedAt: new Date().toISOString(),
-        updatedBy: context?.fullName,
-      } : plan),
-    } : current);
-  }
-
-  function removeTreatmentBottlePlan(id: string) {
-    setDraft((current) => current ? {
-      ...current,
-      treatmentBottles: (current.treatmentBottles ?? []).filter((plan) => plan.id !== id),
-    } : current);
   }
 
   async function fillAddressFromZipCode(value: string) {
@@ -422,6 +390,70 @@ export default function PatientRecordsPage() {
     setBottleDraft({ receivedAt: item.receivedAt?.slice(0, 10) ?? "", startedAt: item.startedAt?.slice(0, 10) ?? "", finishedAt: item.finishedAt?.slice(0, 10) ?? "", status: item.status });
   }
 
+  function openAddBottleForm() {
+    const initialTrack = visibleTreatmentTracks[0] ?? (patient?.treatment ? treatmentTrack(patient.treatment) : "Rinite");
+    setNewBottleTreatment(initialTrack);
+    setNewBottleVolume(initialTrack === "Imunobacteriana" ? 9 : 4);
+    setNewBottleReceivedAt(new Date().toISOString().slice(0, 10));
+    setAddingBottle(true);
+  }
+
+  async function addBottleToHistory() {
+    if (!patient || !context) return;
+    if (!newBottleReceivedAt) { setMessage("Informe a data de recebimento do frasco."); return; }
+    setSavingBottle(true);
+    const isImmunobacterial = newBottleTreatment === "Imunobacteriana";
+    const item: DemoStockItem = {
+      id: crypto.randomUUID(),
+      batchId: "",
+      batchCode: "ADICIONADO MANUALMENTE",
+      prescriptionId: "",
+      patientId: patient.id,
+      patientName: patient.name,
+      patientCpf: patient.cpf,
+      doctor: patient.doctor,
+      treatment: isImmunobacterial ? "Vacina Imunobacteriana" : "Vacina Rinite",
+      phase: "",
+      bottles: 1,
+      bottleVolumeMl: isImmunobacterial ? 9 : newBottleVolume,
+      formulas: [],
+      delivery: patient.delivery,
+      laboratory: "Registro manual da Secretaria",
+      receivedAt: newBottleReceivedAt,
+      checkedBy: context.fullName,
+      status: "disponivel",
+    };
+    try {
+      const savedBottle = await saveSecretaryStockItem(context, item);
+      const bottleNumber = savedBottle.bottleNumber ?? bottleHistory.length + 1;
+      setStockRecords((current) => [savedBottle, ...current.filter((record) => record.id !== savedBottle.id)]);
+      setPortals((current) => {
+        const currentPortal = current[patient.id] ?? createDefaultPortalState(patient.id);
+        if (currentPortal.bottles.some((bottle) => bottle.id === savedBottle.id)) return current;
+        return {
+          ...current,
+          [patient.id]: {
+            ...currentPortal,
+            bottles: [...currentPortal.bottles, {
+              id: savedBottle.id,
+              number: bottleNumber,
+              treatment: item.treatment,
+              receivedAt: newBottleReceivedAt,
+              startedAt: "",
+              status: "recebido",
+            }],
+          },
+        };
+      });
+      setAddingBottle(false);
+      setMessage(`Frasco ${bottleNumber} adicionado ao histórico e a Pedidos e entregas.`);
+    } catch {
+      setMessage("Não foi possível adicionar o frasco. Confira a conexão e a atualização do banco de dados.");
+    } finally {
+      setSavingBottle(false);
+    }
+  }
+
   async function saveBottleAdjustment() {
     if (!portal || !editingBottle) return;
     if (!bottleReason.trim()) { setMessage("Informe o motivo do ajuste no histórico do frasco."); return; }
@@ -504,19 +536,23 @@ export default function PatientRecordsPage() {
                 const received = trackStock.reduce((sum, item) => sum + item.bottles, 0);
                 return <article key={track} className={`rounded-3xl border p-5 ${track === "Rinite" ? "border-[#ead5dc] bg-[#fff9fb]" : "border-[#d9e4f3] bg-[#f7faff]"}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.14em] text-[#a3113a]">Tratamento independente</p><h3 className="mt-1 text-xl font-bold">{track}</h3></div><span className="rounded-full bg-white px-3 py-1 text-xs font-semibold ring-1 ring-[#e5dfe1]">{trackPrescriptions.length} receita(s)</span></div><div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4"><Metric label="Recebidos" value={String(received)} /><Metric label="Iniciados" value={String(trackBottles.filter((item) => item.startedAt).length)} /><Metric label="Concluídos" value={String(trackBottles.filter((item) => item.status === "finalizado").length)} /><Metric label="Frasco atual" value={current ? String(current.number) : "Nenhum"} /></div><div className="mt-4 rounded-2xl bg-white p-4 text-sm leading-6"><p><strong>Última receita:</strong> {latest ? formatDate(latest.createdAt) : "Não informada"}</p><p><strong>Fase:</strong> {latest?.phase || (track === "Imunobacteriana" ? "Não se aplica" : "Não informada")}</p><p><strong>Posologia:</strong> {latest?.posology || "Não informada"}</p><p><strong>Frascos prescritos:</strong> {latest?.bottles ?? 0}</p></div></article>;
               })}</div> : <Info title="Tratamentos">Nenhuma receita de Rinite ou Imunobacteriana registrada.</Info>}
-              <section className="rounded-2xl border border-[#eee5e0] bg-[#fffdfc] p-4 sm:p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div><h3 className="font-bold">Frascos do tratamento</h3><p className="mt-1 text-xs text-[#817578]">Volume e quantidade previstos para cada tratamento do paciente.</p></div>
-                  <button type="button" onClick={addTreatmentBottlePlan} className="rounded-xl border border-[#a3113a] bg-white px-4 py-2 text-xs font-bold text-[#a3113a]">+ Adicionar frasco</button>
-                </div>
-                {(patient.treatmentBottles ?? []).length === 0 && !editing ? <p className="mt-4 rounded-xl border border-dashed border-[#dfd5d0] px-4 py-5 text-center text-sm text-[#817578]">Nenhum frasco planejado. Use “Adicionar frasco” para cadastrar.</p> : null}
-                {editing ? <div className="mt-4 space-y-2">{(draft.treatmentBottles ?? []).map((plan) => <div key={plan.id} className="grid gap-2 rounded-xl border border-[#eadfd9] bg-white p-3 sm:grid-cols-[1fr_130px_110px_auto] sm:items-end"><Field label="Tratamento"><select value={plan.treatment} onChange={(event) => updateTreatmentBottlePlan(plan.id, { treatment: event.target.value as TreatmentBottlePlan["treatment"] })} className={inputClass}><option value="Rinite">Rinite</option><option value="Imunobacteriana">Imunobacteriana</option></select></Field><Field label="Volume"><select value={plan.volumeMl} onChange={(event) => updateTreatmentBottlePlan(plan.id, { volumeMl: Number(event.target.value) as BottleVolumeMl })} className={inputClass}>{bottleVolumeOptions.map((volume) => <option key={volume} value={volume}>{volume} mL</option>)}</select></Field><Field label="Quantidade"><input type="number" min={1} value={plan.quantity} onChange={(event) => updateTreatmentBottlePlan(plan.id, { quantity: Number(event.target.value) })} className={inputClass} /></Field><button type="button" onClick={() => removeTreatmentBottlePlan(plan.id)} className="h-11 rounded-xl bg-[#fff1f3] px-3 text-xs font-bold text-[#a3113a]">Remover</button></div>)}{(draft.treatmentBottles ?? []).length === 0 && <p className="rounded-xl border border-dashed border-[#dfd5d0] px-4 py-4 text-center text-sm text-[#817578]">Adicione um frasco para este tratamento.</p>}<div className="flex justify-end"><button type="button" onClick={() => saveDraft("Frascos do tratamento")} className={primaryButtonClass}>Salvar frascos</button></div></div> : <div className="mt-4 flex flex-wrap gap-2">{(patient.treatmentBottles ?? []).map((plan) => <span key={plan.id} className="rounded-xl bg-[#f6efec] px-3 py-2 text-sm font-semibold text-[#66595d]">{plan.treatment} · {plan.quantity} frasco(s) de {plan.volumeMl} mL</span>)}</div>}
-              </section>
               {editing && <div className="grid gap-4 rounded-2xl border border-[#eee5e0] p-5 sm:grid-cols-2"><Field label="Status geral do cadastro"><select value={draft.status ?? "em-conversa"} onChange={(event) => updateDraft("status", event.target.value as DemoPatientRecord["status"])} className={inputClass}>{statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field><Field label="Método de recebimento"><select value={draft.delivery ?? "Retirada"} onChange={(event) => updateDraft("delivery", event.target.value as DemoPatientRecord["delivery"])} className={inputClass}>{["Motoboy", "Retirada", "Sedex", "Aéreo"].map((value) => <option key={value}>{value}</option>)}</select></Field>{draft.status === "desistente" && <Field label="Motivo da desistência" wide><textarea rows={3} value={draft.abandonmentReason ?? ""} onChange={(event) => updateDraft("abandonmentReason", event.target.value)} className={textareaClass} /></Field>}<div className="flex justify-end sm:col-span-2"><button type="button" onClick={() => saveDraft("Dados do tratamento")} className={primaryButtonClass}>Salvar dados gerais</button></div></div>}
               <Info title="Observações dos médicos">{prescriptions.filter((item) => item.notes.trim()).map((item) => `${formatDate(item.createdAt)} · ${item.doctor}\n${item.notes}`).join("\n\n") || "Nenhuma observação médica registrada nas receitas."}</Info>
               <div className="rounded-2xl bg-[#fbf7f5] p-5"><h3 className="font-bold">Histórico completo de receitas e fórmulas ({prescriptions.length})</h3><div className="mt-4 space-y-3">{prescriptions.map((item) => <article key={item.id} className="rounded-xl border border-[#eadfd9] bg-white p-4 text-sm"><div className="flex flex-wrap justify-between gap-2"><strong>{treatmentTrack(item.treatment)} · {formatDate(item.createdAt)}{item.phase ? ` · ${item.phase}` : ""}</strong><span>{item.bottles} frasco(s)</span></div><p className="mt-2 text-[#66595d]">{item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ")}</p><p className="mt-2 text-xs text-[#817578]">{item.posology} · {item.doctor} · CRM {item.doctorCrm}</p></article>)}{prescriptions.length === 0 && <p className="text-sm text-[#817578]">Nenhuma receita registrada.</p>}</div></div>
               <div className="rounded-2xl bg-[#fbf7f5] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold">Histórico das avaliações ({portal?.assessments.length ?? 0})</h3><Link href="/secretaria/avaliacoes" className="rounded-xl border border-[#e5d9d4] bg-white px-4 py-2 text-xs font-bold text-[#a3113a]">Gerenciar avaliações</Link></div><div className="mt-4 space-y-3">{portal?.assessments.map((item) => <article key={item.id} className="rounded-xl border border-[#eadfd9] bg-white p-4 text-sm leading-6"><strong>Frasco {item.bottleNumber} · {formatDate(item.createdAt)}</strong><p>Frequência: {item.symptomFrequency ?? "Avaliação anterior"}</p><p>Severidade: {item.symptomSeverity ?? item.feeling ?? "Não informada"}</p><p>Uso de medicamentos: {item.medicationFrequency ?? "Não informado"}</p><p>Relato: {item.notes || "Sem comentário"}</p><p className="mt-2 text-xs text-[#817578]">{item.viewedAt ? `Conferida por ${item.viewedBy ?? "equipe"} em ${formatDate(item.viewedAt, true)}` : "Aguardando conferência da equipe"}</p>{item.response && <p className="mt-2 rounded-lg bg-[#edf8f3] px-3 py-2 text-[#187157]">Resposta: {item.response}</p>}</article>)}{!portal?.assessments.length && <p className="text-sm text-[#817578]">Nenhuma avaliação registrada.</p>}</div></div>
-              <div className="rounded-2xl bg-[#fbf7f5] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Histórico por frasco</h3><p className="mt-1 text-xs text-[#817578]">Cada frasco permanece identificado como Rinite ou Imunobacteriana.</p></div></div><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm"><thead className="text-xs uppercase text-[#817578]"><tr><th className="pb-3">Tratamento</th><th className="pb-3">Frasco</th><th className="pb-3">Recebimento</th><th className="pb-3">Início</th><th className="pb-3">Conclusão</th><th className="pb-3">Status</th><th className="pb-3">Ação</th></tr></thead><tbody>{bottleHistory.slice().reverse().map((item) => <tr key={`${item.treatment ?? "tratamento"}-${item.number}`} className="border-t border-[#eadfd9]"><td className="py-3 font-bold text-[#86203b]">{treatmentTrack(item.treatment)}</td><td className="font-bold">{item.number}</td><td>{formatDate(item.receivedAt)}</td><td>{formatDate(item.startedAt)}</td><td>{formatDate(item.finishedAt)}</td><td>{item.status === "finalizado" ? "Concluído" : item.status === "em-uso" ? "Em uso" : "Recebido"}</td><td><button type="button" onClick={() => openBottleEditor(item.number)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-[#a3113a] ring-1 ring-[#e9dfda]">Ajustar</button></td></tr>)}</tbody></table>{bottleHistory.length === 0 && <p className="py-5 text-sm text-[#817578]">Nenhum frasco recebido.</p>}</div></div>
+              <div className="rounded-2xl bg-[#fbf7f5] p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div><h3 className="font-bold">Histórico por frasco</h3><p className="mt-1 text-xs text-[#817578]">Cada frasco permanece identificado como Rinite ou Imunobacteriana.</p></div>
+                  <button type="button" onClick={openAddBottleForm} className="rounded-xl border border-[#a3113a] bg-white px-4 py-2 text-xs font-bold text-[#a3113a]">+ Adicionar frasco</button>
+                </div>
+                {addingBottle && <div className="mt-4 grid gap-3 rounded-xl border border-[#eadfd9] bg-white p-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <Field label="Tratamento"><select value={newBottleTreatment} onChange={(event) => { const treatment = event.target.value as TreatmentTrack; setNewBottleTreatment(treatment); setNewBottleVolume(treatment === "Imunobacteriana" ? 9 : 4); }} className={inputClass}><option value="Rinite">Rinite</option><option value="Imunobacteriana">Imunobacteriana</option></select></Field>
+                  <Field label="Volume por frasco">{newBottleTreatment === "Imunobacteriana" ? <div className={`${inputClass} flex items-center bg-[#f7f4f2]`}>9 mL · fixo</div> : <select value={newBottleVolume} onChange={(event) => setNewBottleVolume(Number(event.target.value) as BottleVolumeMl)} className={inputClass}>{bottleVolumeOptions.map((volume) => <option key={volume} value={volume}>{volume} mL</option>)}</select>}</Field>
+                  <Field label="Data de recebimento"><input type="date" value={newBottleReceivedAt} onChange={(event) => setNewBottleReceivedAt(event.target.value)} className={inputClass} /></Field>
+                  <div className="flex items-end gap-2"><button type="button" disabled={savingBottle} onClick={addBottleToHistory} className={`${primaryButtonClass} flex-1 disabled:opacity-60`}>{savingBottle ? "Salvando…" : "Adicionar ao histórico"}</button><button type="button" disabled={savingBottle} onClick={() => setAddingBottle(false)} className="h-11 rounded-xl border border-[#e5d9d4] px-3 text-sm font-semibold disabled:opacity-60">Cancelar</button></div>
+                </div>}
+                <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm"><thead className="text-xs uppercase text-[#817578]"><tr><th className="pb-3">Tratamento</th><th className="pb-3">Frasco</th><th className="pb-3">Recebimento</th><th className="pb-3">Início</th><th className="pb-3">Conclusão</th><th className="pb-3">Status</th><th className="pb-3">Ação</th></tr></thead><tbody>{bottleHistory.slice().reverse().map((item) => <tr key={`${item.treatment ?? "tratamento"}-${item.number}`} className="border-t border-[#eadfd9]"><td className="py-3 font-bold text-[#86203b]">{treatmentTrack(item.treatment)}</td><td className="font-bold">{item.number}</td><td>{formatDate(item.receivedAt)}</td><td>{formatDate(item.startedAt)}</td><td>{formatDate(item.finishedAt)}</td><td>{item.status === "finalizado" ? "Concluído" : item.status === "em-uso" ? "Em uso" : "Recebido"}</td><td><button type="button" onClick={() => openBottleEditor(item.number)} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-[#a3113a] ring-1 ring-[#e9dfda]">Ajustar</button></td></tr>)}</tbody></table>{bottleHistory.length === 0 && <p className="py-5 text-sm text-[#817578]">Nenhum frasco recebido.</p>}</div>
+              </div>
               <Info title={`Pedidos e entregas (${stock.length})`}>{stock.map((item) => `${treatmentTrack(item.treatment)} · ${item.batchCode} — ${item.bottles} frasco(s) — ${item.status} — recebido no estoque em ${formatDate(item.receivedAt)} — entregue em ${formatDate(item.deliveredAt)}`).join("\n") || "Nenhum pedido ou entrega registrado."}</Info>
             </div>}
 

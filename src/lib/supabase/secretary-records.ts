@@ -73,7 +73,7 @@ function number(value: unknown, fallback = 0) {
 
 function bottleVolume(value: unknown): BottleVolumeMl | undefined {
   const parsed = number(value);
-  return [4, 6, 8, 10, 12].includes(parsed) ? parsed as BottleVolumeMl : undefined;
+  return [4, 6, 8, 9, 10, 12].includes(parsed) ? parsed as BottleVolumeMl : undefined;
 }
 
 function manualNotificationFromValue(value: unknown): PatientManualNotification | null {
@@ -452,7 +452,7 @@ function bottleFromRow(row: Record<string, unknown>): PatientBottle {
     prescriptionId: text(row.prescription_id) || undefined,
     treatment: text(objectValue(row.metadata).treatment) || undefined,
     receivedAt: text(row.received_at) || undefined,
-    startedAt: text(row.started_at) || text(row.received_at),
+    startedAt: text(row.started_at),
     finishedAt: text(row.completed_at) || undefined,
     status: row.completed_at || rawStatus === "finalizado"
       ? "finalizado"
@@ -748,6 +748,7 @@ function stockFromRow(row: Record<string, unknown>): DemoStockItem {
   return {
     ...(metadata as unknown as DemoStockItem),
     id: text(row.id),
+    bottleNumber: number(row.bottle_number) || undefined,
     batchId: text(row.batch_id, text(metadata.batchId)),
     batchCode: text(metadata.batchCode),
     prescriptionId: text(row.prescription_id, text(metadata.prescriptionId)),
@@ -809,7 +810,7 @@ export async function saveSecretaryStockItem(context: SecretaryContext, item: De
     metadata: { ...item, id },
   });
   if (error) throw error;
-  return { ...item, id };
+  return { ...item, id, bottleNumber };
 }
 
 export async function confirmSecretaryBatch(

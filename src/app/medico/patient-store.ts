@@ -235,6 +235,7 @@ export type DemoStockStatus = "disponivel" | "reservado" | "entregue";
 
 export type DemoStockItem = {
   id: string;
+  bottleNumber?: number;
   batchId: string;
   batchCode: string;
   prescriptionId: string;
