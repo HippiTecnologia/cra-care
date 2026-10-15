@@ -68,7 +68,7 @@ export type DemoPatientRecord = {
 
 export const bottleVolumeOptions = [4, 6, 8, 10, 12] as const;
 
-export type BottleVolumeMl = typeof bottleVolumeOptions[number];
+export type BottleVolumeMl = typeof bottleVolumeOptions[number] | 9;
 
 export type TreatmentBottlePlan = {
   id: string;

@@ -279,7 +279,7 @@ export default function MedicalPatientPage() {
     setSelectedFormula(availableFormulas[0]);
     setPhase(patient?.phase ?? treatmentPhases[0]);
     setBottles(vaccineType === "imunobacteriana" ? 4 : 1);
-    setBottleVolumeMl(patient?.treatmentBottles?.find((plan) => plan.treatment === (vaccineType === "imunobacteriana" ? "Imunobacteriana" : "Rinite"))?.volumeMl ?? 4);
+    setBottleVolumeMl(vaccineType === "imunobacteriana" ? 9 : patient?.treatmentBottles?.find((plan) => plan.treatment === "Rinite")?.volumeMl ?? 4);
     setDrops(vaccineType === "imunobacteriana" ? 4 : 2);
     setFrequency(vaccineType === "imunobacteriana" ? "todos os dias" : "3 vezes por semana");
     setCustomPosology(false);
@@ -295,7 +295,7 @@ export default function MedicalPatientPage() {
     setDurationMonths(type === "imunobacteriana" ? 6 : 36);
     setDrops(type === "imunobacteriana" ? 4 : 2);
     setFrequency(type === "imunobacteriana" ? "todos os dias" : "3 vezes por semana");
-    setBottleVolumeMl(patient?.treatmentBottles?.find((plan) => plan.treatment === (type === "imunobacteriana" ? "Imunobacteriana" : "Rinite"))?.volumeMl ?? 4);
+    setBottleVolumeMl(type === "imunobacteriana" ? 9 : patient?.treatmentBottles?.find((plan) => plan.treatment === "Rinite")?.volumeMl ?? 4);
     setCustomPosology(false);
     setPosology("");
     setSelectedPrescriptionId(null);
@@ -324,7 +324,7 @@ export default function MedicalPatientPage() {
       treatment: vaccineType === "imunobacteriana" ? "Vacina Imunobacteriana" : "Vacina Rinite",
       phase: vaccineType === "imunobacteriana" ? "" : phase,
       bottles,
-      bottleVolumeMl,
+      bottleVolumeMl: vaccineType === "imunobacteriana" ? 9 : bottleVolumeMl,
       drops,
       frequency,
       posology: currentPosology,
@@ -557,7 +557,7 @@ export default function MedicalPatientPage() {
     treatment: vaccineType === "imunobacteriana" ? "Vacina Imunobacteriana" : "Vacina Rinite",
     phase: vaccineType === "imunobacteriana" ? "" : phase,
     bottles,
-    bottleVolumeMl,
+    bottleVolumeMl: vaccineType === "imunobacteriana" ? 9 : bottleVolumeMl,
     drops,
     frequency,
     posology: currentPosology,
@@ -904,9 +904,9 @@ export default function MedicalPatientPage() {
                     <input type="number" min={1} value={bottles} onChange={(event) => { setBottles(Number(event.target.value)); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" />
                   </label>
                   <label className="text-sm text-[#544449]">Volume por frasco
-                    <select value={bottleVolumeMl} onChange={(event) => { setBottleVolumeMl(Number(event.target.value) as BottleVolumeMl); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]">
+                    {vaccineType === "imunobacteriana" ? <div className="mt-2 flex h-12 items-center rounded-xl border border-[#e9dfda] bg-[#f7f4f2] px-4 font-semibold text-[#544449]">9 mL · fixo</div> : <select value={bottleVolumeMl} onChange={(event) => { setBottleVolumeMl(Number(event.target.value) as BottleVolumeMl); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]">
                       {bottleVolumeOptions.map((volume) => <option key={volume} value={volume}>{volume} mL</option>)}
-                    </select>
+                    </select>}
                   </label>
                   <label className="text-sm text-[#544449]">Duração
                     <select value={durationMonths} onChange={(event) => { setDurationMonths(Number(event.target.value)); setSelectedPrescriptionId(null); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]">
