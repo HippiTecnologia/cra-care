@@ -43,7 +43,11 @@ export async function loadNursingWorkspace() {
 }
 
 export async function createNursingPatient(profile: NursingProfile, input: { name: string; cpf: string; birthDate: string; phone?: string; doctorId?: string }) {
-  const { data, error } = await (getSupabaseClient().from("patients") as any).insert({ clinic_id: profile.clinicId, nursing_profile_id: profile.id, doctor_profile_id: null, full_name: input.name.trim(), cpf: input.cpf.replace(/\D/g, ""), birth_date: input.birthDate, phone: input.phone?.trim() || null, status: "laudo", address: {}, treatment: {}, financial: {} }).select("id").single();
+  const normalizedCpf = input.cpf.replace(/\D/g, "");
+  if (normalizedCpf.length !== 11) throw new Error("CPF_INVALIDO");
+  if (await findNursingPatientByCpf(profile, normalizedCpf)) throw new Error("CPF_DUPLICADO");
+  const { data, error } = await (getSupabaseClient().from("patients") as any).insert({ clinic_id: profile.clinicId, nursing_profile_id: profile.id, doctor_profile_id: null, full_name: input.name.trim(), cpf: normalizedCpf, birth_date: input.birthDate, phone: input.phone?.trim() || null, status: "laudo", address: {}, treatment: {}, financial: {} }).select("id").single();
+  if (error?.code === "23505" || error?.message === "CPF_DUPLICADO") throw new Error("CPF_DUPLICADO");
   if (error) throw error;
   return data.id as string;
 }
@@ -57,6 +61,7 @@ export async function updateNursingPatient(profile: NursingProfile, patientId: s
     p_birth_date: input.birthDate,
     p_phone: input.phone?.trim() || null,
   });
+  if (error?.code === "23505" || error?.message === "CPF_DUPLICADO") throw new Error("CPF_DUPLICADO");
   if (error) throw error;
 }
 

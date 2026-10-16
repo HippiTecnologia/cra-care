@@ -63,6 +63,7 @@ export default function MedicoPage() {
   const [searchingClinic, setSearchingClinic] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [duplicatePatient, setDuplicatePatient] = useState<DemoPatientRecord | null>(null);
   const [section, setSection] = useState<DoctorSection>("dashboard");
   const [patientFilter, setPatientFilter] = useState<DoctorPatientFilter>("todos");
   const [portalStates, setPortalStates] = useState<Record<string, PatientPortalState>>({});
@@ -138,6 +139,7 @@ export default function MedicoPage() {
   function closeForm() {
     setShowForm(false);
     setError("");
+    setDuplicatePatient(null);
   }
 
   async function registerPatient(event: FormEvent<HTMLFormElement>) {
@@ -150,8 +152,17 @@ export default function MedicoPage() {
       return;
     }
 
+    setDuplicatePatient(null);
     try {
       if (!doctor) throw new Error("PERFIL_MEDICO");
+      const inMyList = records.find((patient) => patient.cpf.replace(/\D/g, "") === normalizedCpf);
+      const clinicPatient = inMyList ?? (await searchClinicPatients(doctor, normalizedCpf))
+        .find((patient) => patient.cpf.replace(/\D/g, "") === normalizedCpf);
+      if (clinicPatient) {
+        setDuplicatePatient(clinicPatient);
+        setError("CPF já cadastrado. Confira o paciente existente antes de continuar.");
+        return;
+      }
       const created = await createDoctorPatient(doctor, {
         name,
         cpf,
@@ -163,9 +174,16 @@ export default function MedicoPage() {
       setMessage(`${name.trim()} foi encaminhado para a secretaria completar o cadastro.`);
       closeForm();
     } catch (caught) {
-      setError(caught instanceof Error && caught.message === "CPF_DUPLICADO"
-        ? "Já existe um paciente cadastrado com esse CPF."
-        : "Não foi possível salvar o pré-cadastro agora. Tente novamente.");
+      if (caught instanceof Error && caught.message === "CPF_DUPLICADO") {
+        const existing = doctor
+          ? (await searchClinicPatients(doctor, normalizedCpf).catch(() => []))
+            .find((patient) => patient.cpf.replace(/\D/g, "") === normalizedCpf)
+          : undefined;
+        setDuplicatePatient(existing ?? null);
+        setError("CPF já cadastrado. Não criamos um segundo paciente.");
+      } else {
+        setError("Não foi possível salvar o pré-cadastro agora. Tente novamente.");
+      }
     }
   }
 
@@ -312,6 +330,7 @@ export default function MedicoPage() {
                   type="button"
                   onClick={() => {
                     setMessage("");
+                    setDuplicatePatient(null);
                     setShowForm(true);
                   }}
                   className="h-12 rounded-xl bg-[#a3113a] px-5 text-sm font-semibold text-white"
@@ -436,6 +455,7 @@ export default function MedicoPage() {
                   onChange={(event) => {
                     setCpf(formatCpf(event.target.value));
                     setError("");
+                    setDuplicatePatient(null);
                   }}
                   placeholder="000.000.000-00"
                   className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]"
@@ -465,9 +485,10 @@ export default function MedicoPage() {
               <label className="block text-sm font-medium text-[#544449]">Telefone / WhatsApp <span className="font-normal text-[#817578]">(opcional)</span><input inputMode="tel" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="(41) 99999-9999" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" /></label>
 
               {error && (
-                <p className="rounded-xl border border-[#f3d5d8] bg-[#fff2f3] px-4 py-3 text-sm text-[#a3113a]">
-                  {error}
-                </p>
+                <div className="rounded-xl border border-[#f3d5d8] bg-[#fff2f3] px-4 py-3 text-sm text-[#a3113a]">
+                  <p>{error}</p>
+                  {duplicatePatient && <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/80 p-3"><span className="font-semibold">{duplicatePatient.name} · CPF {duplicatePatient.cpf}</span><Link href={`/medico/paciente/${duplicatePatient.id}`} onClick={closeForm} className="rounded-lg bg-[#a3113a] px-3 py-2 font-semibold text-white">Abrir paciente existente</Link></div>}
+                </div>
               )}
 
               <div className="flex flex-col-reverse gap-3 border-t border-[#eee4e0] pt-5 sm:flex-row sm:justify-end">

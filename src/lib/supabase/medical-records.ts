@@ -449,20 +449,16 @@ export async function createDoctorPatient(
   input: { name: string; cpf: string; birthDate: string; phone?: string },
 ) {
   const supabase = getSupabaseClient();
-  const { data: duplicate, error: duplicateError } = await supabase
-    .from("patients")
-    .select("id")
-    .eq("clinic_id", doctor.clinicId)
-    .eq("cpf", input.cpf)
-    .maybeSingle();
-  if (duplicateError) throw duplicateError;
-  if (duplicate) throw new Error("CPF_DUPLICADO");
+  const normalizedCpf = input.cpf.replace(/\D/g, "");
+  if (normalizedCpf.length !== 11) throw new Error("CPF_INVALIDO");
+  const duplicate = await searchClinicPatients(doctor, normalizedCpf);
+  if (duplicate.some((patient) => patient.cpf.replace(/\D/g, "") === normalizedCpf)) throw new Error("CPF_DUPLICADO");
 
   const { data, error } = await supabase.from("patients").insert({
     clinic_id: doctor.clinicId,
     doctor_profile_id: doctor.id,
     full_name: input.name.trim(),
-    cpf: input.cpf,
+    cpf: normalizedCpf,
     birth_date: input.birthDate,
     phone: input.phone?.trim() || null,
     status: "com-pedido",

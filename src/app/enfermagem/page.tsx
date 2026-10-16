@@ -7,6 +7,7 @@ import {
   createNursingPatient,
   createNursingReport,
   findNursingPatient,
+  findNursingPatientByCpf,
   loadNursingReportsForPatient,
   loadNursingWorkspace,
   deleteNursingReport,
@@ -121,6 +122,7 @@ export default function NursingPage() {
   const [cpf, setCpf] = useState("");
   const [birthDate, setBirthDate] = useState("");
   const [phone, setPhone] = useState("");
+  const [duplicatePatient, setDuplicatePatient] = useState<NursingPatient | null>(null);
   const [reportType, setReportType] = useState<ReportType>("prick_test");
   const [reportDoctorId, setReportDoctorId] = useState("");
   const [prickResults, setPrickResults] = useState<Record<string, PrickResult>>({});
@@ -220,12 +222,29 @@ export default function NursingPage() {
   async function savePatient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!profile) return;
-    const id = await createNursingPatient(profile, { name, cpf, birthDate, phone });
-    const patient: NursingPatient = { id, name, cpf, birthDate, phone, doctorName: "Equipe médica CRA Care", createdAt: new Date().toISOString() };
-    setPatients((current) => [patient, ...current]);
-    setModal(null);
-    setName(""); setCpf(""); setBirthDate(""); setPhone("");
-    await openPatient(patient);
+    const normalizedCpf = cpf.replace(/\D/g, "");
+    if (normalizedCpf.length !== 11) return setMessage("Informe um CPF com 11 números.");
+    setDuplicatePatient(null);
+    try {
+      const duplicate = await findNursingPatientByCpf(profile, normalizedCpf);
+      if (duplicate) {
+        setDuplicatePatient(duplicate);
+        return;
+      }
+      const id = await createNursingPatient(profile, { name, cpf: normalizedCpf, birthDate, phone });
+      const patient: NursingPatient = { id, name, cpf: normalizedCpf, birthDate, phone, doctorName: "Equipe médica CRA Care", createdAt: new Date().toISOString() };
+      setPatients((current) => [patient, ...current]);
+      setModal(null);
+      setName(""); setCpf(""); setBirthDate(""); setPhone("");
+      await openPatient(patient);
+    } catch (cause) {
+      if (cause instanceof Error && cause.message === "CPF_DUPLICADO") {
+        const duplicate = await findNursingPatientByCpf(profile, normalizedCpf).catch(() => null);
+        setDuplicatePatient(duplicate);
+        return;
+      }
+      setMessage("Não foi possível cadastrar a paciente. Tente novamente.");
+    }
   }
 
   function updatePrick(item: string, change: Partial<PrickResult>) {
@@ -331,8 +350,10 @@ export default function NursingPage() {
       setPatients((current) => current.map((patient) => patient.id === updated.id ? updated : patient));
       setModal(null);
       setMessage("Dados da paciente atualizados.");
-    } catch {
-      setMessage("Não foi possível atualizar os dados da paciente.");
+    } catch (cause) {
+      setMessage(cause instanceof Error && cause.message === "CPF_DUPLICADO"
+        ? "Este CPF já está cadastrado em outro paciente da clínica. Confira o registro antes de alterar."
+        : "Não foi possível atualizar os dados da paciente.");
     }
   }
 
@@ -460,7 +481,7 @@ export default function NursingPage() {
       </> : null}
     </section>
   </div>
-  {canCreatePatients && modal === "patient" && <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4"><form onSubmit={savePatient} className="w-full max-w-lg rounded-3xl bg-white p-6"><div className="flex justify-between"><h2 className="text-xl font-bold">Cadastrar paciente</h2><button type="button" onClick={() => setModal(null)}>Fechar</button></div><div className="mt-5 grid gap-3"><input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo" className="rounded-xl border p-3"/><input required inputMode="numeric" maxLength={14} value={cpf} onChange={(e) => setCpf(formatCpf(e.target.value))} placeholder="000.000.000-00" className="rounded-xl border p-3"/><label className="text-sm font-medium text-[#544449]">Data de nascimento<input required type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} onPaste={pasteBirthDate} className="mt-1 w-full rounded-xl border p-3"/><span className="mt-1 block text-xs text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span></label><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Telefone" className="rounded-xl border p-3"/></div><p className="mt-4 rounded-xl bg-[#fbf5f2] p-3 text-sm text-[#66595d]">A paciente ficará disponível para consulta por toda a equipe médica. O médico que assumir o acompanhamento será vinculado ao tratamento.</p><button className="mt-5 w-full rounded-xl bg-[#a3113a] p-3 font-bold text-white">Salvar paciente</button></form></div>}
+  {canCreatePatients && modal === "patient" && <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4"><form onSubmit={savePatient} className="w-full max-w-lg rounded-3xl bg-white p-6"><div className="flex justify-between"><h2 className="text-xl font-bold">Cadastrar paciente</h2><button type="button" onClick={() => setModal(null)}>Fechar</button></div><div className="mt-5 grid gap-3"><input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo" className="rounded-xl border p-3"/><input required inputMode="numeric" maxLength={14} value={cpf} onChange={(e) => { setCpf(formatCpf(e.target.value)); setDuplicatePatient(null); }} placeholder="000.000.000-00" className="rounded-xl border p-3"/><label className="text-sm font-medium text-[#544449]">Data de nascimento<input required type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} onPaste={pasteBirthDate} className="mt-1 w-full rounded-xl border p-3"/><span className="mt-1 block text-xs text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span></label><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Telefone" className="rounded-xl border p-3"/></div>{duplicatePatient && <div className="mt-4 rounded-xl border border-[#f0c5ce] bg-[#fff1f3] p-4 text-sm text-[#8f1235]"><strong>CPF já cadastrado.</strong><p className="mt-1">Encontramos {duplicatePatient.name} · CPF {duplicatePatient.cpf}. Não criamos outro registro.</p><button type="button" onClick={() => { const existing = duplicatePatient; setDuplicatePatient(null); setModal(null); void openPatient(existing); }} className="mt-3 rounded-lg bg-[#a3113a] px-3 py-2 font-semibold text-white">Abrir paciente existente</button></div>}<p className="mt-4 rounded-xl bg-[#fbf5f2] p-3 text-sm text-[#66595d]">A paciente ficará disponível para consulta por toda a equipe médica. O médico que assumir o acompanhamento será vinculado ao tratamento.</p><button className="mt-5 w-full rounded-xl bg-[#a3113a] p-3 font-bold text-white">Salvar paciente</button></form></div>}
   {canEditPatients && modal === "patient-edit" && <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4"><form onSubmit={savePatientEdit} className="w-full max-w-lg rounded-3xl bg-white p-6"><div className="flex justify-between"><h2 className="text-xl font-bold">Editar dados da paciente</h2><button type="button" onClick={() => setModal(null)}>Fechar</button></div><div className="mt-5 grid gap-3"><input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo" className="rounded-xl border p-3"/><input required inputMode="numeric" maxLength={14} value={cpf} onChange={(e) => setCpf(formatCpf(e.target.value))} placeholder="CPF" className="rounded-xl border p-3"/><label className="text-sm font-medium text-[#544449]">Data de nascimento<input required type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} onPaste={pasteBirthDate} className="mt-1 w-full rounded-xl border p-3"/><span className="mt-1 block text-xs text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span></label><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Telefone" className="rounded-xl border p-3"/></div><button className="mt-5 w-full rounded-xl bg-[#a3113a] p-3 font-bold text-white">Salvar alterações</button></form></div>}
   {canEditReports && modal === "report" && <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4"><section className="mx-auto my-5 max-w-6xl rounded-3xl bg-white p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-2xl font-bold">Preencher laudo</h2><p className="mt-1 text-sm text-[#817578]">Paciente: {selected?.name ?? "Selecione uma paciente antes de criar o laudo"}</p></div><button onClick={() => setModal(null)} className="rounded-xl border px-4 py-2 font-semibold">Fechar laudo</button></div><div className="mt-5 grid gap-3 md:grid-cols-[1fr_210px]"><label className="text-sm font-semibold text-[#544449]">Paciente<input readOnly value={selected?.name ?? ""} className="mt-1 w-full rounded-xl border border-[#ddd5d0] bg-[#faf8f6] p-3 font-normal"/></label><label className="text-sm font-semibold text-[#544449]">Data<input type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} className="mt-1 w-full rounded-xl border border-[#ddd5d0] p-3 font-normal"/></label></div><div className="mt-4 grid gap-3 md:grid-cols-2"><label className="text-sm font-semibold text-[#544449]">Tipo de laudo<select value={reportType} onChange={(event) => changeReportType(event.target.value as ReportType)} className="mt-1 w-full rounded-xl border p-3 font-normal"><option value="prick_test">Laudo Prick</option><option value="patch_test">Laudo Patch</option></select></label><label className="text-sm font-semibold text-[#544449]">Médico responsável<select value={selectedReportDoctor?.id ?? ""} onChange={(event) => setReportDoctorId(event.target.value)} disabled={profile?.role === "medico" || allowedReportDoctors.length <= 1} className="mt-1 w-full rounded-xl border p-3 font-normal disabled:bg-[#f7f4f2]"><option value="">Selecione o médico</option>{allowedReportDoctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.fullName}{doctor.crm ? ` · CRM ${doctor.crm}` : ""}</option>)}</select><span className="mt-1 block text-xs font-normal text-[#817578]">{profile?.role === "medico" ? "O laudo será registrado no seu perfil médico." : reportType === "prick_test" ? "Prick: Dr. Sérgio, Dra. Alessandra ou Dra. Patrícia Martinski." : "Patch: Dra. Alessandra ou Dra. Patrícia Martinski."}</span></label></div>
     {reportType === "prick_test" ? <div className="mt-6 overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="sr-only"><tr><th>Item</th><th>Medida</th><th>Observações</th><th>Resultado</th></tr></thead><tbody>{prickGroups.map((group, groupIndex) => <MemoGroup key={`${group.battery}-${group.category}`} group={group} showBattery={groupIndex === 0 || prickGroups[groupIndex - 1].battery !== group.battery} values={prickResults} update={updatePrick}/>)}</tbody></table></div> : <div className="mt-6 space-y-5">{patchBatteries.map((battery) => <section key={battery.name} className="overflow-hidden rounded-xl border"><h3 className="bg-[#d4d8dd] px-4 py-2 text-sm font-bold">{battery.name}</h3>{battery.items.map((item) => { const result = patchResults[item] ?? { firstReading: "", secondReading: "" }; return <div key={item} className="grid gap-3 border-t p-3 text-sm sm:grid-cols-[1fr_180px_180px]"><span>{item}</span><label>1ª leitura · 48h<select value={result.firstReading} onChange={(event) => setPatchResults((current) => ({ ...current, [item]: { ...result, firstReading: event.target.value as PatchResult["firstReading"] } }))} className="mt-1 w-full rounded-lg border p-2"><option value="">Não informado</option><option>-</option><option>?</option><option>+</option><option>++</option><option>+++</option></select></label><label>2ª leitura · 48h<select value={result.secondReading} onChange={(event) => setPatchResults((current) => ({ ...current, [item]: { ...result, secondReading: event.target.value as PatchResult["secondReading"] } }))} className="mt-1 w-full rounded-lg border p-2"><option value="">Não informado</option><option>-</option><option>?</option><option>+</option><option>++</option><option>+++</option></select></label></div>; })}</section>)}</div>}
