@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createHash, randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { authenticatedSignatureUser } from "../../../../../lib/signatures/auth";
+import { authenticatedSignatureUser, isActiveSignaturePatient } from "../../../../../lib/signatures/auth";
 import { writeSignatureAudit } from "../../../../../lib/signatures/audit";
 import { certificateFingerprintFromDer, validatePreparedA1SignatureAgainstIcpBrasil, verifyPreparedA1Signature } from "../../../../../lib/signatures/a1";
 import { getSupabaseAdminClient } from "../../../../../lib/supabase/admin";
@@ -22,6 +22,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     const admin = getSupabaseAdminClient();
     const { data: signature } = await (admin.from("digital_signatures") as any).select("*").eq("id", id).eq("clinic_id", user.clinicId).maybeSingle();
     if (!signature) return NextResponse.json({ error: "Solicitação não encontrada." }, { status: 404 });
+    if (!(await isActiveSignaturePatient(user.clinicId, String(signature.patient_id ?? "")))) return NextResponse.json({ error: "Solicitação não encontrada." }, { status: 404 });
     if (signature.signer_user_id !== user.id || user.role !== "medico") return NextResponse.json({ error: "Somente o médico signatário pode concluir esta assinatura." }, { status: 403 });
     const downloaded = await admin.storage.from("digital-signatures").download(signature.original_storage_path);
     if (downloaded.error || !downloaded.data) throw new Error("Documento preparado não encontrado.");

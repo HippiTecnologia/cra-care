@@ -32,7 +32,7 @@ async function findAccount(clinicId: string, userId: string) {
   const admin = getSupabaseAdminClient();
   const { data: profile } = await admin.from("profiles").select("id, clinic_id, role, crm, username").eq("id", userId).eq("clinic_id", clinicId).maybeSingle();
   if (profile) return { kind: "profile" as const, ...profile };
-  const { data: patient } = await admin.from("patients").select("id, clinic_id, auth_user_id, username, cpf, birth_date").eq("auth_user_id", userId).eq("clinic_id", clinicId).maybeSingle();
+  const { data: patient } = await admin.from("patients").select("id, clinic_id, auth_user_id, username, cpf, birth_date").eq("auth_user_id", userId).eq("clinic_id", clinicId).is("archived_at", null).maybeSingle();
   return patient?.auth_user_id ? { kind: "patient" as const, ...patient, id: patient.auth_user_id, patientId: patient.id } : null;
 }
 
@@ -49,6 +49,14 @@ export async function POST(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     if (body.kind === "patient") {
       if (!body.patientId || !body.cpf || !body.birthDate) return NextResponse.json({ error: "Dados do paciente incompletos." }, { status: 400 });
+      const { data: activePatient, error: activePatientError } = await admin.from("patients")
+        .select("id")
+        .eq("id", String(body.patientId))
+        .eq("clinic_id", currentActor.clinic_id)
+        .is("archived_at", null)
+        .maybeSingle();
+      if (activePatientError) throw activePatientError;
+      if (!activePatient) return NextResponse.json({ error: "Paciente não encontrado ou está desativado." }, { status: 404 });
       const cpf = String(body.cpf).replace(/\D/g, "");
       const initialPassword = patientInitialPassword(body.birthDate);
       const { data: created, error } = await admin.auth.admin.createUser({ email: authEmailForPatientCpf(cpf), password: initialPassword, email_confirm: true, user_metadata: { username: cpf, role: "paciente" } });

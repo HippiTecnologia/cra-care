@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     if (!prescription) return NextResponse.json({ error: "Receita não encontrada para este médico." }, { status: 404 });
     if (prescription.signature_status === "signed") return NextResponse.json({ error: "Esta receita já possui assinatura digital." }, { status: 409 });
 
-    const { data: rawPatient } = await (admin.from("patients") as any).select("full_name, cpf").eq("id", prescription.patient_id).eq("clinic_id", doctor.clinic_id).maybeSingle();
+    const { data: rawPatient } = await (admin.from("patients") as any).select("full_name, cpf").eq("id", prescription.patient_id).eq("clinic_id", doctor.clinic_id).is("archived_at", null).maybeSingle();
     const patient = rawPatient as { full_name: string; cpf: string } | null;
     if (!patient) return NextResponse.json({ error: "Paciente da receita não encontrado." }, { status: 404 });
     const content = (prescription.content ?? {}) as Record<string, unknown>;

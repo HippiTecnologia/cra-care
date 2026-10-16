@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from "next/server";
-import { authenticatedSignatureUser } from "../../../../../lib/signatures/auth";
+import { authenticatedSignatureUser, isActiveSignaturePatient } from "../../../../../lib/signatures/auth";
 import { getSupabaseAdminClient } from "../../../../../lib/supabase/admin";
 
 export async function GET(request: NextRequest, context: { params: Promise<{ id: string }> }) {
@@ -9,7 +9,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   const { id } = await context.params;
   const admin = getSupabaseAdminClient();
   const { data: signature } = await (admin.from("digital_signatures") as any).select("*").eq("id", id).eq("clinic_id", user.clinicId).maybeSingle();
-  if (!signature || (user.role === "medico" && signature.signer_user_id !== user.id)) return NextResponse.json({ error: "Documento não encontrado." }, { status: 404 });
+  if (!signature || (user.role === "medico" && signature.signer_user_id !== user.id) || !(await isActiveSignaturePatient(user.clinicId, String(signature.patient_id ?? "")))) return NextResponse.json({ error: "Documento não encontrado." }, { status: 404 });
   const hasSignedFile = Boolean(signature.signed_storage_path);
   const path = hasSignedFile ? signature.signed_storage_path : signature.original_storage_path;
   const result = await admin.storage.from("digital-signatures").download(path);

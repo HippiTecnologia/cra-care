@@ -39,8 +39,9 @@ export default function Home() {
           router.replace(destination);
           return;
         }
-        const { data: patient } = await supabase.from("patients").select("id").eq("auth_user_id", user.id).maybeSingle();
+        const { data: patient } = await supabase.from("patients").select("id").eq("auth_user_id", user.id).is("archived_at", null).maybeSingle();
         if (patient) router.replace("/paciente");
+        else await supabase.auth.signOut();
       } catch { /* O acesso normal continua disponível se a sessão expirar. */ }
     }
     void restoreRememberedAccess();
@@ -121,7 +122,7 @@ export default function Home() {
         router.push(destination);
         return;
       }
-      const { data: patient } = await supabase.from("patients").select("id").eq("auth_user_id", data.user.id).maybeSingle();
+      const { data: patient } = await supabase.from("patients").select("id").eq("auth_user_id", data.user.id).is("archived_at", null).maybeSingle();
       if (!patient) {
         await supabase.auth.signOut();
         setMessage("Este acesso ainda não foi vinculado a um perfil. Procure a secretaria.");

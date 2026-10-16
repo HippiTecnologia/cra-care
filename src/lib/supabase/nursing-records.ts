@@ -31,7 +31,7 @@ export async function loadNursingWorkspace() {
   const reportTable = supabase.from("nursing_reports") as any;
   const [patientsResult, doctorsResult, reportsResult] = await Promise.all([
     // A Enfermagem e o médico usam a mesma carteira de pacientes da clínica.
-    patientTable.select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)").eq("clinic_id", clinicId).order("created_at", { ascending: false }),
+    patientTable.select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)").eq("clinic_id", clinicId).is("archived_at", null).order("created_at", { ascending: false }),
     supabase.from("profiles").select("id, full_name, crm").eq("clinic_id", clinicId).eq("role", "medico").order("full_name"),
     reportTable.select("id, patient_id, nurse_profile_id, doctor_profile_id, report_type, content, created_at").eq("clinic_id", clinicId).order("created_at", { ascending: false }),
   ]);
@@ -88,7 +88,7 @@ export async function deleteNursingReport(profile: NursingProfile, reportId: str
 
 export async function findNursingPatientByCpf(profile: NursingProfile, cpf: string): Promise<NursingPatient | null> {
   const wantedCpf = cpf.replace(/\D/g, "");
-  const { data: rows, error } = await (getSupabaseClient().from("patients") as any).select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)").eq("clinic_id", profile.clinicId);
+  const { data: rows, error } = await (getSupabaseClient().from("patients") as any).select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)").eq("clinic_id", profile.clinicId).is("archived_at", null);
   if (error) throw error;
   const data = (rows ?? []).find((item: { cpf?: unknown }) => String(item.cpf ?? "").replace(/\D/g, "") === wantedCpf);
   if (!data) return null;
@@ -100,7 +100,8 @@ export async function findNursingPatient(profile: NursingProfile, query: string)
   const digits = query.replace(/\D/g, "");
   const { data: rows, error } = await (getSupabaseClient().from("patients") as any)
     .select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)")
-    .eq("clinic_id", profile.clinicId);
+    .eq("clinic_id", profile.clinicId)
+    .is("archived_at", null);
   if (error) throw error;
   const item = (rows ?? []).find((candidate: { cpf?: unknown; full_name?: unknown }) => {
     const candidateCpf = String(candidate.cpf ?? "").replace(/\D/g, "");

@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       .eq("id", prescriptionId).eq("clinic_id", doctor.clinic_id).eq("doctor_profile_id", doctor.id).maybeSingle();
     if (!rawPrescription) return NextResponse.json({ error: "Receita não encontrada para este médico." }, { status: 404 });
     const prescription = rawPrescription as { id: string; clinic_id: string; patient_id: string; content: Record<string, unknown> | null; created_at: string };
-    const { data: patient } = await (admin.from("patients") as any).select("full_name, cpf").eq("id", prescription.patient_id).eq("clinic_id", doctor.clinic_id).maybeSingle();
+    const { data: patient } = await (admin.from("patients") as any).select("full_name, cpf").eq("id", prescription.patient_id).eq("clinic_id", doctor.clinic_id).is("archived_at", null).maybeSingle();
     if (!patient) return NextResponse.json({ error: "Paciente da receita não encontrado." }, { status: 404 });
 
     const content = prescription.content ?? {};

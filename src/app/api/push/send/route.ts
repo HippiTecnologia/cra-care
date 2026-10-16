@@ -26,7 +26,11 @@ export async function POST(request: NextRequest) {
     const payload = await request.json() as Payload;
     const patientIds = Array.isArray(payload.patientIds) ? payload.patientIds.filter((id): id is string => typeof id === "string") : [];
     if (!patientIds.length || typeof payload.title !== "string" || typeof payload.text !== "string") return NextResponse.json({ error: "Dados da notificação inválidos." }, { status: 400 });
-    const { data: subscriptions, error } = await (admin.from("push_subscriptions") as any).select("id, subscription").eq("clinic_id", profile.clinic_id).in("patient_id", patientIds);
+    const { data: activePatients, error: patientsError } = await (admin.from("patients") as any).select("id").eq("clinic_id", profile.clinic_id).in("id", patientIds).is("archived_at", null);
+    if (patientsError) throw patientsError;
+    const activePatientIds = (activePatients ?? []).map((patient: { id: string }) => patient.id);
+    if (!activePatientIds.length) return NextResponse.json({ sent: 0 });
+    const { data: subscriptions, error } = await (admin.from("push_subscriptions") as any).select("id, subscription").eq("clinic_id", profile.clinic_id).in("patient_id", activePatientIds);
     if (error) throw error;
     const message = JSON.stringify({ title: payload.title, body: payload.text, icon: payload.icon, url: "/paciente" });
     let sent = 0;

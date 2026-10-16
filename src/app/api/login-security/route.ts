@@ -13,6 +13,7 @@ export async function POST(request: NextRequest) {
       if (cpf.length !== 11) return NextResponse.json({ ok: true });
       const { data: patient } = await admin.from("patients")
         .select("id, clinic_id, auth_user_id")
+        .is("archived_at", null)
         .eq("cpf", cpf)
         .not("auth_user_id", "is", null)
         .maybeSingle();
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
       const { data: auth } = await admin.auth.getUser(token);
       if (!auth.user) return NextResponse.json({ ok: true });
       const now = new Date().toISOString();
-      const { data: patient } = await admin.from("patients").select("id, clinic_id").eq("auth_user_id", auth.user.id).maybeSingle();
+      const { data: patient } = await admin.from("patients").select("id, clinic_id").eq("auth_user_id", auth.user.id).is("archived_at", null).maybeSingle();
       if (patient) {
         await admin.from("patients").update({ last_login_at: now }).eq("id", patient.id);
         await admin.from("login_security").upsert({ user_id: auth.user.id, clinic_id: patient.clinic_id, patient_id: patient.id, failed_attempts: 0, locked_at: null, last_login_at: now, updated_at: now });

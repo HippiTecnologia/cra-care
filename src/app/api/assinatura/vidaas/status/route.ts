@@ -15,7 +15,12 @@ export async function GET(request: NextRequest) {
   const doctor = await currentDoctor(request);
   const prescriptionId = request.nextUrl.searchParams.get("prescriptionId");
   if (!doctor || !prescriptionId) return NextResponse.json({ error: "Consulta não autorizada." }, { status: 401 });
-  const { data, error } = await (getSupabaseAdminClient().from("prescription_digital_signatures") as any).select("status, signed_at, error_message, certificate_alias").eq("prescription_id", prescriptionId).eq("doctor_profile_id", doctor.id).maybeSingle();
+  const admin = getSupabaseAdminClient();
+  const { data: prescription } = await (admin.from("prescriptions") as any).select("patient_id").eq("id", prescriptionId).eq("clinic_id", doctor.clinic_id).eq("doctor_profile_id", doctor.id).maybeSingle();
+  if (!prescription) return NextResponse.json({ error: "Receita não encontrada." }, { status: 404 });
+  const { data: activePatient } = await (admin.from("patients") as any).select("id").eq("id", prescription.patient_id).eq("clinic_id", doctor.clinic_id).is("archived_at", null).maybeSingle();
+  if (!activePatient) return NextResponse.json({ error: "Receita não encontrada." }, { status: 404 });
+  const { data, error } = await (admin.from("prescription_digital_signatures") as any).select("status, signed_at, error_message, certificate_alias").eq("prescription_id", prescriptionId).eq("doctor_profile_id", doctor.id).maybeSingle();
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ signature: data ?? null });
 }

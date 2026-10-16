@@ -19,6 +19,16 @@ export async function authenticatedSignatureUser(request: NextRequest): Promise<
   };
 }
 
+export async function isActiveSignaturePatient(clinicId: string, patientId: string): Promise<boolean> {
+  const { data, error } = await getSupabaseAdminClient().from("patients")
+    .select("id")
+    .eq("clinic_id", clinicId)
+    .eq("id", patientId)
+    .is("archived_at", null)
+    .maybeSingle();
+  return !error && Boolean(data);
+}
+
 export function requestMetadata(request: NextRequest) {
   return {
     ip: request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,

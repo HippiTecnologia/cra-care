@@ -11,6 +11,7 @@ export async function POST(request: NextRequest) {
     const { data, error } = await getSupabaseAdminClient()
       .from("patients")
       .select("cpf, username, auth_user_id")
+      .is("archived_at", null)
       .not("auth_user_id", "is", null);
     if (error) throw error;
 

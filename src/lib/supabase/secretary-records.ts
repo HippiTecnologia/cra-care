@@ -220,7 +220,7 @@ export async function loadSecretaryPatients(context?: SecretaryContext) {
   const supabase = getSupabaseClient();
   const [doctors, patientResult, paymentResult] = await Promise.all([
     loadSecretaryDoctors(current),
-    supabase.from("patients").select("*").eq("clinic_id", current.clinicId).neq("status", "laudo").order("created_at", { ascending: false }),
+    supabase.from("patients").select("*").eq("clinic_id", current.clinicId).is("archived_at", null).neq("status", "laudo").order("created_at", { ascending: false }),
     supabase.from("payments").select("*").eq("clinic_id", current.clinicId).order("paid_at", { ascending: false }),
   ]);
   if (patientResult.error) throw patientResult.error;
@@ -994,6 +994,7 @@ export async function loadSecretaryUsers(context?: SecretaryContext) {
     supabase.from("patients")
       .select("id, auth_user_id, full_name, cpf, username, access_status, created_at, last_login_at, deactivated_at, deactivation_reason")
       .eq("clinic_id", current.clinicId)
+      .is("archived_at", null)
       .order("full_name"),
     supabase.from("login_security")
       .select("user_id, failed_attempts, locked_at")
@@ -1037,4 +1038,76 @@ export async function loadSecretaryUsers(context?: SecretaryContext) {
       };
     });
   return [...profiles, ...patients].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+}
+
+export type SecretaryPatientRecord = {
+  id: string;
+  name: string;
+  cpf: string;
+  createdAt: string;
+  responsible: string;
+  archivedAt?: string;
+  archiveReason?: string;
+};
+
+export async function loadSecretaryPatientRecords(context?: SecretaryContext): Promise<SecretaryPatientRecord[]> {
+  const current = context ?? await loadSecretaryContext();
+  const supabase = getSupabaseClient();
+  type PatientRow = { id: string; full_name: string; cpf: string; created_at: string; archived_at: string | null; archive_reason: string | null; doctor_profile_id: string | null; nursing_profile_id: string | null };
+  const activeRows: PatientRow[] = [];
+  const archivedRows: PatientRow[] = [];
+  const pageSize = 1000;
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase.from("patients")
+      .select("id, full_name, cpf, created_at, archived_at, archive_reason, doctor_profile_id, nursing_profile_id")
+      .eq("clinic_id", current.clinicId)
+      .is("archived_at", null)
+      .order("full_name")
+      .order("id")
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as PatientRow[];
+    activeRows.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase.rpc("secretary_list_archived_patients", {}).range(from, from + pageSize - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as PatientRow[];
+    archivedRows.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  const { data: profileRows, error: profileError } = await supabase.from("profiles")
+    .select("id, full_name, role")
+    .eq("clinic_id", current.clinicId);
+  if (profileError) throw profileError;
+  const profileById = new Map((profileRows ?? []).map((profile) => [profile.id, profile]));
+
+  return [...activeRows, ...archivedRows].map((row) => ({
+    id: String(row.id),
+    name: String(row.full_name ?? "Paciente sem nome"),
+    cpf: String(row.cpf ?? ""),
+    createdAt: String(row.created_at ?? ""),
+    responsible: [
+      row.doctor_profile_id ? `Médico · ${profileById.get(row.doctor_profile_id)?.full_name ?? "sem vínculo"}` : null,
+      row.nursing_profile_id ? `Enfermagem · ${profileById.get(row.nursing_profile_id)?.full_name ?? "sem vínculo"}` : null,
+    ].filter(Boolean).join(" · ") || "Sem profissional vinculado",
+    archivedAt: row.archived_at ? String(row.archived_at) : undefined,
+    archiveReason: row.archive_reason ? String(row.archive_reason) : undefined,
+  }));
+}
+
+export async function archiveSecretaryPatient(context: SecretaryContext, patientId: string, reason: string) {
+  const { error } = await getSupabaseClient().rpc("secretary_archive_patient", { p_patient_id: patientId, p_reason: reason.trim() });
+  if (error) throw error;
+  await audit(context, "archive", "patient", patientId, { reason: reason.trim() });
+}
+
+export async function restoreSecretaryPatient(context: SecretaryContext, patientId: string) {
+  const { error } = await getSupabaseClient().rpc("secretary_restore_patient", { p_patient_id: patientId });
+  if (error) throw error;
+  await audit(context, "restore", "patient", patientId);
 }

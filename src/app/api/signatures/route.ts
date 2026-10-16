@@ -28,14 +28,16 @@ export async function GET(request: NextRequest) {
   const patientIds = [...new Set([...rows.map((row) => String(row.patient_id ?? "")), ...availableDocuments.map((row) => String(row.patient_id ?? ""))].filter(Boolean))];
   const signerIds = [...new Set([...rows.map((row) => String(row.signer_user_id ?? "")), ...availableDocuments.map((row) => String(row.doctor_profile_id ?? ""))].filter(Boolean))];
   const [{ data: patients }, { data: signers }] = await Promise.all([
-    patientIds.length ? (admin.from("patients") as any).select("id, full_name").in("id", patientIds).eq("clinic_id", user.clinicId) : Promise.resolve({ data: [] }),
+    patientIds.length ? (admin.from("patients") as any).select("id, full_name").in("id", patientIds).eq("clinic_id", user.clinicId).is("archived_at", null) : Promise.resolve({ data: [] }),
     signerIds.length ? admin.from("profiles").select("id, full_name, crm").in("id", signerIds).eq("clinic_id", user.clinicId) : Promise.resolve({ data: [] }),
   ]);
   const patientMap = new Map((patients ?? []).map((item: any) => [item.id, item.full_name]));
   const signerMap = new Map((signers ?? []).map((item) => [item.id, { name: item.full_name, crm: item.crm }]));
+  const visibleRows = rows.filter((row) => patientMap.has(String(row.patient_id ?? "")));
+  const visibleDocuments = availableDocuments.filter((row) => patientMap.has(String(row.patient_id ?? "")));
   return NextResponse.json({
-    signatures: rows.map((row) => ({ ...row, patient_name: patientMap.get(String(row.patient_id)) ?? "—", signer: signerMap.get(String(row.signer_user_id)) ?? null })),
-    availableDocuments: availableDocuments.map((row) => ({ id: row.id, patientName: patientMap.get(String(row.patient_id)) ?? "—", signer: signerMap.get(String(row.doctor_profile_id)) ?? null, createdAt: row.created_at })),
+    signatures: visibleRows.map((row) => ({ ...row, patient_name: patientMap.get(String(row.patient_id)) ?? "—", signer: signerMap.get(String(row.signer_user_id)) ?? null })),
+    availableDocuments: visibleDocuments.map((row) => ({ id: row.id, patientName: patientMap.get(String(row.patient_id)) ?? "—", signer: signerMap.get(String(row.doctor_profile_id)) ?? null, createdAt: row.created_at })),
     providers: listSignatureProviders(),
     user: { role: user.role, name: user.fullName },
   });

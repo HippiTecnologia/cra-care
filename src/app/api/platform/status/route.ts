@@ -13,8 +13,9 @@ export async function GET(request: NextRequest) {
       .select("clinic_id, role").eq("id", auth.user.id).maybeSingle();
     if (profileError) throw profileError;
     const patient = profile ? null : await admin.from("patients")
-      .select("clinic_id").eq("auth_user_id", auth.user.id).maybeSingle();
+      .select("clinic_id, archived_at").eq("auth_user_id", auth.user.id).maybeSingle();
     if (patient?.error) throw patient.error;
+    if (patient?.data?.archived_at) return NextResponse.json({ error: "Este cadastro está desativado. Procure a Secretaria da clínica." }, { status: 403 });
     const clinicId = profile?.clinic_id ?? patient?.data?.clinic_id;
     if (!clinicId) return NextResponse.json({ error: "Clínica não encontrada para este acesso." }, { status: 403 });
 

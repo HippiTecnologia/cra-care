@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     if (authError || !user) return NextResponse.json({ error: "Sessão inválida." }, { status: 401 });
     const subscription = await request.json() as PushSubscriptionInput;
     if (typeof subscription.endpoint !== "string" || !subscription.keys?.p256dh || !subscription.keys.auth) return NextResponse.json({ error: "Dispositivo inválido." }, { status: 400 });
-    const { data: patient, error: patientError } = await admin.from("patients").select("id, clinic_id").eq("auth_user_id", user.id).maybeSingle();
+    const { data: patient, error: patientError } = await admin.from("patients").select("id, clinic_id").eq("auth_user_id", user.id).is("archived_at", null).maybeSingle();
     if (patientError || !patient?.clinic_id) return NextResponse.json({ error: "Paciente não encontrado." }, { status: 403 });
     const { error } = await (admin.from("push_subscriptions") as any).upsert({
       clinic_id: patient.clinic_id,

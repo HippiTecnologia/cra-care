@@ -166,6 +166,7 @@ async function loadPatientIdentity(): Promise<{ context: PatientContext; row: Me
   const { data, error } = await supabase.from("patients")
     .select("*")
     .eq("auth_user_id", user.id)
+    .is("archived_at", null)
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new Error("Este acesso ainda não está vinculado a um paciente.");

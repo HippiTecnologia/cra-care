@@ -311,6 +311,7 @@ export async function loadDoctorPatients(doctor: MedicalDoctorProfile) {
     .from("patients")
     .select("*")
     .eq("clinic_id", doctor.clinicId)
+    .is("archived_at", null)
     .eq("doctor_profile_id", doctor.id)
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -333,6 +334,7 @@ export async function searchClinicPatients(doctor: MedicalDoctorProfile, query: 
   const { data, error } = await (getSupabaseClient().from("patients") as any)
     .select("id, clinic_id, auth_user_id, username, full_name, cpf, birth_date, phone, email, status, doctor_profile_id, address, treatment, financial, created_at, profiles!patients_doctor_profile_id_fkey(full_name)")
     .eq("clinic_id", doctor.clinicId)
+    .is("archived_at", null)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return ((data ?? []) as (MedicalPatientRow & { profiles?: { full_name?: string } | null })[])
@@ -610,7 +612,7 @@ export async function loadMedicalPatientWorkspace(patientId: string) {
 
   const { data: patientData, error: patientError } = await supabase
     .from("patients").select("*").eq("id", normalizedPatientId)
-    .eq("clinic_id", doctor.clinicId).maybeSingle();
+    .eq("clinic_id", doctor.clinicId).is("archived_at", null).maybeSingle();
   if (patientError) throw patientError;
   if (!patientData) return { doctor, patient: null, prescriptions: [], clinicalRecords: [], nursingReports: [] as NursingReport[], portal: createDefaultPortalState(normalizedPatientId) };
 

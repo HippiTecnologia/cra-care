@@ -16,7 +16,7 @@ export async function loadPrescriptionDocument(clinicId: string, documentId: str
   if (!rawPrescription) throw new Error("Documento não encontrado nesta clínica.");
   const prescription = rawPrescription as { id: string; patient_id: string; doctor_profile_id: string; content: unknown; created_at: string };
   const [{ data: rawPatient }, { data: rawDoctor }] = await Promise.all([
-    (admin.from("patients") as any).select("id, full_name, cpf").eq("id", prescription.patient_id).eq("clinic_id", clinicId).maybeSingle(),
+    (admin.from("patients") as any).select("id, full_name, cpf").eq("id", prescription.patient_id).eq("clinic_id", clinicId).is("archived_at", null).maybeSingle(),
     admin.from("profiles").select("id, full_name, crm").eq("id", prescription.doctor_profile_id).eq("clinic_id", clinicId).maybeSingle(),
   ]);
   if (!rawPatient || !rawDoctor) throw new Error("Paciente ou médico do documento não encontrado.");
