@@ -1111,3 +1111,11 @@ export async function restoreSecretaryPatient(context: SecretaryContext, patient
   if (error) throw error;
   await audit(context, "restore", "patient", patientId);
 }
+
+export async function permanentlyDeleteSecretaryPatient(patientId: string, confirmation: string) {
+  const { error } = await getSupabaseClient().rpc("secretary_delete_patient_if_empty", {
+    p_patient_id: patientId,
+    p_confirmation: confirmation,
+  });
+  if (error) throw error;
+}
