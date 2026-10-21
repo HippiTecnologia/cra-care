@@ -119,6 +119,8 @@ type NewPatientForm = {
 };
 
 type FilterMode = "todos" | "novo-pedido" | "aniversario" | "ativos" | "concluidos";
+type NextContactFilter = "todos" | "pendente" | "futuro" | "aguardando-inicio";
+type PatientSortMode = "pedido-pendente" | "az";
 
 const columns: {
   id: PatientStatus;
@@ -339,6 +341,27 @@ function requiresNewOrder(patient: Patient) {
   return getDaysSince(patient.lastReceivedDate) >= 30;
 }
 
+function getNextContactDate(portal: PatientPortalState | undefined) {
+  const currentBottle = portal?.bottles.find((bottle) => bottle.status === "em-uso");
+  if (!currentBottle) return null;
+
+  const date = new Date(`${currentBottle.startedAt}T12:00:00`);
+  date.setDate(date.getDate() + 30);
+  return date;
+}
+
+function hasPendingNextContact(patient: Patient, portal: PatientPortalState | undefined, now = new Date()) {
+  const currentBottle = portal?.bottles.find((bottle) => bottle.status === "em-uso");
+  const nextContact = getNextContactDate(portal);
+  const receivedAfterCurrentStart = Boolean(
+    currentBottle &&
+      patient.lastReceivedDate &&
+      patient.lastReceivedDate > currentBottle.startedAt.slice(0, 10),
+  );
+
+  return Boolean(nextContact && nextContact <= now && !receivedAfterCurrentStart);
+}
+
 export default function SecretariaPage() {
   const router = useRouter();
   const cardWasDragged = useRef(false);
@@ -348,6 +371,8 @@ export default function SecretariaPage() {
   const [portals, setPortals] = useState<Record<string, PatientPortalState>>({});
   const [search, setSearch] = useState("");
   const [selectedDoctor, setSelectedDoctor] = useState("Todos os médicos");
+  const [nextContactFilter, setNextContactFilter] = useState<NextContactFilter>("todos");
+  const [sortMode, setSortMode] = useState<PatientSortMode>("pedido-pendente");
   const [filter, setFilter] = useState<FilterMode>("todos");
   const [showPatientForm, setShowPatientForm] = useState(false);
   const [editingPatientId, setEditingPatientId] = useState<string | null>(null);
@@ -429,7 +454,7 @@ export default function SecretariaPage() {
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[.-]/g, "");
 
-    return patients.filter((patient) => {
+    const matchingPatients = patients.filter((patient) => {
       const searchable = `${patient.name} ${patient.cpf}`
         .toLowerCase()
         .normalize("NFD")
@@ -462,9 +487,34 @@ export default function SecretariaPage() {
       }
 
       const matchesKanbanStatus = kanbanStatusFilter === "todos" || patient.status === kanbanStatusFilter;
-      return matchesSearch && matchesDoctor && matchesFilter && matchesKanbanStatus;
+      const portal = portals[patient.id];
+      const nextContact = getNextContactDate(portal);
+      const isPendingNextContact = hasPendingNextContact(patient, portal);
+      const matchesNextContact =
+        nextContactFilter === "todos" ||
+        (nextContactFilter === "pendente" && isPendingNextContact) ||
+        (nextContactFilter === "futuro" && Boolean(nextContact && nextContact > new Date())) ||
+        (nextContactFilter === "aguardando-inicio" && !nextContact);
+
+      return matchesSearch && matchesDoctor && matchesFilter && matchesKanbanStatus && matchesNextContact;
     });
-  }, [filter, kanbanStatusFilter, patients, search, selectedDoctor]);
+
+    return matchingPatients.sort((left, right) => {
+      if (sortMode === "az") {
+        return left.name.localeCompare(right.name, "pt-BR", { sensitivity: "base" });
+      }
+
+      const leftPortal = portals[left.id];
+      const rightPortal = portals[right.id];
+      const leftPending = hasPendingNextContact(left, leftPortal);
+      const rightPending = hasPendingNextContact(right, rightPortal);
+      if (leftPending !== rightPending) return leftPending ? -1 : 1;
+
+      const leftDate = getNextContactDate(leftPortal)?.getTime() ?? Number.POSITIVE_INFINITY;
+      const rightDate = getNextContactDate(rightPortal)?.getTime() ?? Number.POSITIVE_INFINITY;
+      return leftDate - rightDate || left.name.localeCompare(right.name, "pt-BR", { sensitivity: "base" });
+    });
+  }, [filter, kanbanStatusFilter, nextContactFilter, patients, portals, search, selectedDoctor, sortMode]);
 
   function openKanbanFilter(status: PatientStatus | "todos") {
     setKanbanStatusFilter(status);
@@ -962,7 +1012,7 @@ export default function SecretariaPage() {
           {/* Pesquisa e filtros */}
 
           <section id="kanban-pacientes" className="mt-8 scroll-mt-6 rounded-3xl border border-[#efe6e1] bg-white p-5 shadow-[0_12px_35px_rgba(80,30,45,0.04)]">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex flex-col gap-4">
               <div>
                 <h2 className="text-xl font-bold text-[#433438]">
                   Kanban de pacientes
@@ -973,41 +1023,76 @@ export default function SecretariaPage() {
                 </p>
               </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Buscar por nome ou CPF"
-                  className="h-12 w-full rounded-xl border border-[#e9dfda] px-4 text-sm outline-none focus:border-[#b91142] sm:w-64"
-                />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+                <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#74686b]">
+                  Buscar paciente
+                  <input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Nome ou CPF"
+                    className="h-12 w-full rounded-xl border border-[#e9dfda] px-4 text-sm font-normal text-[#433438] outline-none focus:border-[#b91142]"
+                  />
+                </label>
 
-                <select
-                  value={selectedDoctor}
-                  onChange={(event) =>
-                    setSelectedDoctor(event.target.value)
-                  }
-                  className="h-12 rounded-xl border border-[#e9dfda] bg-white px-4 text-sm outline-none focus:border-[#b91142]"
-                >
-                  {doctors.map((doctor) => (
-                    <option key={doctor} value={doctor}>
-                      {doctor}
-                    </option>
-                  ))}
-                </select>
+                <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#74686b]">
+                  Filtrar por médico
+                  <select
+                    value={selectedDoctor}
+                    onChange={(event) => setSelectedDoctor(event.target.value)}
+                    className="h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 text-sm font-normal text-[#433438] outline-none focus:border-[#b91142]"
+                  >
+                    {doctors.map((doctor) => (
+                      <option key={doctor} value={doctor}>{doctor}</option>
+                    ))}
+                  </select>
+                </label>
 
-                <span className="flex h-12 items-center rounded-xl bg-[#fff0f3] px-4 text-xs font-semibold text-[#a3113a]">
-                  Cadastro inicial realizado pelo médico
-                </span>
+                <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#74686b]">
+                  Filtrar próximo pedido/contato
+                  <select
+                    value={nextContactFilter}
+                    onChange={(event) => setNextContactFilter(event.target.value as NextContactFilter)}
+                    className="h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 text-sm font-normal text-[#433438] outline-none focus:border-[#b91142]"
+                  >
+                    <option value="todos">Todos</option>
+                    <option value="pendente">Pedido/contato pendente</option>
+                    <option value="futuro">Próximo contato futuro</option>
+                    <option value="aguardando-inicio">Aguardando início do frasco</option>
+                  </select>
+                </label>
+
+                <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#74686b]">
+                  Ordenar por
+                  <select
+                    value={sortMode}
+                    onChange={(event) => setSortMode(event.target.value as PatientSortMode)}
+                    className="h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 text-sm font-normal text-[#433438] outline-none focus:border-[#b91142]"
+                  >
+                    <option value="pedido-pendente">Próximo pedido pendente</option>
+                    <option value="az">Nome (A–Z)</option>
+                  </select>
+                </label>
               </div>
+
+              <span className="flex h-10 w-fit items-center rounded-xl bg-[#fff0f3] px-4 text-xs font-semibold text-[#a3113a]">
+                Cadastro inicial realizado pelo médico
+              </span>
             </div>
 
-            {(filter !== "todos" || kanbanStatusFilter !== "todos") && (
+            {(search || selectedDoctor !== "Todos os médicos" || nextContactFilter !== "todos" || sortMode !== "pedido-pendente" || filter !== "todos" || kanbanStatusFilter !== "todos") && (
               <button
                 type="button"
-                onClick={() => { setFilter("todos"); setKanbanStatusFilter("todos"); }}
+                onClick={() => {
+                  setSearch("");
+                  setSelectedDoctor("Todos os médicos");
+                  setNextContactFilter("todos");
+                  setSortMode("pedido-pendente");
+                  setFilter("todos");
+                  setKanbanStatusFilter("todos");
+                }}
                 className="mt-4 rounded-full bg-[#fff0f3] px-4 py-2 text-xs font-semibold text-[#a3113a]"
               >
-                Limpar filtro selecionado ×
+                Limpar filtros ×
               </button>
             )}
           </section>
@@ -1078,9 +1163,8 @@ export default function SecretariaPage() {
                       {columnPatients.map((patient) => {
                         const portal = portals[patient.id] ?? createDefaultPortalState(patient.id);
                         const currentBottle = portal.bottles.find((bottle) => bottle.status === "em-uso");
-                        const nextContact = currentBottle ? (() => { const date = new Date(`${currentBottle.startedAt}T12:00:00`); date.setDate(date.getDate() + 30); return date; })() : null;
-                        const receivedAfterCurrentStart = Boolean(currentBottle && patient.lastReceivedDate && patient.lastReceivedDate > currentBottle.startedAt.slice(0, 10));
-                        const showAlert = Boolean(nextContact && nextContact <= new Date() && !receivedAfterCurrentStart);
+                        const nextContact = getNextContactDate(portal);
+                        const showAlert = hasPendingNextContact(patient, portal);
 
                         return (
                           <article
