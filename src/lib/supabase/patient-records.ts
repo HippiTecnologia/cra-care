@@ -178,7 +178,7 @@ async function loadPatientIdentity(): Promise<{ context: PatientContext; row: Me
       patientId: row.id,
       clinicId: row.clinic_id,
       fullName: row.full_name,
-      cpf: row.cpf,
+      cpf: row.cpf ?? "",
     },
   };
 }

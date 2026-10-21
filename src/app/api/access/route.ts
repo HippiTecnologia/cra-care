@@ -91,6 +91,10 @@ export async function PUT(request: NextRequest) {
     if (!account) return NextResponse.json({ error: "Acesso não encontrado nesta clínica." }, { status: 404 });
     const admin = getSupabaseAdminClient();
     const role = account.kind === "profile" ? account.role as StaffRole : "paciente";
+    const patientCpf = account.kind === "patient" ? String(account.cpf ?? "").replace(/\D/g, "") : "";
+    if (account.kind === "patient" && patientCpf.length !== 11) {
+      return NextResponse.json({ error: "Não é possível redefinir o acesso sem um CPF válido cadastrado." }, { status: 400 });
+    }
     // A senha anterior nunca é recuperada. Para pacientes, a redefinição volta
     // ao padrão automático da clínica: data de nascimento (ddmmaaaa). Para a
     // equipe, é gerada uma senha temporária forte.
@@ -98,16 +102,16 @@ export async function PUT(request: NextRequest) {
       ? patientInitialPassword(account.birth_date)
       : createTemporaryPassword();
     const update = account.kind === "patient"
-      ? { email: authEmailForPatientCpf(String(account.cpf).replace(/\D/g, "")), password: temporaryPassword, user_metadata: { username: String(account.cpf).replace(/\D/g, ""), role: "paciente" }, ban_duration: "none" as const }
+      ? { email: authEmailForPatientCpf(patientCpf), password: temporaryPassword, user_metadata: { username: patientCpf, role: "paciente" }, ban_duration: "none" as const }
       : { password: temporaryPassword, ban_duration: "none" as const };
     const { error } = await admin.auth.admin.updateUserById(account.id, update);
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     const reset = { access_status: "ativo", deactivated_at: null, deactivation_reason: null, deactivated_by: null };
-    if (account.kind === "patient") await admin.from("patients").update({ ...reset, username: String(account.cpf).replace(/\D/g, "") }).eq("id", account.patientId);
+    if (account.kind === "patient") await admin.from("patients").update({ ...reset, username: patientCpf }).eq("id", account.patientId);
     else await admin.from("profiles").update({ ...reset, must_change_password: requiresPasswordChange(role) }).eq("id", account.id);
     await admin.from("login_security").upsert({ user_id: account.id, clinic_id: currentActor.clinic_id, patient_id: account.kind === "patient" ? account.patientId : null, failed_attempts: 0, locked_at: null, updated_at: new Date().toISOString() });
     await audit(currentActor.clinic_id, currentActor.id, "reset_password", account.kind, account.kind === "patient" ? account.patientId : account.id, { username: account.username });
-    return NextResponse.json({ username: account.kind === "patient" ? String(account.cpf).replace(/\D/g, "") : account.username, temporaryPassword, mustChangePassword: requiresPasswordChange(role) });
+    return NextResponse.json({ username: account.kind === "patient" ? patientCpf : account.username, temporaryPassword, mustChangePassword: requiresPasswordChange(role) });
   } catch { return NextResponse.json({ error: "Não foi possível redefinir a senha agora." }, { status: 500 }); }
 }
 
