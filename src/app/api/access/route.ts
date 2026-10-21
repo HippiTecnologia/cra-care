@@ -92,14 +92,14 @@ export async function PUT(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     const role = account.kind === "profile" ? account.role as StaffRole : "paciente";
     const patientCpf = account.kind === "patient" ? String(account.cpf ?? "").replace(/\D/g, "") : "";
-    if (account.kind === "patient" && patientCpf.length !== 11) {
-      return NextResponse.json({ error: "Não é possível redefinir o acesso sem um CPF válido cadastrado." }, { status: 400 });
+    if (account.kind === "patient" && (patientCpf.length !== 11 || !account.birth_date)) {
+      return NextResponse.json({ error: "Não é possível redefinir o acesso sem CPF e data de nascimento válidos cadastrados." }, { status: 400 });
     }
     // A senha anterior nunca é recuperada. Para pacientes, a redefinição volta
     // ao padrão automático da clínica: data de nascimento (ddmmaaaa). Para a
     // equipe, é gerada uma senha temporária forte.
     const temporaryPassword = account.kind === "patient"
-      ? patientInitialPassword(account.birth_date)
+      ? patientInitialPassword(account.birth_date ?? "")
       : createTemporaryPassword();
     const update = account.kind === "patient"
       ? { email: authEmailForPatientCpf(patientCpf), password: temporaryPassword, user_metadata: { username: patientCpf, role: "paciente" }, ban_duration: "none" as const }
