@@ -253,35 +253,55 @@ export default function PatientRecordsPage() {
 
   async function saveDraft(section: string) {
     if (!draft) return;
-    if (!draft.name.trim() || !draft.cpf.trim() || !draft.birthDate) {
-      setMessage("Nome completo, CPF e data de nascimento são obrigatórios.");
+    if (!draft.name.trim()) {
+      setMessage("Informe o nome completo do paciente.");
+      return;
+    }
+    const currentPatient = patients.find((item) => item.id === draft.id);
+    const cpfValue = draft.cpf.trim() || currentPatient?.cpf || "";
+    const birthDateValue = draft.birthDate || currentPatient?.birthDate || "";
+    const normalizedCpf = cpfValue.replace(/\D/g, "");
+    if (normalizedCpf && normalizedCpf.length !== 11) {
+      setMessage("Informe um CPF com 11 números ou deixe o campo pendente.");
+      return;
+    }
+    if (normalizedCpf && patients.some((item) => item.id !== draft.id && item.cpf.replace(/\D/g, "") === normalizedCpf)) {
+      setMessage("Já existe outro paciente cadastrado com esse CPF nesta clínica.");
       return;
     }
     if (!context) { setMessage("Sessão da Secretaria não identificada."); return; }
     try {
+      const hasRequiredIdentity = normalizedCpf.length === 11 && Boolean(birthDateValue);
       const patientDraft = section.startsWith("Financeiro")
         ? {
             ...draft,
+            cpf: cpfValue,
+            birthDate: birthDateValue,
             treatmentPayments: (draft.treatmentPayments ?? []).map((item) => item.treatment === activeFinancialTrack && !item.dueDate
               ? { ...item, dueDate: sixMonthDueDate() }
               : item),
           }
-        : draft;
-      const completedPatient: DemoPatientRecord = { ...patientDraft, registrationStatus: "completed" };
+        : { ...draft, cpf: cpfValue, birthDate: birthDateValue };
+      const completedPatient: DemoPatientRecord = {
+        ...patientDraft,
+        registrationStatus: hasRequiredIdentity ? draft.registrationStatus : "pending-secretary",
+      };
       const savedPatient = await saveSecretaryPatient(context, completedPatient);
       let patientWithAccess = completedPatient;
       let accessMessage = "";
-      if (!savedPatient.hasPatientAccess) {
+      if (!savedPatient.hasPatientAccess && hasRequiredIdentity) {
         const access = await createSecretaryPatientAccess(completedPatient);
         patientWithAccess = { ...completedPatient, username: access.username };
         accessMessage = " O acesso do paciente foi criado.";
+      } else if (!hasRequiredIdentity) {
+        accessMessage = " O acesso ao portal fica pendente até completar CPF e data de nascimento.";
       }
       setDraft(patientWithAccess);
       setPatients((current) => current.map((item) => item.id === draft.id ? patientWithAccess : item));
       setEditing(false);
-      setMessage(`${section} atualizados no Supabase com sucesso.${accessMessage}`);
-    } catch {
-      setMessage(`Não foi possível salvar ${section.toLowerCase()}.`);
+      setMessage(`${section} atualizados no Supabase com sucesso.${hasRequiredIdentity ? "" : " O cadastro permanece incompleto."}${accessMessage}`);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : `Não foi possível salvar ${section.toLowerCase()}.`);
     }
   }
 
@@ -549,14 +569,17 @@ export default function PatientRecordsPage() {
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar nome ou CPF" className="h-12 w-full rounded-xl border border-[#e9dfda] px-4 outline-none focus:border-[#b91142]" />
             <p className="mt-3 text-xs text-[#817578]">{visible.length} paciente(s) encontrado(s)</p>
             <div className="mt-4 max-h-[70vh] space-y-2 overflow-y-auto pr-1">
-              {visible.map((item) => <button key={item.id} type="button" onClick={() => selectPatient(item.id)} className={`w-full rounded-xl p-4 text-left transition ${selectedId === item.id ? "bg-[#fff0f3] text-[#a3113a] ring-1 ring-[#efc9d3]" : "bg-[#fbf7f5] hover:bg-[#f7efec]"}`}><strong className="text-sm">{item.name}</strong><p className="mt-1 text-xs opacity-70">{item.cpf}</p></button>)}
+              {visible.map((item) => <button key={item.id} type="button" onClick={() => selectPatient(item.id)} className={`w-full rounded-xl p-4 text-left transition ${selectedId === item.id ? "bg-[#fff0f3] text-[#a3113a] ring-1 ring-[#efc9d3]" : "bg-[#fbf7f5] hover:bg-[#f7efec]"}`}><strong className="text-sm">{item.name}</strong><p className="mt-1 text-xs opacity-70">{item.cpf || "CPF pendente"}</p></button>)}
               {visible.length === 0 && <p className="py-8 text-center text-sm text-[#817578]">Nenhum paciente encontrado.</p>}
             </div>
           </aside>
 
           {patient && draft ? <section className="min-w-0 rounded-3xl border border-[#eee5e0] bg-white p-5 sm:p-7">
             <div className="flex flex-wrap justify-between gap-4">
-              <div><h2 className="text-2xl font-bold text-[#86203b]">{patient.name}</h2><p className="mt-1 text-sm text-[#817578]">CPF {patient.cpf} · {patient.doctor}</p></div>
+              <div><h2 className="text-2xl font-bold text-[#86203b]">{patient.name}</h2><p className="mt-1 text-sm text-[#817578]">CPF {patient.cpf || "pendente"} · {patient.doctor}</p>{(!patient.cpf.trim() || !patient.birthDate) && <p className="mt-2 text-xs font-semibold text-[#98671a]">Dados pendentes: {[
+                !patient.cpf.trim() ? "CPF" : null,
+                !patient.birthDate ? "data de nascimento" : null,
+              ].filter(Boolean).join(" e ")}. Complete em Dados pessoais.</p>}</div>
               <div className="flex items-center gap-2"><span className="rounded-full bg-[#edf8f3] px-3 py-2 text-xs font-semibold text-[#187157]">{statusOptions.find(([value]) => value === patient.status)?.[1] ?? "Em conversa"}</span><button type="button" onClick={() => { setDraft(patient); setEditing((current) => !current); }} className="rounded-xl border border-[#e5d9d4] px-4 py-2 text-xs font-bold text-[#a3113a]">{editing ? "Cancelar edição" : "Editar cadastro"}</button></div>
             </div>
 
@@ -564,8 +587,8 @@ export default function PatientRecordsPage() {
 
             {tab === "pessoais" && <div className="mt-6">{editing ? <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Nome completo *"><input required value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} className={inputClass} /></Field>
-              <Field label="CPF *"><input required inputMode="numeric" maxLength={14} value={draft.cpf} onChange={(event) => updateDraft("cpf", formatCpf(event.target.value))} placeholder="000.000.000-00" className={inputClass} /></Field>
-              <Field label="Data de nascimento *"><input type="date" required value={draft.birthDate} onChange={(event) => updateDraft("birthDate", event.target.value)} onPaste={(event) => { const date = normalizeBirthDate(event.clipboardData.getData("text")); if (!date) return; event.preventDefault(); updateDraft("birthDate", date); }} className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span></Field>
+              <Field label="CPF"><input inputMode="numeric" maxLength={14} value={draft.cpf} onChange={(event) => updateDraft("cpf", formatCpf(event.target.value))} placeholder="000.000.000-00" className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Se estiver pendente, você pode salvar os outros dados e completar depois.</span></Field>
+              <Field label="Data de nascimento"><input type="date" value={draft.birthDate} onChange={(event) => updateDraft("birthDate", event.target.value)} onPaste={(event) => { const date = normalizeBirthDate(event.clipboardData.getData("text")); if (!date) return; event.preventDefault(); updateDraft("birthDate", date); }} className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span></Field>
               <Field label="Telefone / WhatsApp (opcional)"><input value={draft.phone ?? ""} onChange={(event) => updateDraft("phone", event.target.value)} className={inputClass} /></Field>
               <Field label="E-mail (opcional)"><input type="email" value={draft.email ?? ""} onChange={(event) => updateDraft("email", event.target.value)} placeholder="paciente@exemplo.com" className={inputClass} /></Field>
               <Field label="Médico responsável"><input value={draft.doctor} onChange={(event) => updateDraft("doctor", event.target.value)} className={inputClass} /></Field>
@@ -584,7 +607,7 @@ export default function PatientRecordsPage() {
               <Field label="Observações da secretaria" wide><textarea rows={4} value={draft.notes ?? ""} onChange={(event) => updateDraft("notes", event.target.value)} className={textareaClass} /></Field>
               <div className="flex justify-end sm:col-span-2"><button type="button" onClick={() => saveDraft("Dados pessoais")} className={primaryButtonClass}>Salvar dados pessoais</button></div>
             </div> : <div className="grid gap-4 text-sm sm:grid-cols-2">{[
-              ["Nascimento", formatDate(patient.birthDate)], ["Telefone", patient.phone || "Não informado"], ["E-mail", patient.email || "Não informado"], ["Médico responsável", patient.doctor], ["CEP", patient.zipCode || "Não informado"], ["Endereço", `${patient.street ?? patient.address ?? "Não informado"}, ${patient.addressNumber || "s/n"}`], ["Complemento", patient.addressComplement || "Não informado"], ["Bairro", patient.neighborhood || "Não informado"], ["Cidade/Estado", `${patient.city || "Não informada"}/${patient.state || "--"}`], ["Dados para nota fiscal", `${patient.billingName || patient.name} · ${patient.billingDocumentType === "cnpj" ? "CNPJ" : "CPF"} ${patient.billingCpf || patient.cpf}`], ["Observações de entrega", patient.deliveryNotes || "Nenhuma"], ["Observações da secretaria", patient.notes || "Nenhuma"],
+              ["Nascimento", formatDate(patient.birthDate)], ["Telefone", patient.phone || "Não informado"], ["E-mail", patient.email || "Não informado"], ["Médico responsável", patient.doctor], ["CEP", patient.zipCode || "Não informado"], ["Endereço", `${patient.street ?? patient.address ?? "Não informado"}, ${patient.addressNumber || "s/n"}`], ["Complemento", patient.addressComplement || "Não informado"], ["Bairro", patient.neighborhood || "Não informado"], ["Cidade/Estado", `${patient.city || "Não informada"}/${patient.state || "--"}`], ["Dados para nota fiscal", `${patient.billingName || patient.name} · ${patient.billingDocumentType === "cnpj" ? "CNPJ" : "CPF"} ${patient.billingCpf || patient.cpf || "Pendente"}`], ["Observações de entrega", patient.deliveryNotes || "Nenhuma"], ["Observações da secretaria", patient.notes || "Nenhuma"],
             ].map(([label, value]) => <DataCard key={label} label={label} value={value} />)}</div>}</div>}
 
             {tab === "tratamento" && <div className="mt-6 space-y-5">

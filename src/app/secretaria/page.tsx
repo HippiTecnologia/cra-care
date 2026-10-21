@@ -80,6 +80,13 @@ type Patient = {
   registrationComplete?: boolean;
 };
 
+function missingPatientIdentity(patient: Pick<Patient, "cpf" | "birthDate">) {
+  const missing: string[] = [];
+  if (!patient.cpf.trim()) missing.push("CPF");
+  if (!patient.birthDate) missing.push("data de nascimento");
+  return missing;
+}
+
 type NewPatientForm = {
   name: string;
   cpf: string;
@@ -322,6 +329,7 @@ function formatCurrency(value: number) {
 }
 
 function isBirthdayToday(date: string) {
+  if (!date) return false;
   const birthday = new Date(`${date}T12:00:00`);
   const today = new Date();
 
@@ -356,6 +364,7 @@ export default function SecretariaPage() {
   );
   const [formError, setFormError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [draggedPatientId, setDraggedPatientId] = useState<string | null>(null);
   const [dragOverStatus, setDragOverStatus] = useState<PatientStatus | null>(null);
   const [abandoningPatient, setAbandoningPatient] = useState<Patient | null>(null);
@@ -383,7 +392,7 @@ export default function SecretariaPage() {
         setPortals(loadedPortals);
         setPrescriptions(loadedPrescriptions);
       } catch {
-        if (active) setSuccessMessage("Não foi possível carregar a operação real da Secretaria.");
+        if (active) setLoadError("Não foi possível carregar os dados da Secretaria. Atualize a página e tente novamente.");
       }
     })();
     return () => { active = false; };
@@ -621,14 +630,18 @@ export default function SecretariaPage() {
       return;
     }
 
-    const normalizedCpf = newPatient.cpf.replace(/\D/g, "");
+    const previous = patients.find((item) => item.id === editingPatientId);
+    const cpfValue = newPatient.cpf.trim() || previous?.cpf || "";
+    const birthDateValue = newPatient.birthDate || previous?.birthDate || "";
+    const normalizedCpf = cpfValue.replace(/\D/g, "");
 
-    if (normalizedCpf.length !== 11) {
+    if (normalizedCpf && normalizedCpf.length !== 11) {
       setFormError("Informe um CPF com 11 números.");
       return;
     }
 
     if (
+      normalizedCpf &&
       patients.some(
         (patient) =>
           patient.id !== editingPatientId &&
@@ -643,7 +656,7 @@ export default function SecretariaPage() {
     const billingDocumentType = newPatient.billingDocumentType;
     const billingDocumentLength = billingDocumentType === "cnpj" ? 14 : 11;
 
-    if (billingCpf.replace(/\D/g, "").length !== billingDocumentLength) {
+    if (billingCpf && billingCpf.replace(/\D/g, "").length !== billingDocumentLength) {
       setFormError(`Informe um ${billingDocumentType === "cnpj" ? "CNPJ" : "CPF"} válido para os dados da nota fiscal.`);
       return;
     }
@@ -652,16 +665,16 @@ export default function SecretariaPage() {
       setFormError("Não foi possível identificar a sessão da Secretaria.");
       return;
     }
-    const previous = patients.find((item) => item.id === editingPatientId);
+    const hasRequiredIdentity = normalizedCpf.length === 11 && Boolean(birthDateValue);
     const patient: Patient = {
       id: editingPatientId,
       username: previous?.username,
       createdAt: previous?.createdAt ?? new Date().toISOString(),
       name: newPatient.name.trim(),
-      cpf: newPatient.cpf,
+      cpf: cpfValue,
       phone: newPatient.phone,
       email: newPatient.email.trim(),
-      birthDate: newPatient.birthDate,
+      birthDate: birthDateValue,
       doctor: newPatient.doctor,
       treatment: newPatient.treatment,
       startDate: newPatient.startDate,
@@ -692,7 +705,7 @@ export default function SecretariaPage() {
       payments: newPatient.payments,
       notes: newPatient.notes.trim(),
       abandonmentReason: newPatient.status === "desistente" ? newPatient.abandonmentReason.trim() : undefined,
-      registrationComplete: true,
+      registrationComplete: hasRequiredIdentity,
     };
 
     setSavingPatient(true);
@@ -701,21 +714,23 @@ export default function SecretariaPage() {
       const record: DemoPatientRecord = {
         ...patient,
         username: patient.username ?? patientUsername(patient.name),
-        registrationStatus: "completed",
+        registrationStatus: hasRequiredIdentity ? "completed" : "pending-secretary",
       };
       const savedPatient = await saveSecretaryPatient(context, record);
       let accessMessage = "";
-      if (!savedPatient.hasPatientAccess) {
+      if (!savedPatient.hasPatientAccess && hasRequiredIdentity) {
         const access = await createSecretaryPatientAccess(record);
         patient.username = access.username;
         accessMessage = ` Usuário: ${access.username}. Senha inicial: ${access.initialPassword}.`;
+      } else if (!hasRequiredIdentity) {
+        accessMessage = " O acesso ao portal fica pendente até completar CPF e data de nascimento em Cadastros completos.";
       }
       setPatients((current) => current.map((existing) => existing.id === editingPatientId ? patient : existing));
       setNewPatient(createEmptyPatientForm());
       setSearch("");
       setSelectedDoctor("Todos os médicos");
       setFilter("todos");
-      setSuccessMessage(`${patient.name} teve o cadastro complementado e salvo no Supabase.${accessMessage}`);
+      setSuccessMessage(`${patient.name} foi salvo no Supabase.${hasRequiredIdentity ? "" : " O cadastro permanece incompleto."}${accessMessage}`);
       closePatientForm();
     } catch (cause) {
       setFormError(cause instanceof Error ? cause.message : "Não foi possível salvar o cadastro.");
@@ -1026,6 +1041,19 @@ export default function SecretariaPage() {
             </div>
           )}
 
+          {loadError && (
+            <div role="alert" className="mt-4 flex items-center justify-between gap-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              <span>{loadError}</span>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="font-bold underline"
+              >
+                Recarregar
+              </button>
+            </div>
+          )}
+
           {/* Colunas do Kanban */}
 
           <section className="mt-6 overflow-x-auto pb-6">
@@ -1081,6 +1109,7 @@ export default function SecretariaPage() {
                         const nextContact = currentBottle ? (() => { const date = new Date(`${currentBottle.startedAt}T12:00:00`); date.setDate(date.getDate() + 30); return date; })() : null;
                         const receivedAfterCurrentStart = Boolean(currentBottle && patient.lastReceivedDate && patient.lastReceivedDate > currentBottle.startedAt.slice(0, 10));
                         const showAlert = Boolean(nextContact && nextContact <= new Date() && !receivedAfterCurrentStart);
+                        const missingIdentity = missingPatientIdentity(patient);
 
                         return (
                           <article
@@ -1122,7 +1151,7 @@ export default function SecretariaPage() {
                                 </h4>
 
                                 <p className="mt-1 text-xs text-[#85797c]">
-                                  {patient.cpf}
+                                  {patient.cpf || "CPF pendente"}
                                 </p>
                                 <div className="mt-2 flex flex-wrap gap-1.5">
                                   {[...(indicationsByPatient.get(patient.id) ?? new Set<"Rinite" | "Bacteriana">())].map((indication) => <span key={indication} className={`rounded-full px-2 py-1 text-[10px] font-bold ${indication === "Rinite" ? "bg-[#fff0f3] text-[#a3113a]" : "bg-[#eaf6f9] text-[#28728a]"}`}>{indication}</span>)}
@@ -1142,9 +1171,11 @@ export default function SecretariaPage() {
                             </div>
 
                             <div className="mt-4 space-y-2 text-xs text-[#706467]">
-                              {patient.registrationComplete === false && (
+                              {(patient.registrationComplete === false || missingIdentity.length > 0) && (
                                 <div className="rounded-xl bg-[#fff5df] px-3 py-2 text-xs font-semibold text-[#98671a]">
-                                  Cadastro iniciado pelo médico. Complete os dados.
+                                  {missingIdentity.length > 0
+                                    ? `Cadastro incompleto. Dados pendentes: ${missingIdentity.join(", ")}. Clique para completar em Cadastros completos.`
+                                    : "Cadastro pendente da Secretaria. Clique para completar em Cadastros completos."}
                                 </div>
                               )}
                               <p>
@@ -1271,9 +1302,8 @@ export default function SecretariaPage() {
                     />
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
-                    CPF *
+                    CPF
                     <input
-                      required
                       readOnly
                       inputMode="numeric"
                       value={newPatient.cpf}
@@ -1285,9 +1315,8 @@ export default function SecretariaPage() {
                     />
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
-                    Data de nascimento *
+                    Data de nascimento
                     <input
-                      required
                       type="date"
                       value={newPatient.birthDate}
                       onChange={(event) =>
@@ -1304,9 +1333,8 @@ export default function SecretariaPage() {
                     <span className="mt-1 block text-xs text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span>
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
-                    Telefone / WhatsApp *
+                    Telefone / WhatsApp
                     <input
-                      required
                       inputMode="tel"
                       value={newPatient.phone}
                       onChange={(event) =>
