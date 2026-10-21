@@ -694,7 +694,9 @@ function TreatmentPaymentEditor({ patient, track, methods, onSelectMethod, onCha
   const usesAsaas = (payment?.paymentMethod ?? "").toLocaleLowerCase("pt-BR").includes("asaas");
   const installmentLimit = selectedMethod
     ? selectedMethod.category === "Recorrente" ? selectedMethod.billingPeriodMonths : selectedMethod.maxInstallments
-    : Math.max(1, payment?.installments ?? 1);
+    // Cadastros antigos podem não ter o vínculo com a modalidade; nesse caso,
+    // não deixe o valor atual (muitas vezes 1) travar a edição das parcelas.
+    : 36;
   const installmentsLabel = selectedMethod?.category === "Recorrente" ? "Meses de cobrança" : "Parcelas";
 
   return <div className="mt-5 grid gap-4 sm:grid-cols-2">
