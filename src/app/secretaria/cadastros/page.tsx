@@ -5,6 +5,7 @@ import { ReactNode, useEffect, useMemo, useState } from "react";
 import { bottleVolumeOptions, openDemoInvoicePdf } from "../../medico/patient-store";
 import type {
   BottleVolumeMl,
+  DemoBatch,
   DemoInvoice,
   DemoPatientRecord,
   DemoPrescription,
@@ -23,7 +24,9 @@ import {
 import type { AdminTreatmentMethod } from "../../adm/admin-store";
 import { loadActiveAdminMethods } from "../../../lib/supabase/admin-records";
 import { normalizeBirthDate } from "../../../lib/birth-date";
+import { bottlesBeyondCoverage, getBottleBillingState } from "../bottle-billing";
 import {
+  loadSecretaryBatches,
   loadSecretaryInvoices,
   loadSecretaryPatients,
   loadSecretaryPortals,
@@ -126,6 +129,7 @@ export default function PatientRecordsPage() {
   const [prescriptionRecords, setPrescriptionRecords] = useState<DemoPrescription[]>([]);
   const [invoiceRecords, setInvoiceRecords] = useState<DemoInvoice[]>([]);
   const [stockRecords, setStockRecords] = useState<DemoStockItem[]>([]);
+  const [batchRecords, setBatchRecords] = useState<DemoBatch[]>([]);
   const [adminMethods, setAdminMethods] = useState<AdminTreatmentMethod[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [search, setSearch] = useState("");
@@ -138,6 +142,7 @@ export default function PatientRecordsPage() {
   const [paymentNotes, setPaymentNotes] = useState("");
   const [paymentReference, setPaymentReference] = useState("");
   const [paymentBottlePlanId, setPaymentBottlePlanId] = useState("");
+  const [paymentAdditionalBottles, setPaymentAdditionalBottles] = useState(0);
   const [installmentNumber, setInstallmentNumber] = useState(1);
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [editingPaymentAmount, setEditingPaymentAmount] = useState("");
@@ -145,6 +150,7 @@ export default function PatientRecordsPage() {
   const [editingPaymentInstallmentNumber, setEditingPaymentInstallmentNumber] = useState(1);
   const [editingPaymentMethod, setEditingPaymentMethod] = useState("");
   const [editingPaymentBottlePlanId, setEditingPaymentBottlePlanId] = useState("");
+  const [editingPaymentAdditionalBottles, setEditingPaymentAdditionalBottles] = useState(0);
   const [editingPaymentReference, setEditingPaymentReference] = useState("");
   const [editingPaymentNotes, setEditingPaymentNotes] = useState("");
   const [financialTrack, setFinancialTrack] = useState<TreatmentTrack>("Rinite");
@@ -165,11 +171,12 @@ export default function PatientRecordsPage() {
     void (async () => {
       try {
         const workspace = await loadSecretaryPatients();
-        const [loadedPortals, loadedPrescriptions, loadedInvoices, loadedStock, loadedMethods] = await Promise.all([
+        const [loadedPortals, loadedPrescriptions, loadedInvoices, loadedStock, loadedBatches, loadedMethods] = await Promise.all([
           loadSecretaryPortals(workspace.patients.map((item) => item.id)),
           loadSecretaryPrescriptions(workspace.context),
           loadSecretaryInvoices(workspace.context),
           loadSecretaryStock(workspace.context),
+          loadSecretaryBatches(workspace.context),
           loadActiveAdminMethods(workspace.context),
         ]);
         if (!active) return;
@@ -179,6 +186,7 @@ export default function PatientRecordsPage() {
         setPrescriptionRecords(loadedPrescriptions);
         setInvoiceRecords(loadedInvoices);
         setStockRecords(loadedStock);
+        setBatchRecords(loadedBatches);
         setAdminMethods(loadedMethods);
         const hash = window.location.hash.slice(1);
         const initialId = workspace.patients.some((item) => item.id === hash) ? hash : workspace.patients[0]?.id ?? "";
@@ -202,7 +210,7 @@ export default function PatientRecordsPage() {
   const prescriptions = patient ? prescriptionRecords.filter((item) => item.patientId === patient.id) : [];
   const invoices = patient ? invoiceRecords.filter((item) => item.patientId === patient.id) : [];
   const stock = patient ? stockRecords.filter((item) => item.patientId === patient.id) : [];
-  const bottleHistory = patient && portal ? buildBottleHistory(patient, portal, stock) : [];
+  const bottleHistory = patient && portal ? buildBottleHistory(patient, portal, stock, prescriptions) : [];
   const overdueBottles = bottleHistory.filter((item) => {
     if (item.status !== "em-uso" || !item.startedAt) return false;
     const startedAt = new Date(`${item.startedAt.slice(0, 10)}T12:00:00`);
@@ -228,6 +236,9 @@ export default function PatientRecordsPage() {
   );
   const totalPaid = activePayments.reduce((sum, item) => sum + item.amount, 0);
   const remaining = Math.max(0, activeContractValue - totalPaid);
+  const newBottleBilling = patient
+    ? getBottleBillingState(patient, newBottleTreatment, stockRecords, batchRecords)
+    : undefined;
   const activeBottlePlans = (draft?.treatmentBottles ?? patient?.treatmentBottles ?? []).filter((item) => item.treatment === activeFinancialTrack);
 
   function updateDraft<K extends keyof DemoPatientRecord>(key: K, value: DemoPatientRecord[K]) {
@@ -276,6 +287,13 @@ export default function PatientRecordsPage() {
           }
         : draft;
       const completedPatient: DemoPatientRecord = { ...patientDraft, registrationStatus: "completed" };
+      if (section.startsWith("Financeiro")) {
+        const quota = getBottleBillingState(completedPatient, activeFinancialTrack, stockRecords, batchRecords);
+        if (quota.committedBottles > quota.coveredBottles) {
+          setMessage(`Não é possível reduzir a cobertura para ${quota.coveredBottles} frasco(s): ${quota.committedBottles} já foram registrados ou estão em andamento. Preserve ou aumente a quantidade coberta.`);
+          return;
+        }
+      }
       const savedPatient = await saveSecretaryPatient(context, completedPatient);
       let patientWithAccess = completedPatient;
       let accessMessage = "";
@@ -304,6 +322,7 @@ export default function PatientRecordsPage() {
       id: crypto.randomUUID(),
       treatment: activeFinancialTrack,
       bottlePlanId: paymentBottlePlanId || undefined,
+      additionalBottles: Math.max(0, Math.trunc(paymentAdditionalBottles)),
       amount: parsed,
       paidAt: new Date(`${paidAt}T12:00:00`).toISOString(),
       method: activeDraftPayment?.paymentMethod ?? (legacyFinancialAllowed ? draft.paymentMethod : undefined) ?? "A definir",
@@ -328,6 +347,7 @@ export default function PatientRecordsPage() {
       setPaymentNotes("");
       setPaymentReference("");
       setPaymentBottlePlanId("");
+      setPaymentAdditionalBottles(0);
       setInstallmentNumber(1);
       setMessage(`Pagamento de ${activeFinancialTrack} registrado no Supabase pela Secretaria.`);
     } catch {
@@ -342,6 +362,7 @@ export default function PatientRecordsPage() {
     setEditingPaymentInstallmentNumber(Math.max(1, payment.installmentNumber ?? 1));
     setEditingPaymentMethod(payment.method);
     setEditingPaymentBottlePlanId(payment.bottlePlanId ?? "");
+    setEditingPaymentAdditionalBottles(Math.max(0, Math.trunc(payment.additionalBottles ?? 0)));
     setEditingPaymentReference(payment.asaasReference ?? "");
     setEditingPaymentNotes(payment.notes ?? "");
     setMessage("");
@@ -354,6 +375,7 @@ export default function PatientRecordsPage() {
     setEditingPaymentInstallmentNumber(1);
     setEditingPaymentMethod("");
     setEditingPaymentBottlePlanId("");
+    setEditingPaymentAdditionalBottles(0);
     setEditingPaymentReference("");
     setEditingPaymentNotes("");
   }
@@ -383,10 +405,16 @@ export default function PatientRecordsPage() {
         installmentNumber: Math.max(1, Math.trunc(editingPaymentInstallmentNumber)),
         method: editingPaymentMethod || payment.method,
         bottlePlanId: editingPaymentBottlePlanId || undefined,
+        additionalBottles: Math.max(0, Math.trunc(editingPaymentAdditionalBottles)),
         asaasReference: editingPaymentReference.trim() || undefined,
         notes: editingPaymentNotes.trim() || undefined,
       } : payment),
     };
+    const quota = getBottleBillingState(updated, activeFinancialTrack, stockRecords, batchRecords);
+    if (quota.committedBottles > quota.coveredBottles) {
+      setMessage(`Não é possível reduzir/remover essa quantidade: ${quota.committedBottles} frasco(s) já foram registrados ou estão em andamento e a cobertura ficaria em ${quota.coveredBottles}.`);
+      return;
+    }
     if (!context) return;
     try {
       await saveSecretaryPatient(context, updated);
@@ -402,6 +430,11 @@ export default function PatientRecordsPage() {
   async function removePayment(paymentId: string) {
     if (!draft) return;
     const updated = { ...draft, payments: (draft.payments ?? []).filter((item) => item.id !== paymentId) };
+    const quota = getBottleBillingState(updated, activeFinancialTrack, stockRecords, batchRecords);
+    if (quota.committedBottles > quota.coveredBottles) {
+      setMessage(`Não é possível remover este pagamento: ${quota.committedBottles} frasco(s) já foram registrados ou estão em andamento e a cobertura ficaria em ${quota.coveredBottles}.`);
+      return;
+    }
     if (!context) return;
     try {
       await saveSecretaryPatient(context, updated);
@@ -502,8 +535,18 @@ export default function PatientRecordsPage() {
       setMessage("Informe ao menos uma fórmula com nome e concentração maior que zero.");
       return;
     }
+    const quota = getBottleBillingState(patient, newBottleTreatment, stockRecords, batchRecords);
+    if (quota.coveredBottles < 1) {
+      setMessage(`Informe quantos frascos o pagamento cobre em Condições financeiras de ${newBottleTreatment} antes de registrar a entrega.`);
+      return;
+    }
+    if (bottlesBeyondCoverage(quota, 1) > 0) {
+      setMessage(`Limite de ${quota.coveredBottles} frasco(s) atingido. Registre uma nova cobrança na aba Financeiro e informe quantos frascos adicionais ela libera antes de registrar outra entrega.`);
+      return;
+    }
     setSavingBottle(true);
     const isImmunobacterial = newBottleTreatment === "Imunobacteriana";
+    const deliveredAt = new Date(`${newBottleReceivedAt}T12:00:00`).toISOString();
     const item: DemoStockItem = {
       id: crypto.randomUUID(),
       batchId: "",
@@ -522,7 +565,8 @@ export default function PatientRecordsPage() {
       laboratory: "Registro manual da Secretaria",
       receivedAt: newBottleReceivedAt,
       checkedBy: context.fullName,
-      status: "disponivel",
+      status: "entregue",
+      deliveredAt,
     };
     try {
       const savedBottle = await saveSecretaryStockItem(context, item, patient.bottlesReceived ?? 0);
@@ -547,7 +591,7 @@ export default function PatientRecordsPage() {
         };
       });
       setAddingBottle(false);
-      setMessage(`Frasco ${bottleNumber} adicionado ao histórico e a Pedidos e entregas.`);
+      setMessage(`Frasco ${bottleNumber} vinculado diretamente ao paciente e registrado como entregue.`);
     } catch {
       setMessage("Não foi possível adicionar o frasco. Confira a conexão e a atualização do banco de dados.");
     } finally {
@@ -685,6 +729,7 @@ export default function PatientRecordsPage() {
                   <Field label="Fase"><input value={newBottlePhase} onChange={(event) => setNewBottlePhase(event.target.value)} placeholder="Ex.: Fase 1:10" className={inputClass} /></Field>
                   <Field label="Volume por frasco">{newBottleTreatment === "Imunobacteriana" ? <div className={`${inputClass} flex items-center bg-[#f7f4f2]`}>9 mL · fixo</div> : <select value={newBottleVolume} onChange={(event) => setNewBottleVolume(Number(event.target.value) as BottleVolumeMl)} className={inputClass}>{bottleVolumeOptions.map((volume) => <option key={volume} value={volume}>{volume} mL</option>)}</select>}</Field>
                   <Field label="Data de recebimento"><input type="date" value={newBottleReceivedAt} onChange={(event) => setNewBottleReceivedAt(event.target.value)} className={inputClass} /></Field>
+                  {newBottleBilling && <p className="rounded-xl bg-[#fbf7f5] px-3 py-2 text-xs text-[#66595d] sm:col-span-2 lg:col-span-4">Cobertura: {newBottleBilling.coveredBottles} frasco(s) · já registrados/comprometidos: {newBottleBilling.committedBottles} · saldo: {Math.max(0, newBottleBilling.coveredBottles - newBottleBilling.committedBottles)}.</p>}
                   <div className="rounded-xl bg-[#fbf7f5] p-3 sm:col-span-2 lg:col-span-4">
                     <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">Fórmulas do frasco</strong><button type="button" onClick={() => addFormula(setNewBottleFormulas)} className="rounded-lg border border-[#e5d9d4] bg-white px-3 py-2 text-xs font-bold text-[#a3113a]">+ Adicionar fórmula</button></div>
                     <div className="mt-2 space-y-2">{newBottleFormulas.map((formula, index) => <div key={formula.id} className="grid gap-2 sm:grid-cols-[1fr_130px_auto] sm:items-end"><Field label="Nome da fórmula"><input value={formula.name} onChange={(event) => setNewBottleFormulas((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))} placeholder="Nome" className={inputClass} /></Field><Field label="Concentração (%)"><input type="number" min={0} step="any" value={formula.percentage} onChange={(event) => setNewBottleFormulas((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, percentage: Number(event.target.value) } : item))} className={inputClass} /></Field><button type="button" onClick={() => setNewBottleFormulas((current) => current.filter((item) => item.id !== formula.id))} className="h-11 rounded-lg bg-[#fff1f3] px-3 text-xs font-bold text-[#a3113a]">Remover</button></div>)}{newBottleFormulas.length === 0 && <p className="text-xs text-[#817578]">Nenhuma fórmula adicionada.</p>}</div>
@@ -705,7 +750,7 @@ export default function PatientRecordsPage() {
               <div className="rounded-2xl border border-[#eee5e0] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Condições financeiras de {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">Estes dados pertencem exclusivamente a este tratamento.</p></div>{!editing && <button type="button" onClick={() => setEditing(true)} className="rounded-xl border border-[#e5d9d4] px-4 py-2 text-xs font-bold text-[#a3113a]">Editar financeiro</button>}</div>
                 {editing ? <><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} methods={adminMethods} onSelectMethod={(method, condition) => chooseMethod(method, condition, activeFinancialTrack)} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={primaryButtonClass}>Salvar financeiro de {activeFinancialTrack}</button></div></> : <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3"><DataCard label="Método de aquisição" value={`${activeTreatmentPayment?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido"}${activeTreatmentPayment?.methodSnapshotVersion ? ` · versão ${activeTreatmentPayment.methodSnapshotVersion}` : ""}`} /><DataCard label="Condição escolhida" value={activeTreatmentPayment?.agreedCondition ?? (legacyFinancialAllowed ? patient.agreedCondition : undefined) ?? "Não definida"} /><DataCard label="Forma de pagamento" value={activeTreatmentPayment?.paymentMethod ?? (legacyFinancialAllowed ? patient.paymentMethod : undefined) ?? "Não definida"} /><DataCard label="Parcelas" value={(activeTreatmentPayment?.installments ?? (legacyFinancialAllowed ? patient.paymentInstallments : undefined)) ? `${activeTreatmentPayment?.installments ?? patient.paymentInstallments}x` : "Não informado"} /><DataCard label="Desconto registrado" value={money(activeTreatmentPayment?.discountAmount ?? (legacyFinancialAllowed ? patient.discountAmount : undefined) ?? 0)} /><DataCard label="Vencimento" value={formatDate(activeTreatmentPayment?.dueDate ?? (legacyFinancialAllowed ? patient.paymentDueDate : undefined))} /><DataCard label="Frascos cobertos por este valor" value={activeTreatmentPayment?.bottlesIncluded ? String(activeTreatmentPayment.bottlesIncluded) : "Não informado"} /><DataCard label="Referência ASAAS" value={activeTreatmentPayment?.asaasReference ?? (legacyFinancialAllowed ? patient.asaasReference : undefined) ?? "Não informada"} /><DataCard label="Observações" value={activeTreatmentPayment?.notes ?? (legacyFinancialAllowed ? patient.financialNotes : undefined) ?? "Nenhuma"} /></div>}
               </div>
-              <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><span className="text-xs text-[#817578]">Vincule ao frasco quando aplicável.</span></div><div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5"><Field label="Valor pago (R$)"><input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" className={inputClass} /></Field><Field label="Data"><input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} className={inputClass} /></Field><Field label="Parcela"><input type="number" min={1} value={installmentNumber} onChange={(event) => setInstallmentNumber(Math.max(1, Number(event.target.value)))} className={inputClass} /></Field><Field label="Frasco"><select value={paymentBottlePlanId} onChange={(event) => setPaymentBottlePlanId(event.target.value)} className={inputClass}><option value="">Não vincular</option>{activeBottlePlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.quantity}x {plan.volumeMl} mL</option>)}</select></Field><Field label="Referência ASAAS"><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} className={inputClass} /></Field><Field label="Observação" wide><input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: pagamento do 2º frasco" className={inputClass} /></Field></div><button type="button" onClick={addPayment} className="mt-3 rounded-xl bg-[#187157] px-4 py-2.5 text-sm font-semibold text-white">Registrar pagamento</button></div>
+              <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><span className="text-xs text-[#817578]">A cobertura inicial fica nas condições financeiras.</span></div><div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5"><Field label="Valor pago (R$)"><input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" className={inputClass} /></Field><Field label="Data"><input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} className={inputClass} /></Field><Field label="Parcela"><input type="number" min={1} value={installmentNumber} onChange={(event) => setInstallmentNumber(Math.max(1, Number(event.target.value)))} className={inputClass} /></Field><Field label="Frasco"><select value={paymentBottlePlanId} onChange={(event) => setPaymentBottlePlanId(event.target.value)} className={inputClass}><option value="">Não vincular</option>{activeBottlePlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.quantity}x {plan.volumeMl} mL</option>)}</select></Field><Field label="Frascos adicionais liberados"><input type="number" min={0} step={1} value={paymentAdditionalBottles} onChange={(event) => setPaymentAdditionalBottles(Math.max(0, Math.trunc(Number(event.target.value))))} className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Use 0 para parcela sem nova cota; informe a quantidade liberada por uma nova cobrança.</span></Field><Field label="Referência ASAAS"><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} className={inputClass} /></Field><Field label="Observação" wide><input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: pagamento de frascos adicionais" className={inputClass} /></Field></div><button type="button" onClick={addPayment} className="mt-3 rounded-xl bg-[#187157] px-4 py-2.5 text-sm font-semibold text-white">Registrar pagamento</button></div>
               <div className="rounded-2xl bg-[#fbf7f5] p-4">
                 <h3 className="font-bold">Histórico de pagamentos de {activeFinancialTrack} ({activePayments.length})</h3>
                 <div className="mt-3 space-y-2">
@@ -725,6 +770,7 @@ export default function PatientRecordsPage() {
                             {item.bottlePlanId && !activeBottlePlans.some((plan) => plan.id === item.bottlePlanId) && <option value={item.bottlePlanId}>Vínculo antigo</option>}
                             {activeBottlePlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.quantity}x {plan.volumeMl} mL</option>)}
                           </select></Field>
+                          <Field label="Frascos adicionais liberados"><input type="number" min={0} step={1} value={editingPaymentAdditionalBottles} onChange={(event) => setEditingPaymentAdditionalBottles(Math.max(0, Math.trunc(Number(event.target.value))))} className={inputClass} /></Field>
                           <Field label="Referência ASAAS"><input value={editingPaymentReference} onChange={(event) => setEditingPaymentReference(event.target.value)} className={inputClass} /></Field>
                           <Field label="Observação" wide><input value={editingPaymentNotes} onChange={(event) => setEditingPaymentNotes(event.target.value)} className={inputClass} /></Field>
                         </div>
@@ -733,7 +779,7 @@ export default function PatientRecordsPage() {
                           <button type="button" onClick={() => void saveEditedPayment()} className="rounded-lg bg-[#187157] px-3 py-2 text-xs font-semibold text-white">Salvar alterações</button>
                         </div>
                       </div> : <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div><strong>{money(item.amount)}</strong><p className="mt-1 text-xs text-[#817578]">{item.treatment ?? activeFinancialTrack} · {formatDate(item.paidAt)} · {item.method}{item.installments ? ` · ${item.installmentNumber ?? 1}/${item.installments}` : ""}{linkedPlan ? ` · Frasco ${linkedPlan.volumeMl} mL` : ""}{item.asaasReference ? ` · ASAAS ${item.asaasReference}` : ""}</p>{item.notes && <p className="mt-1 text-sm text-[#66595d]">{item.notes}</p>}</div>
+                        <div><strong>{money(item.amount)}</strong><p className="mt-1 text-xs text-[#817578]">{item.treatment ?? activeFinancialTrack} · {formatDate(item.paidAt)} · {item.method}{item.installments ? ` · ${item.installmentNumber ?? 1}/${item.installments}` : ""}{item.additionalBottles ? ` · +${item.additionalBottles} frasco(s)` : ""}{linkedPlan ? ` · Frasco ${linkedPlan.volumeMl} mL` : ""}{item.asaasReference ? ` · ASAAS ${item.asaasReference}` : ""}</p>{item.notes && <p className="mt-1 text-sm text-[#66595d]">{item.notes}</p>}</div>
                         <div className="flex flex-wrap gap-2">
                           <button type="button" onClick={() => startEditingPayment(item)} className="rounded-lg bg-[#f7f1ee] px-3 py-2 text-xs font-semibold text-[#a3113a]">Editar</button>
                           <button type="button" onClick={() => removePayment(item.id)} className="rounded-lg bg-[#fff1f3] px-3 py-2 text-xs font-semibold text-[#a3113a]">Remover</button>

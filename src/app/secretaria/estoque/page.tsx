@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   DemoPatientRecord,
+  DemoBatch,
   DemoPrescription,
   DemoStockItem,
   DemoStockStatus,
 } from "../../medico/patient-store";
+import { bottlesBeyondCoverage, getBottleBillingState } from "../bottle-billing";
 import {
   loadSecretaryPatients,
   loadSecretaryBatches,
@@ -73,6 +75,7 @@ function escapeReportHtml(value: string | number | undefined) {
 export default function SecretariaEstoquePage() {
   const [stock, setStock] = useState<DemoStockItem[]>([]);
   const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
+  const [batches, setBatches] = useState<DemoBatch[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [filter, setFilter] = useState<StockFilter>("todos");
   const [search, setSearch] = useState("");
@@ -84,7 +87,6 @@ export default function SecretariaEstoquePage() {
   const [selectedStockIds, setSelectedStockIds] = useState<string[]>([]);
   const [assignmentPatientId, setAssignmentPatientId] = useState("");
   const [assignmentPrescriptionId, setAssignmentPrescriptionId] = useState("");
-  const [assignmentPaymentConfirmed, setAssignmentPaymentConfirmed] = useState(false);
   const [assignmentAsaasConfirmed, setAssignmentAsaasConfirmed] = useState(false);
   const [assignmentError, setAssignmentError] = useState("");
   const [deliveredRetentionCutoff, setDeliveredRetentionCutoff] = useState(0);
@@ -115,6 +117,7 @@ export default function SecretariaEstoquePage() {
             : item;
         }));
         setPrescriptions(loadedPrescriptions);
+        setBatches(loadedBatches);
         setBatchNames(Object.fromEntries(loadedBatches.map((batch) => [batch.id, batch.name ?? batch.code])));
         setPatients(workspace.patients);
         setDeliveredRetentionCutoff(new Date().getTime() - 30 * 86_400_000);
@@ -134,29 +137,28 @@ export default function SecretariaEstoquePage() {
     return saved;
   }
 
-  function getBillingRequirement(patient: DemoPatientRecord, prescription: DemoPrescription) {
+  function getBillingRequirement(patient: DemoPatientRecord, prescription: DemoPrescription, additionalBottles = 1) {
     const track = indicationForTreatment(prescription.treatment) === "bacteriana" ? "Imunobacteriana" : "Rinite";
     const trackFinancial = patient.treatmentPayments?.find((payment) => payment.treatment === track);
     const patientTracks = new Set(prescriptions.filter((item) => item.patientId === patient.id).map((item) => indicationForTreatment(item.treatment)));
     const legacyFinancialAllowed = patientTracks.size <= 1;
-    const financialConfigured = Boolean(trackFinancial) || legacyFinancialAllowed;
     const acquisitionMethod = trackFinancial?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido";
     const paymentMethod = trackFinancial?.paymentMethod ?? (legacyFinancialAllowed ? patient.paymentMethod : undefined) ?? "A definir";
-    const treatmentBottles = stock.filter((item) => item.patientId === patient.id && indicationForTreatment(item.treatment) === indicationForTreatment(prescription.treatment))
-      .reduce((total, item) => total + item.bottles, 0);
-    const nextBottleNumber = treatmentBottles + 1;
-    const renewalBottle = nextBottleNumber > 2 && (nextBottleNumber - 1) % 2 === 0;
-    const recurringAsaas = acquisitionMethod === "Recorrente — ASAAS";
-    const paymentRequired = !recurringAsaas && (acquisitionMethod === "Por frasco" || renewalBottle);
-    const asaasRequired = recurringAsaas || (paymentRequired && paymentMethod === "Asaas");
+    const quota = getBottleBillingState(patient, prescription.treatment, stock, batches);
+    const financialConfigured = Boolean(trackFinancial?.acquisitionMethod || (legacyFinancialAllowed && patient.acquisitionMethod))
+      && quota.coveredBottles > 0;
+    const nextBottleNumber = quota.committedBottles + 1;
+    const bottlesBeyondAllowance = bottlesBeyondCoverage(quota, additionalBottles);
+    const recurringAsaas = (trackFinancial?.methodCategory === "Recorrente" && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas"))
+      || acquisitionMethod === "Recorrente — ASAAS";
+    const paymentRequired = bottlesBeyondAllowance > 0;
+    const asaasRequired = recurringAsaas || (paymentRequired && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas"));
     const explanation = recurringAsaas
       ? "Pagamento recorrente: confirme no ASAAS se a cobrança está em dia."
-      : acquisitionMethod === "Por frasco"
-        ? "Cada novo frasco precisa de pagamento confirmado."
-        : paymentRequired
-          ? `Novo pagamento necessário para o ${nextBottleNumber}º frasco.`
-          : `Frasco ${nextBottleNumber} incluído no pagamento do tratamento.`;
-    return { track, financialConfigured, paymentRequired, asaasRequired, explanation };
+      : paymentRequired
+        ? `Limite de ${quota.coveredBottles} frasco(s) atingido. Registre uma nova cobrança com a quantidade de frascos liberada antes de continuar.`
+        : `Frasco ${nextBottleNumber} dentro dos ${quota.coveredBottles} frasco(s) cobertos pelos pagamentos.`;
+    return { track, financialConfigured, paymentRequired, asaasRequired, explanation, bottlesBeyondAllowance, quota };
   }
 
   const filteredStock = useMemo(() => {
@@ -185,7 +187,7 @@ export default function SecretariaEstoquePage() {
     : [];
   const assignmentPrescription = assignmentPrescriptionOptions.find((prescription) => prescription.id === assignmentPrescriptionId)
     ?? assignmentPrescriptionOptions[0];
-  const assignmentBilling = assignmentPatient && assignmentPrescription ? getBillingRequirement(assignmentPatient, assignmentPrescription) : undefined;
+  const assignmentBilling = assignmentPatient && assignmentPrescription ? getBillingRequirement(assignmentPatient, assignmentPrescription, 1) : undefined;
   const selectedPatient = selectedItem?.patientId ? patients.find((patient) => patient.id === selectedItem.patientId) : undefined;
   const availableBatches = Array.from(new Map(stock.map((item) => [item.batchId, batchNames[item.batchId] ?? item.batchCode])).entries());
 
@@ -273,6 +275,13 @@ export default function SecretariaEstoquePage() {
 
     const deliveredAt = new Date().toISOString();
     const patient = patients.find((record) => record.id === item.patientId);
+    if (patient) {
+      const quota = getBottleBillingState(patient, item.treatment, stock, batches);
+      if (quota.deliveredBottles + item.bottles > quota.coveredBottles) {
+        setMessage(`Entrega bloqueada: ${patient.name} já recebeu ${quota.deliveredBottles} frasco(s) de ${quota.coveredBottles} cobertos. Registre uma nova cobrança e informe quantos frascos ela libera antes de entregar.`);
+        return;
+      }
+    }
 
     await persistStockItem({ ...item, status: "entregue", deliveredAt });
 
@@ -295,7 +304,6 @@ export default function SecretariaEstoquePage() {
     setSelectedItemId(item.id);
     setAssignmentPatientId("");
     setAssignmentPrescriptionId("");
-    setAssignmentPaymentConfirmed(false);
     setAssignmentAsaasConfirmed(false);
     setAssignmentError("");
   }
@@ -311,7 +319,7 @@ export default function SecretariaEstoquePage() {
       if (assignmentPatient.registrationStatus !== "completed") throw new Error("Complete o cadastro do paciente antes de vincular o frasco.");
       if (!assignmentPrescription) throw new Error("O paciente precisa de uma receita médica antes da vinculação.");
       if (!assignmentBilling?.financialConfigured) throw new Error(`Configure o financeiro de ${assignmentBilling?.track ?? "este tratamento"}. O pagamento do outro tratamento não libera este frasco.`);
-      if (assignmentBilling?.paymentRequired && !assignmentPaymentConfirmed) throw new Error("Confirme o pagamento antes de vincular o frasco ao paciente.");
+      if (assignmentBilling?.paymentRequired) throw new Error(`O limite de frascos foi atingido. Registre uma nova cobrança de ${assignmentBilling.bottlesBeyondAllowance} frasco(s) em Cadastros antes de vincular.`);
       if (assignmentBilling?.asaasRequired && !assignmentAsaasConfirmed) throw new Error("Confirme no ASAAS se o pagamento está em dia.");
       const now = new Date().toISOString();
       const assigned = await persistStockItem({
@@ -330,7 +338,6 @@ export default function SecretariaEstoquePage() {
         delivery: assignmentPatient.delivery,
         status: "disponivel",
         assignedAt: now,
-        paymentConfirmedAt: assignmentBilling?.paymentRequired ? now : undefined,
         asaasConfirmedAt: assignmentBilling?.asaasRequired ? now : undefined,
       });
       if (selectedItem.bottles > 1) await persistStockItem({ ...selectedItem, bottles: selectedItem.bottles - 1 });
@@ -691,7 +698,7 @@ export default function SecretariaEstoquePage() {
                     <div className="mt-6 rounded-2xl border border-[#e5daf1] bg-[#faf7ff] p-4">
                       <h3 className="text-sm font-bold text-[#7351a3]">Vincular a um paciente</h3>
                       <p className="mt-1 text-xs text-[#66595d]">A última receita do paciente será buscada automaticamente.</p>
-                      <select value={assignmentPatientId} onChange={(event) => { setAssignmentPatientId(event.target.value); setAssignmentPrescriptionId(""); setAssignmentPaymentConfirmed(false); setAssignmentAsaasConfirmed(false); setAssignmentError(""); }} className="mt-4 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]">
+                      <select value={assignmentPatientId} onChange={(event) => { setAssignmentPatientId(event.target.value); setAssignmentPrescriptionId(""); setAssignmentAsaasConfirmed(false); setAssignmentError(""); }} className="mt-4 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]">
                         <option value="">Selecione um paciente</option>
                         {patients.filter((patient) => patient.registrationStatus === "completed").map((patient) => <option key={patient.id} value={patient.id}>{patient.name} · {patient.cpf}</option>)}
                       </select>
@@ -704,13 +711,13 @@ export default function SecretariaEstoquePage() {
                           {assignmentPrescription && <p className="mt-2"><strong>Composição:</strong> {assignmentPrescription.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ")}</p>}
                           {assignmentPrescription && assignmentPrescription.phase !== selectedItem.phase && <p className="mt-2 rounded-lg bg-[#fff4e4] p-2 text-[#966419]">A fase deste frasco é diferente da fase da última receita. Confira antes de prosseguir.</p>}
                           {assignmentBilling && <p className={`mt-3 font-semibold ${!assignmentBilling.financialConfigured ? "text-[#a3113a]" : assignmentBilling.paymentRequired ? "text-[#966419]" : "text-[#187157]"}`}>{assignmentBilling.financialConfigured ? assignmentBilling.explanation : `Financeiro de ${assignmentBilling.track} não configurado. O pagamento do outro tratamento não libera este frasco.`}</p>}
-                          {assignmentBilling?.paymentRequired && <label className="mt-3 flex items-start gap-2"><input type="checkbox" checked={assignmentPaymentConfirmed} onChange={(event) => setAssignmentPaymentConfirmed(event.target.checked)} className="mt-0.5 accent-[#a3113a]" />Confirmo a cobrança e o pagamento deste frasco.</label>}
+                          {assignmentBilling?.paymentRequired && <Link href={`/secretaria/cadastros#${assignmentPatient.id}`} className="mt-3 inline-flex rounded-lg bg-[#fff1f3] px-3 py-2 text-xs font-bold text-[#a3113a]">Registrar nova cobrança de {assignmentBilling.bottlesBeyondAllowance} frasco(s) em Cadastros</Link>}
                           {assignmentBilling?.asaasRequired && <label className="mt-3 flex items-start gap-2 rounded-lg bg-[#eef3ff] p-2 text-[#3c5da0]"><input type="checkbox" checked={assignmentAsaasConfirmed} onChange={(event) => setAssignmentAsaasConfirmed(event.target.checked)} className="mt-0.5 accent-[#3c5da0]" /><span><strong>Confirmar no ASAAS se o pagamento está em dia.</strong></span></label>}
                         </div>
                       )}
 
                       {assignmentError && <p role="alert" className="mt-3 rounded-xl bg-[#fff1f3] px-3 py-2 text-xs text-[#a3113a]">{assignmentError}</p>}
-                      <button type="button" onClick={assignSelectedItem} disabled={!assignmentPatientId || !assignmentPrescription || !assignmentBilling?.financialConfigured} className="mt-4 w-full rounded-xl bg-[#7351a3] px-4 py-3 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">Vincular frasco ao paciente</button>
+                      <button type="button" onClick={assignSelectedItem} disabled={!assignmentPatientId || !assignmentPrescription || !assignmentBilling?.financialConfigured || assignmentBilling.paymentRequired} className="mt-4 w-full rounded-xl bg-[#7351a3] px-4 py-3 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">Vincular frasco ao paciente</button>
                     </div>
                   )}
 

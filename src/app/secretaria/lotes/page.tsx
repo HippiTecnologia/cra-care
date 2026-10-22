@@ -16,6 +16,7 @@ import {
   treatmentPhases,
 } from "../../medico/patient-store";
 import type { BottleVolumeMl } from "../../medico/patient-store";
+import { bottlesBeyondCoverage, getBottleBillingState } from "../bottle-billing";
 import {
   confirmSecretaryBatch,
   loadSecretaryBatches,
@@ -144,7 +145,7 @@ export default function SecretariaLotesPage() {
   const [batchHistoryMonth, setBatchHistoryMonth] = useState("");
   const [externalReceivedDate, setExternalReceivedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [externalLaboratory, setExternalLaboratory] = useState("Laboratório externo");
-  const [paymentConfirmations, setPaymentConfirmations] = useState<Record<string, { payment: boolean; asaas: boolean }>>({});
+  const [paymentConfirmations, setPaymentConfirmations] = useState<Record<string, { asaas: boolean }>>({});
   const [readyItems, setReadyItems] = useState<DemoBatchItem[]>([]);
   const [readyFormula, setReadyFormula] = useState(availableFormulas[0]);
   const [readyFormulaPercentage, setReadyFormulaPercentage] = useState("");
@@ -155,15 +156,6 @@ export default function SecretariaLotesPage() {
   const [context, setContext] = useState<SecretaryContext | null>(null);
 
   const effectiveReadyFormulas = batchIndication === "bacteriana" ? immunobacterialReadyFormulas : readyFormulas;
-  const manualBottleCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const item of stockRecords) {
-      if (item.batchCode !== "ADICIONADO MANUALMENTE" || !item.patientId) continue;
-      const key = `${item.patientId}:${indicationForTreatment(item.treatment)}`;
-      counts.set(key, (counts.get(key) ?? 0) + Math.max(0, Math.trunc(item.bottles)));
-    }
-    return counts;
-  }, [stockRecords]);
   const readyFormulaTotal = useMemo(
     () => effectiveReadyFormulas.reduce((total, formula) => total + formula.percentage, 0),
     [effectiveReadyFormulas],
@@ -215,32 +207,23 @@ export default function SecretariaLotesPage() {
     const patientTracks = new Set(prescriptions.filter((item) => item.patientId === patient.id).map((item) => indicationForTreatment(item.treatment)));
     const legacyFinancialAllowed = patientTracks.size <= 1;
     const bottlesIncluded = trackFinancial?.bottlesIncluded;
-    const financialConfigured = Boolean(trackFinancial?.acquisitionMethod)
-      && Number.isInteger(bottlesIncluded)
-      && (bottlesIncluded ?? 0) > 0;
     const acquisitionMethod = trackFinancial?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido";
     const paymentMethod = trackFinancial?.paymentMethod ?? (legacyFinancialAllowed ? patient.paymentMethod : undefined) ?? "A definir";
-    const pendingBatchBottles = batches.reduce((total, batch) => total + batch.items
-      .filter((item) => item.patientId === patient.id && indicationForTreatment(item.treatment) === indicationForTreatment(prescription.treatment))
-      .reduce((count, item) => count + item.bottles, 0), 0);
-    const previouslyPaidAdditionalBottles = batches.reduce((total, batch) => total + batch.items
-      .filter((item) => item.patientId === patient.id && indicationForTreatment(item.treatment) === indicationForTreatment(prescription.treatment))
-      .reduce((count, item) => count + (item.additionalPaidBottles ?? 0), 0), 0);
-    const previouslyReceivedManualBottles = manualBottleCounts.get(`${patient.id}:${indicationForTreatment(prescription.treatment)}`) ?? 0;
-    const nextBottleNumber = previouslyReceivedManualBottles + pendingBatchBottles + additionalBottles + 1;
+    const quota = getBottleBillingState(patient, prescription.treatment, stockRecords, batches);
+    const previouslyReceivedManualBottles = stockRecords
+      .filter((item) => item.patientId === patient.id && item.batchCode === "ADICIONADO MANUALMENTE" && indicationForTreatment(item.treatment) === indicationForTreatment(prescription.treatment))
+      .reduce((total, item) => total + Math.max(0, Math.trunc(item.bottles)), 0);
+    const financialConfigured = Boolean(trackFinancial?.acquisitionMethod || (legacyFinancialAllowed && patient.acquisitionMethod))
+      && quota.coveredBottles > 0;
+    const nextBottleNumber = quota.committedBottles + additionalBottles + 1;
     const lastBottleNumber = nextBottleNumber + Math.max(1, Math.trunc(prescription.bottles)) - 1;
-    const totalCoveredBottles = (bottlesIncluded ?? 0) + previouslyPaidAdditionalBottles;
-    const bottlesBeforeThisPrescription = nextBottleNumber - 1;
-    const excessBeforeThisPrescription = Math.max(0, bottlesBeforeThisPrescription - totalCoveredBottles);
-    const excessAfterThisPrescription = Math.max(0, lastBottleNumber - totalCoveredBottles);
-    const bottlesBeyondAllowance = Number.isInteger(bottlesIncluded) ? excessAfterThisPrescription - excessBeforeThisPrescription : 0;
+    const totalCoveredBottles = quota.coveredBottles;
+    const bottlesBeyondAllowance = bottlesBeyondCoverage(quota, additionalBottles + Math.max(1, Math.trunc(prescription.bottles)))
+      - bottlesBeyondCoverage(quota, additionalBottles);
     const recurringAsaas = (trackFinancial?.methodCategory === "Recorrente" && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas"))
       || acquisitionMethod === "Recorrente — ASAAS";
-    const prescriptionPaymentConfirmed = batches.some((batch) => batch.items.some((item) =>
-      item.prescriptionId === prescription.id && Boolean(item.paymentConfirmedAt || item.asaasConfirmedAt),
-    ));
-    const paymentRequired = bottlesBeyondAllowance > 0 && !prescriptionPaymentConfirmed;
-    const asaasRequired = !prescriptionPaymentConfirmed && (recurringAsaas || paymentRequired && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas"));
+    const paymentRequired = bottlesBeyondAllowance > 0;
+    const asaasRequired = recurringAsaas || (paymentRequired && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas"));
     const paymentStatus = trackFinancial?.paymentStatus ?? (legacyFinancialAllowed ? patient.paymentStatus : undefined);
     const manualBottleNote = previouslyReceivedManualBottles > 0
       ? ` ${previouslyReceivedManualBottles} frasco(s) antigo(s) cadastrado(s) manualmente já entram nessa contagem.`
@@ -248,7 +231,7 @@ export default function SecretariaLotesPage() {
     const explanation = !financialConfigured
       ? "Selecione uma modalidade e informe quantos frascos o valor cobre no Financeiro do paciente."
       : paymentRequired
-        ? `Pagamento adicional necessário: ${bottlesBeyondAllowance} frasco(s) ultrapassam os ${bottlesIncluded} cobertos pelo valor cadastrado.${manualBottleNote}`
+        ? `Cobrança adicional necessária: ${bottlesBeyondAllowance} frasco(s) ultrapassam os ${totalCoveredBottles} cobertos pelos pagamentos registrados.${manualBottleNote}`
         : recurringAsaas
           ? "Confirme no ASAAS se a cobrança recorrente está em dia."
         : `Frascos ${nextBottleNumber} a ${lastBottleNumber} dentro do limite de ${totalCoveredBottles} frasco(s) já coberto(s).${manualBottleNote}`;
@@ -386,14 +369,16 @@ export default function SecretariaLotesPage() {
     }
     const missingPayment = billingRows.find(({ prescription, billing }) => {
       const confirmation = paymentConfirmations[prescription.id];
-      return (billing.paymentRequired && !confirmation?.payment) || (billing.asaasRequired && !confirmation?.asaas);
+      return billing.paymentRequired || (billing.asaasRequired && !confirmation?.asaas);
     });
 
     if (missingPayment) {
       const confirmation = paymentConfirmations[missingPayment.prescription.id];
-      setError(missingPayment.billing.asaasRequired && !confirmation?.asaas
+      setError(missingPayment.billing.paymentRequired
+        ? `Limite de frascos atingido para ${missingPayment.patient.name}. Abra o cadastro financeiro, registre a nova cobrança e informe ${missingPayment.billing.bottlesBeyondAllowance} frasco(s) adicional(is); depois volte ao lote.`
+        : missingPayment.billing.asaasRequired && !confirmation?.asaas
         ? `Confirme no ASAAS se o pagamento de ${missingPayment.patient.name} está em dia.`
-        : `Confirme o pagamento adicional de ${missingPayment.billing.bottlesBeyondAllowance} frasco(s) de ${missingPayment.patient.name} antes de incluir no lote.`);
+        : `Confira o pagamento de ${missingPayment.patient.name} antes de incluir no lote.`);
       return false;
     }
 
@@ -422,8 +407,8 @@ export default function SecretariaLotesPage() {
             paymentMethod: billing.paymentMethod,
             billingBottleNumber: billing.nextBottleNumber,
             paymentRequired: billing.paymentRequired,
-            additionalPaidBottles: billing.paymentRequired ? billing.bottlesBeyondAllowance : 0,
-            paymentConfirmedAt: billing.paymentRequired ? confirmedAt : undefined,
+            additionalPaidBottles: 0,
+            paymentConfirmedAt: undefined,
             asaasConfirmedAt: billing.asaasRequired ? confirmedAt : undefined,
           },
         ];
@@ -1073,7 +1058,7 @@ export default function SecretariaLotesPage() {
                 <div className="mt-5 space-y-3">
                   <h3 className="text-sm font-bold text-[#433438]">Conferência financeira</h3>
                   {getSelectedBillingRows().map(({ prescription, patient, billing }) => {
-                    const confirmation = paymentConfirmations[prescription.id] ?? { payment: false, asaas: false };
+                    const confirmation = paymentConfirmations[prescription.id] ?? { asaas: false };
 
                     return (
                       <div key={prescription.id} className={`rounded-2xl border p-4 ${billing.paymentStatus === "Vencido" ? "border-[#f0bcc5] bg-[#fff2f3]" : billing.paymentRequired ? "border-[#f0dfc0] bg-[#fff9ef]" : "border-[#d7e9df] bg-[#f5fbf7]"}`}>
@@ -1082,7 +1067,7 @@ export default function SecretariaLotesPage() {
                         <p className={`mt-2 text-xs font-bold ${billing.paymentStatus === "Vencido" ? "text-[#a3113a]" : "text-[#187157]"}`}>{billing.paymentStatus === "Vencido" ? `● ${indicationLabel(indicationForTreatment(prescription.treatment))} INADIMPLENTE — não liberar até regularizar` : `● ${indicationLabel(indicationForTreatment(prescription.treatment))} EM DIA`}</p>
                         <p className={`mt-2 text-xs font-semibold ${billing.paymentRequired ? "text-[#966419]" : "text-[#187157]"}`}>{billing.explanation}</p>
                         {billing.paymentRequired && (
-                          <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-[#544449]"><input type="checkbox" checked={confirmation.payment} onChange={(event) => setPaymentConfirmations((current) => ({ ...current, [prescription.id]: { ...confirmation, payment: event.target.checked } }))} className="mt-0.5 accent-[#a3113a]" />Confirmo que o pagamento adicional dos {billing.bottlesBeyondAllowance} frasco(s) que excedem o limite cadastrado foi realizado.</label>
+                          <Link href={`/secretaria/cadastros#${patient.id}`} className="mt-3 inline-flex rounded-lg bg-[#fff1f3] px-3 py-2 text-xs font-bold text-[#a3113a]">Registrar nova cobrança de {billing.bottlesBeyondAllowance} frasco(s) em Cadastros</Link>
                         )}
                         {billing.asaasRequired && (
                           <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-xl bg-[#eef3ff] p-3 text-xs text-[#3c5da0]"><input type="checkbox" checked={confirmation.asaas} onChange={(event) => setPaymentConfirmations((current) => ({ ...current, [prescription.id]: { ...confirmation, asaas: event.target.checked } }))} className="mt-0.5 accent-[#3c5da0]" /><span><strong>Confirmar no ASAAS se o pagamento está em dia.</strong><br />Verifiquei diretamente no ASAAS e o pagamento está regular.</span></label>

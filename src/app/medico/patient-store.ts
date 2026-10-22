@@ -122,6 +122,8 @@ export type PatientPaymentRecord = {
   id: string;
   treatment?: "Rinite" | "Imunobacteriana";
   bottlePlanId?: string;
+  /** Quantidade extra de frascos liberada por este pagamento, além da cobertura inicial. */
+  additionalBottles?: number;
   amount: number;
   paidAt: string;
   method: string;
@@ -260,6 +262,8 @@ export type DemoStockItem = {
   assignedAt?: string;
   paymentConfirmedAt?: string;
   asaasConfirmedAt?: string;
+  /** Frascos extras autorizados pelo pagamento que liberou este item. */
+  additionalPaidBottles?: number;
 };
 
 export type PatientBillingRequirement = {
