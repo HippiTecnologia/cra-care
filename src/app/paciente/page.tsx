@@ -951,8 +951,8 @@ export default function PatientPortalPage() {
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#faf7f5] pb-24 text-[#34292d] lg:pb-0">
-      <div className="min-h-screen lg:grid lg:grid-cols-[285px_minmax(0,1fr)]">
-        <aside className="hidden bg-gradient-to-b from-[#b31340] to-[#790b2a] px-7 py-8 text-white lg:block">
+      <div className="min-h-screen lg:pl-[285px]">
+        <aside className="hidden bg-gradient-to-b from-[#b31340] to-[#790b2a] px-7 py-8 text-white lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:block lg:w-[285px] lg:overflow-y-auto">
           <Image src="/logo-cra-branca.png" alt="CRA - Centro de Rinite e Alergia" width={170} height={115} priority className="h-auto w-36" />
           <p className="mt-4 text-sm text-white/70">Meu tratamento</p>
           <nav className="mt-9 space-y-2">

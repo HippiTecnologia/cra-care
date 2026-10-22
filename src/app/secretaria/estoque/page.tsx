@@ -363,8 +363,8 @@ export default function SecretariaEstoquePage() {
 
   return (
     <main className="min-h-screen bg-[#f8f5f2] text-[#34292d]">
-      <div className="min-h-screen lg:grid lg:grid-cols-[285px_minmax(0,1fr)]">
-        <aside className="bg-gradient-to-b from-[#b31340] to-[#790b2a] px-7 py-8 text-white lg:sticky lg:top-0 lg:h-screen lg:self-start lg:overflow-y-auto">
+      <div className="min-h-screen lg:pl-[285px]">
+        <aside className="bg-gradient-to-b from-[#b31340] to-[#790b2a] px-7 py-8 text-white lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:w-[285px] lg:overflow-y-auto">
           <div className="border-b border-white/15 pb-8">
             <Image
               src="/logo-cra-branca.png"
