@@ -8,6 +8,7 @@ import type {
   DemoStockItem,
   PatientPaymentRecord,
   PrescriptionFormula,
+  TreatmentPayment,
 } from "../../app/medico/patient-store";
 import type {
   PatientAssessment,
@@ -371,6 +372,42 @@ export async function saveSecretaryPatient(
   }
   void audit(context, "update", "patient", patient.id, { status: patient.status, source: "secretaria" });
   return { patient, hasPatientAccess: Boolean((existing as unknown as MedicalPatientRow).auth_user_id) };
+}
+
+export async function saveSecretaryTreatmentFinance(
+  context: SecretaryContext,
+  patientId: string,
+  payment: TreatmentPayment,
+) {
+  const supabase = getSupabaseClient();
+  const { data: patient, error: readError } = await supabase.from("patients")
+    .select("financial")
+    .eq("id", patientId)
+    .eq("clinic_id", context.clinicId)
+    .single();
+  if (readError || !patient) throw readError ?? new Error("Paciente não encontrado.");
+
+  const financial = objectValue(patient.financial);
+  const treatmentPayments = Array.isArray(financial.treatmentPayments)
+    ? [...financial.treatmentPayments]
+    : [];
+  const index = treatmentPayments.findIndex((item) => objectValue(item).treatment === payment.treatment);
+  if (index >= 0) treatmentPayments[index] = { ...objectValue(treatmentPayments[index]), ...payment };
+  else treatmentPayments.push(payment);
+
+  const { data: saved, error: saveError } = await supabase.from("patients")
+    .update({ financial: { ...financial, treatmentPayments }, updated_at: new Date().toISOString() })
+    .eq("id", patientId)
+    .eq("clinic_id", context.clinicId)
+    .select("financial")
+    .single();
+  if (saveError || !saved) throw saveError ?? new Error("O financeiro não foi gravado. Tente novamente.");
+  const persisted = objectValue(saved.financial).treatmentPayments;
+  if (!Array.isArray(persisted) || !persisted.some((item) => objectValue(item).treatment === payment.treatment)) {
+    throw new Error("Não foi possível confirmar o financeiro salvo. Atualize a página antes de tentar novamente.");
+  }
+  void audit(context, "update", "patient_financial", patientId, { treatment: payment.treatment });
+  return persisted as TreatmentPayment[];
 }
 
 export async function updateSecretaryPatientStatus(

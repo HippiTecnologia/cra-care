@@ -37,6 +37,7 @@ import {
   saveSecretaryStockItem,
   deleteSecretaryManualBottle,
   saveSecretaryPatient,
+  saveSecretaryTreatmentFinance,
   type SecretaryContext,
 } from "../../../lib/supabase/secretary-records";
 
@@ -137,6 +138,8 @@ export default function PatientRecordsPage() {
   const [draft, setDraft] = useState<DemoPatientRecord | null>(null);
   const [editing, setEditing] = useState(false);
   const [message, setMessage] = useState("");
+  const [financialFeedback, setFinancialFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [savingFinancial, setSavingFinancial] = useState(false);
   const [amount, setAmount] = useState("");
   const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10));
   const [paymentNotes, setPaymentNotes] = useState("");
@@ -271,6 +274,10 @@ export default function PatientRecordsPage() {
   }
 
   async function saveDraft(section: string) {
+    if (section.startsWith("Financeiro")) {
+      await saveFinancialDraft();
+      return;
+    }
     if (!draft) return;
     if (!draft.name.trim() || !draft.cpf.trim() || !draft.birthDate) {
       setMessage("Nome completo, CPF e data de nascimento são obrigatórios.");
@@ -278,22 +285,7 @@ export default function PatientRecordsPage() {
     }
     if (!context) { setMessage("Sessão da Secretaria não identificada."); return; }
     try {
-      const patientDraft = section.startsWith("Financeiro")
-        ? {
-            ...draft,
-            treatmentPayments: (draft.treatmentPayments ?? []).map((item) => item.treatment === activeFinancialTrack && !item.dueDate
-              ? { ...item, dueDate: sixMonthDueDate() }
-              : item),
-          }
-        : draft;
-      const completedPatient: DemoPatientRecord = { ...patientDraft, registrationStatus: "completed" };
-      if (section.startsWith("Financeiro")) {
-        const quota = getBottleBillingState(completedPatient, activeFinancialTrack, stockRecords, batchRecords);
-        if (quota.committedBottles > quota.coveredBottles) {
-          setMessage(`Não é possível reduzir a cobertura para ${quota.coveredBottles} frasco(s): ${quota.committedBottles} já foram registrados ou estão em andamento. Preserve ou aumente a quantidade coberta.`);
-          return;
-        }
-      }
+      const completedPatient: DemoPatientRecord = { ...draft, registrationStatus: "completed" };
       const savedPatient = await saveSecretaryPatient(context, completedPatient);
       let patientWithAccess = completedPatient;
       let accessMessage = "";
@@ -308,6 +300,44 @@ export default function PatientRecordsPage() {
       setMessage(`${section} atualizados no Supabase com sucesso.${accessMessage}`);
     } catch {
       setMessage(`Não foi possível salvar ${section.toLowerCase()}.`);
+    }
+  }
+
+  async function saveFinancialDraft() {
+    if (!draft || savingFinancial) return;
+    if (!context || !patient) {
+      setFinancialFeedback({ kind: "error", text: "Sessão da Secretaria ou paciente não identificado. Atualize a página e tente novamente." });
+      return;
+    }
+    const currentPayment = draft.treatmentPayments?.find((item) => item.treatment === activeFinancialTrack);
+    if (!currentPayment) {
+      setFinancialFeedback({ kind: "error", text: "Selecione o método de aquisição antes de salvar." });
+      return;
+    }
+    const payment = { ...currentPayment, dueDate: currentPayment.dueDate || sixMonthDueDate() };
+    const updated: DemoPatientRecord = {
+      ...draft,
+      treatmentPayments: (draft.treatmentPayments ?? []).map((item) => item.treatment === activeFinancialTrack ? payment : item),
+    };
+    const previousQuota = getBottleBillingState(patient, activeFinancialTrack, stockRecords, batchRecords);
+    const nextQuota = getBottleBillingState(updated, activeFinancialTrack, stockRecords, batchRecords);
+    if (nextQuota.coveredBottles < previousQuota.coveredBottles && nextQuota.coveredBottles < nextQuota.committedBottles) {
+      setFinancialFeedback({ kind: "error", text: `A cobertura não pode cair para ${nextQuota.coveredBottles} frasco(s): ${nextQuota.committedBottles} já estão registrados ou em andamento.` });
+      return;
+    }
+    setSavingFinancial(true);
+    setFinancialFeedback(null);
+    try {
+      const savedPayments = await saveSecretaryTreatmentFinance(context, draft.id, payment);
+      setDraft({ ...updated, treatmentPayments: savedPayments });
+      setPatients((current) => current.map((item) => item.id === draft.id ? { ...item, treatmentPayments: savedPayments } : item));
+      setEditing(false);
+      setMessage("");
+      setFinancialFeedback({ kind: "success", text: `Financeiro de ${activeFinancialTrack} salvo com sucesso.` });
+    } catch (cause) {
+      setFinancialFeedback({ kind: "error", text: cause instanceof Error ? cause.message : "Não foi possível salvar o financeiro. Tente novamente." });
+    } finally {
+      setSavingFinancial(false);
     }
   }
 
@@ -448,6 +478,7 @@ export default function PatientRecordsPage() {
 
   function selectPatient(id: string) {
     cancelEditingPayment();
+    setFinancialFeedback(null);
     const selectedTracks = Array.from(new Set(prescriptionRecords.filter((item) => item.patientId === id).map((item) => treatmentTrack(item.treatment))));
     setSelectedId(id);
     setDraft(patients.find((item) => item.id === id) ?? null);
@@ -458,6 +489,7 @@ export default function PatientRecordsPage() {
   }
 
   function chooseMethod(method: AdminTreatmentMethod, condition: "À vista" | "Parcelado", track: TreatmentTrack) {
+    setFinancialFeedback(null);
     const total = treatmentMethodTotal(method);
     const agreedValue = condition === "À vista" && method.cashValue ? method.cashValue : total;
     setDraft((current) => {
@@ -659,6 +691,7 @@ export default function PatientRecordsPage() {
           <Link href="/secretaria" className="rounded-xl border border-[#e6dbd6] bg-white px-4 py-3 text-sm font-semibold text-[#a3113a]">← Voltar</Link>
         </header>
 
+        {financialFeedback && tab === "financeiro" && <div role={financialFeedback.kind === "error" ? "alert" : "status"} className={`fixed bottom-4 right-4 z-50 flex max-w-[min(460px,calc(100vw-2rem))] items-start gap-3 rounded-2xl border p-4 text-sm font-semibold shadow-xl ${financialFeedback.kind === "error" ? "border-[#efb8c4] bg-[#fff1f3] text-[#8b1734]" : "border-[#cfe9de] bg-[#edf8f3] text-[#187157]"}`}><span>{financialFeedback.text}</span><button type="button" onClick={() => setFinancialFeedback(null)} aria-label="Fechar mensagem financeira">×</button></div>}
         {message && <div className="mt-5 flex items-center justify-between rounded-2xl border border-[#cfe9de] bg-[#edf8f3] px-4 py-3 text-sm font-semibold text-[#187157]"><span>{message}</span><button type="button" onClick={() => setMessage("")} aria-label="Fechar mensagem">×</button></div>}
 
         <div className="mt-7 grid gap-5 lg:grid-cols-[340px_1fr]">
@@ -748,7 +781,7 @@ export default function PatientRecordsPage() {
               <div className="rounded-2xl border border-[#eee5e0] bg-[#fffdfc] p-4"><p className="text-xs font-bold uppercase tracking-[.14em] text-[#a3113a]">Financeiro por tratamento</p><div className="mt-3 flex flex-wrap gap-2">{visibleTreatmentTracks.map((track) => <button key={track} type="button" onClick={() => { cancelEditingPayment(); setFinancialTrack(track); setEditing(false); setDraft(patient); }} className={`rounded-xl px-4 py-3 text-sm font-semibold ${activeFinancialTrack === track ? "bg-[#a3113a] text-white" : "bg-[#f6efec] text-[#716569]"}`}>{track}</button>)}</div></div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><Metric label={`Total · ${activeFinancialTrack}`} value={money(activeContractValue)} /><Metric label="Pago" value={money(totalPaid)} /><Metric label="Saldo" value={money(remaining)} /><Metric label="Status" value={activeTreatmentPayment?.paymentStatus ?? (legacyFinancialAllowed ? patient.paymentStatus : undefined) ?? "A definir"} /></div>
               <div className="rounded-2xl border border-[#eee5e0] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Condições financeiras de {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">Estes dados pertencem exclusivamente a este tratamento.</p></div>{!editing && <button type="button" onClick={() => setEditing(true)} className="rounded-xl border border-[#e5d9d4] px-4 py-2 text-xs font-bold text-[#a3113a]">Editar financeiro</button>}</div>
-                {editing ? <><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} methods={adminMethods} onSelectMethod={(method, condition) => chooseMethod(method, condition, activeFinancialTrack)} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={primaryButtonClass}>Salvar financeiro de {activeFinancialTrack}</button></div></> : <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3"><DataCard label="Método de aquisição" value={`${activeTreatmentPayment?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido"}${activeTreatmentPayment?.methodSnapshotVersion ? ` · versão ${activeTreatmentPayment.methodSnapshotVersion}` : ""}`} /><DataCard label="Condição escolhida" value={activeTreatmentPayment?.agreedCondition ?? (legacyFinancialAllowed ? patient.agreedCondition : undefined) ?? "Não definida"} /><DataCard label="Forma de pagamento" value={activeTreatmentPayment?.paymentMethod ?? (legacyFinancialAllowed ? patient.paymentMethod : undefined) ?? "Não definida"} /><DataCard label="Parcelas" value={(activeTreatmentPayment?.installments ?? (legacyFinancialAllowed ? patient.paymentInstallments : undefined)) ? `${activeTreatmentPayment?.installments ?? patient.paymentInstallments}x` : "Não informado"} /><DataCard label="Desconto registrado" value={money(activeTreatmentPayment?.discountAmount ?? (legacyFinancialAllowed ? patient.discountAmount : undefined) ?? 0)} /><DataCard label="Vencimento" value={formatDate(activeTreatmentPayment?.dueDate ?? (legacyFinancialAllowed ? patient.paymentDueDate : undefined))} /><DataCard label="Frascos cobertos por este valor" value={activeTreatmentPayment?.bottlesIncluded ? String(activeTreatmentPayment.bottlesIncluded) : "Não informado"} /><DataCard label="Referência ASAAS" value={activeTreatmentPayment?.asaasReference ?? (legacyFinancialAllowed ? patient.asaasReference : undefined) ?? "Não informada"} /><DataCard label="Observações" value={activeTreatmentPayment?.notes ?? (legacyFinancialAllowed ? patient.financialNotes : undefined) ?? "Nenhuma"} /></div>}
+                {editing ? <><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} methods={adminMethods} onSelectMethod={(method, condition) => chooseMethod(method, condition, activeFinancialTrack)} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" disabled={savingFinancial} onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={`${primaryButtonClass} disabled:opacity-60`}>{savingFinancial ? "Salvando…" : `Salvar financeiro de ${activeFinancialTrack}`}</button></div></> : <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3"><DataCard label="Método de aquisição" value={`${activeTreatmentPayment?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido"}${activeTreatmentPayment?.methodSnapshotVersion ? ` · versão ${activeTreatmentPayment.methodSnapshotVersion}` : ""}`} /><DataCard label="Condição escolhida" value={activeTreatmentPayment?.agreedCondition ?? (legacyFinancialAllowed ? patient.agreedCondition : undefined) ?? "Não definida"} /><DataCard label="Forma de pagamento" value={activeTreatmentPayment?.paymentMethod ?? (legacyFinancialAllowed ? patient.paymentMethod : undefined) ?? "Não definida"} /><DataCard label="Parcelas" value={(activeTreatmentPayment?.installments ?? (legacyFinancialAllowed ? patient.paymentInstallments : undefined)) ? `${activeTreatmentPayment?.installments ?? patient.paymentInstallments}x` : "Não informado"} /><DataCard label="Desconto registrado" value={money(activeTreatmentPayment?.discountAmount ?? (legacyFinancialAllowed ? patient.discountAmount : undefined) ?? 0)} /><DataCard label="Vencimento" value={formatDate(activeTreatmentPayment?.dueDate ?? (legacyFinancialAllowed ? patient.paymentDueDate : undefined))} /><DataCard label="Frascos cobertos por este valor" value={activeTreatmentPayment?.bottlesIncluded ? String(activeTreatmentPayment.bottlesIncluded) : "Não informado"} /><DataCard label="Referência ASAAS" value={activeTreatmentPayment?.asaasReference ?? (legacyFinancialAllowed ? patient.asaasReference : undefined) ?? "Não informada"} /><DataCard label="Observações" value={activeTreatmentPayment?.notes ?? (legacyFinancialAllowed ? patient.financialNotes : undefined) ?? "Nenhuma"} /></div>}
               </div>
               <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><span className="text-xs text-[#817578]">A cobertura inicial fica nas condições financeiras.</span></div><div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5"><Field label="Valor pago (R$)"><input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" className={inputClass} /></Field><Field label="Data"><input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} className={inputClass} /></Field><Field label="Parcela"><input type="number" min={1} value={installmentNumber} onChange={(event) => setInstallmentNumber(Math.max(1, Number(event.target.value)))} className={inputClass} /></Field><Field label="Frasco"><select value={paymentBottlePlanId} onChange={(event) => setPaymentBottlePlanId(event.target.value)} className={inputClass}><option value="">Não vincular</option>{activeBottlePlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.quantity}x {plan.volumeMl} mL</option>)}</select></Field><Field label="Frascos adicionais liberados"><input type="number" min={0} step={1} value={paymentAdditionalBottles} onChange={(event) => setPaymentAdditionalBottles(Math.max(0, Math.trunc(Number(event.target.value))))} className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Use 0 para parcela sem nova cota; informe a quantidade liberada por uma nova cobrança.</span></Field><Field label="Referência ASAAS"><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} className={inputClass} /></Field><Field label="Observação" wide><input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: pagamento de frascos adicionais" className={inputClass} /></Field></div><button type="button" onClick={addPayment} className="mt-3 rounded-xl bg-[#187157] px-4 py-2.5 text-sm font-semibold text-white">Registrar pagamento</button></div>
               <div className="rounded-2xl bg-[#fbf7f5] p-4">
