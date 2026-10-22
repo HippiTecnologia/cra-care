@@ -788,10 +788,24 @@ function TreatmentPaymentEditor({ patient, track, methods, onSelectMethod, onCha
     onChange((current) => {
       const payments = [...(current.treatmentPayments ?? [])];
       const index = payments.findIndex((payment) => payment.treatment === track);
-      const previous = index >= 0 ? payments[index] : { treatment: track, paymentMethod: current.paymentMethod, dueDate: current.paymentDueDate, agreedCondition: current.agreedCondition };
+      const previous: NonNullable<DemoPatientRecord["treatmentPayments"]>[number] = index >= 0 ? payments[index] : { treatment: track, paymentMethod: current.paymentMethod, dueDate: current.paymentDueDate, agreedCondition: current.agreedCondition };
       const next = { ...previous, [field]: value } as NonNullable<DemoPatientRecord["treatmentPayments"]>[number];
+      const isRecurring = selectedMethod?.category === "Recorrente" || previous.methodCategory === "Recorrente";
       if (field === "contractValue") next.installmentValue = Number(value) / Math.max(1, next.installments ?? 1);
-      if (field === "installments") next.installmentValue = (next.contractValue ?? 0) / Math.max(1, Number(value));
+      if (field === "installments") {
+        const installmentCount = Math.max(1, Math.trunc(Number(value)));
+        if (isRecurring) {
+          const currentMonthlyValue = typeof previous.installmentValue === "number"
+            ? previous.installmentValue
+            : typeof previous.contractValue === "number"
+              ? previous.contractValue / Math.max(1, previous.installments ?? 1)
+              : selectedMethod?.value ?? 0;
+          next.installmentValue = currentMonthlyValue;
+          next.contractValue = currentMonthlyValue * installmentCount;
+        } else {
+          next.installmentValue = (next.contractValue ?? 0) / installmentCount;
+        }
+      }
       if (field === "installmentValue") next.contractValue = Number(value) * Math.max(1, next.installments ?? 1);
       if (index >= 0) payments[index] = next; else payments.push(next);
       return { ...current, treatmentPayments: payments };
@@ -802,8 +816,10 @@ function TreatmentPaymentEditor({ patient, track, methods, onSelectMethod, onCha
   const selectedMethod = methods.find((method) => method.id === payment?.methodSnapshotId)
     ?? methods.find((method) => method.name === payment?.acquisitionMethod);
   const usesAsaas = (payment?.paymentMethod ?? "").toLocaleLowerCase("pt-BR").includes("asaas");
-  const installmentLimit = selectedMethod
-    ? selectedMethod.category === "Recorrente" ? selectedMethod.billingPeriodMonths : selectedMethod.maxInstallments
+  const installmentLimit = selectedMethod?.category === "Recorrente"
+    ? 36
+    : selectedMethod
+      ? selectedMethod.maxInstallments
     // Cadastros antigos podem não ter o vínculo com a modalidade; nesse caso,
     // não deixe o valor atual (muitas vezes 1) travar a edição das parcelas.
     : 36;
@@ -818,7 +834,7 @@ function TreatmentPaymentEditor({ patient, track, methods, onSelectMethod, onCha
         <option value="">Selecione uma modalidade</option>
         {methods.map((method) => <option key={method.id} value={method.id}>{method.name} · {method.category}</option>)}
       </select>
-      {selectedMethod && <span className="mt-1 block text-xs text-[#817578]">Modalidade {selectedMethod.version} · {selectedMethod.paymentMethod} · até {installmentLimit} {selectedMethod.category === "Recorrente" ? "mês(es)" : "parcela(s)"}</span>}
+      {selectedMethod && <span className="mt-1 block text-xs text-[#817578]">Modalidade {selectedMethod.version} · {selectedMethod.paymentMethod} · {selectedMethod.category === "Recorrente" ? `padrão de ${selectedMethod.billingPeriodMonths} mês(es), ajustável até 36` : `até ${installmentLimit} parcela(s)`}</span>}
       {!methods.length && <span className="mt-1 block text-xs text-[#a3113a]">Nenhuma modalidade ativa cadastrada.</span>}
     </Field>
     <Field label="Condição">
@@ -836,7 +852,7 @@ function TreatmentPaymentEditor({ patient, track, methods, onSelectMethod, onCha
     </select></Field>
     <Field label="Situação do pagamento"><select value={payment?.paymentStatus ?? "A definir"} onChange={(event) => updatePayment("paymentStatus", event.target.value)} className={inputClass}>{paymentStatusOptions.map((value) => <option key={value}>{value}</option>)}</select></Field>
     <Field label={selectedMethod?.category === "Recorrente" ? "Valor do período (R$)" : "Valor total (R$)"}><input type="number" min={0} step="0.01" value={payment?.contractValue ?? ""} onChange={(event) => updatePayment("contractValue", Number(event.target.value))} className={inputClass} /></Field>
-    <Field label={installmentsLabel}><input type="number" min={1} max={installmentLimit} value={payment?.installments ?? 1} onChange={(event) => updatePayment("installments", Math.min(installmentLimit, Math.max(1, Number(event.target.value))))} className={inputClass} /></Field>
+    <Field label={installmentsLabel}><input type="number" min={1} max={installmentLimit} step={1} value={payment?.installments ?? 1} onChange={(event) => updatePayment("installments", Math.min(installmentLimit, Math.max(1, Math.trunc(Number(event.target.value)))))} className={inputClass} /></Field>
     <Field label="Valor por parcela (R$)"><input type="number" min={0} step="0.01" value={payment?.installmentValue ?? ""} onChange={(event) => updatePayment("installmentValue", Number(event.target.value))} className={inputClass} /></Field>
     <Field label="Vencimento"><input type="date" value={payment?.dueDate ?? sixMonthDueDate()} onChange={(event) => updatePayment("dueDate", event.target.value)} className={inputClass} /></Field>
     <div className="sm:col-start-2"><Field label="Quantidade de frascos cobertos por este valor"><input type="number" min={1} step={1} value={payment?.bottlesIncluded ?? ""} onChange={(event) => updatePayment("bottlesIncluded", event.target.value === "" ? undefined : Math.max(1, Math.trunc(Number(event.target.value))))} placeholder="Preencha a quantidade" className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Deixe vazio até confirmar quantos frascos esse valor cobre.</span></Field></div>
