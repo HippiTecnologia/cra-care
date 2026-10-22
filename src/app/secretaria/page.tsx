@@ -869,7 +869,7 @@ export default function SecretariaPage() {
       <div className="min-h-screen lg:grid lg:grid-cols-[285px_minmax(0,1fr)]">
         {/* Menu lateral */}
 
-        <aside className="bg-gradient-to-b from-[#b31340] to-[#790b2a] px-7 py-8 text-white lg:min-h-screen">
+        <aside className="bg-gradient-to-b from-[#b31340] to-[#790b2a] px-7 py-8 text-white lg:sticky lg:top-0 lg:h-screen lg:self-start lg:overflow-y-auto">
           <div className="border-b border-white/15 pb-8">
             <Image
               src="/logo-cra-branca.png"
