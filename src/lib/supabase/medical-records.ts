@@ -453,8 +453,6 @@ export async function createDoctorPatient(
   const supabase = getSupabaseClient();
   const normalizedCpf = input.cpf.replace(/\D/g, "");
   if (normalizedCpf.length !== 11) throw new Error("CPF_INVALIDO");
-  const duplicate = await searchClinicPatients(doctor, normalizedCpf);
-  if (duplicate.some((patient) => patient.cpf.replace(/\D/g, "") === normalizedCpf)) throw new Error("CPF_DUPLICADO");
 
   const { data, error } = await supabase.from("patients").insert({
     clinic_id: doctor.clinicId,

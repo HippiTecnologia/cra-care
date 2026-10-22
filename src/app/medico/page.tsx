@@ -63,6 +63,7 @@ export default function MedicoPage() {
   const [searchingClinic, setSearchingClinic] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [savingPatient, setSavingPatient] = useState(false);
   const [duplicatePatient, setDuplicatePatient] = useState<DemoPatientRecord | null>(null);
   const [section, setSection] = useState<DoctorSection>("dashboard");
   const [patientFilter, setPatientFilter] = useState<DoctorPatientFilter>("todos");
@@ -152,17 +153,12 @@ export default function MedicoPage() {
       return;
     }
 
+    if (savingPatient) return;
+    setSavingPatient(true);
+    setError("");
     setDuplicatePatient(null);
     try {
       if (!doctor) throw new Error("PERFIL_MEDICO");
-      const inMyList = records.find((patient) => patient.cpf.replace(/\D/g, "") === normalizedCpf);
-      const clinicPatient = inMyList ?? (await searchClinicPatients(doctor, normalizedCpf))
-        .find((patient) => patient.cpf.replace(/\D/g, "") === normalizedCpf);
-      if (clinicPatient) {
-        setDuplicatePatient(clinicPatient);
-        setError("CPF já cadastrado. Confira o paciente existente antes de continuar.");
-        return;
-      }
       const created = await createDoctorPatient(doctor, {
         name,
         cpf,
@@ -182,8 +178,13 @@ export default function MedicoPage() {
         setDuplicatePatient(existing ?? null);
         setError("CPF já cadastrado. Não criamos um segundo paciente.");
       } else {
-        setError("Não foi possível salvar o pré-cadastro agora. Tente novamente.");
+        console.error("Falha no pré-cadastro médico", caught);
+        setError(caught instanceof Error && caught.message === "PERFIL_MEDICO"
+          ? "Sua sessão médica não está pronta. Atualize a página e entre novamente."
+          : "Não foi possível salvar o pré-cadastro. Confira sua conexão e tente novamente. Se persistir, avise a equipe de suporte.");
       }
+    } finally {
+      setSavingPatient(false);
     }
   }
 
@@ -501,9 +502,10 @@ export default function MedicoPage() {
                 </button>
                 <button
                   type="submit"
-                  className="rounded-xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white"
+                  disabled={savingPatient}
+                  className="rounded-xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50"
                 >
-                  Enviar para secretaria
+                  {savingPatient ? "Enviando..." : "Enviar para secretaria"}
                 </button>
               </div>
             </form>
