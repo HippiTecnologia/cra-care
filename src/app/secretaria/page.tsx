@@ -72,6 +72,8 @@ type Patient = {
   billingDocumentType?: "cpf" | "cnpj";
   acquisitionMethod?: AcquisitionMethod;
   paymentMethod?: PaymentMethod;
+  paymentStatus?: DemoPatientRecord["paymentStatus"];
+  treatmentPayments?: DemoPatientRecord["treatmentPayments"];
   paymentInstallments?: number;
   contractValue?: number;
   payments?: PatientPaymentRecord[];
@@ -119,7 +121,7 @@ type NewPatientForm = {
 };
 
 type FilterMode = "todos" | "novo-pedido" | "aniversario" | "ativos" | "concluidos";
-type NextContactFilter = "todos" | "pendente" | "futuro" | "aguardando-inicio";
+type NextContactFilter = "todos" | "pendente" | "futuro" | "aguardando-inicio" | "pagamento-pendente";
 type PatientSortMode = "pedido-pendente" | "az";
 
 const columns: {
@@ -294,6 +296,8 @@ function patientFromMedicalRecord(record: DemoPatientRecord): Patient {
     status: record.status ?? "em-conversa",
     acquisitionMethod: record.acquisitionMethod ?? defaults.acquisitionMethod,
     paymentMethod: record.paymentMethod ?? defaults.paymentMethod,
+    paymentStatus: record.paymentStatus,
+    treatmentPayments: record.treatmentPayments,
     paymentInstallments: record.paymentInstallments ?? 1,
     contractValue: record.contractValue,
     payments: record.payments ?? [],
@@ -360,6 +364,11 @@ function hasPendingNextContact(patient: Patient, portal: PatientPortalState | un
   );
 
   return Boolean(nextContact && nextContact <= now && !receivedAfterCurrentStart);
+}
+
+function hasPendingPayment(patient: Patient) {
+  const isPending = (status?: DemoPatientRecord["paymentStatus"]) => status === "Pendente" || status === "Vencido";
+  return isPending(patient.paymentStatus) || Boolean(patient.treatmentPayments?.some((payment) => isPending(payment.paymentStatus)));
 }
 
 export default function SecretariaPage() {
@@ -494,7 +503,8 @@ export default function SecretariaPage() {
         nextContactFilter === "todos" ||
         (nextContactFilter === "pendente" && isPendingNextContact) ||
         (nextContactFilter === "futuro" && Boolean(nextContact && nextContact > new Date())) ||
-        (nextContactFilter === "aguardando-inicio" && !nextContact);
+        (nextContactFilter === "aguardando-inicio" && !nextContact) ||
+        (nextContactFilter === "pagamento-pendente" && hasPendingPayment(patient));
 
       return matchesSearch && matchesDoctor && matchesFilter && matchesKanbanStatus && matchesNextContact;
     });
@@ -1048,7 +1058,7 @@ export default function SecretariaPage() {
                 </label>
 
                 <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-[#74686b]">
-                  Filtrar próximo pedido/contato
+                  Filtrar situação
                   <select
                     value={nextContactFilter}
                     onChange={(event) => setNextContactFilter(event.target.value as NextContactFilter)}
@@ -1058,6 +1068,7 @@ export default function SecretariaPage() {
                     <option value="pendente">Pedido/contato pendente</option>
                     <option value="futuro">Próximo contato futuro</option>
                     <option value="aguardando-inicio">Aguardando início do frasco</option>
+                    <option value="pagamento-pendente">Pagamento pendente</option>
                   </select>
                 </label>
 

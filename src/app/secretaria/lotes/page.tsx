@@ -9,6 +9,7 @@ import {
   DemoBatchStatus,
   DemoPatientRecord,
   DemoPrescription,
+  DemoStockItem,
   PrescriptionFormula,
   availableFormulas,
   bottleVolumeOptions,
@@ -20,6 +21,7 @@ import {
   loadSecretaryBatches,
   loadSecretaryPatients,
   loadSecretaryPrescriptions,
+  loadSecretaryStock,
   saveSecretaryBatch,
   SecretaryContext,
 } from "../../../lib/supabase/secretary-records";
@@ -120,6 +122,7 @@ function indicationLabel(indication?: DemoBatch["indication"]) {
 export default function SecretariaLotesPage() {
   const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
   const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
+  const [stockRecords, setStockRecords] = useState<DemoStockItem[]>([]);
   const [batches, setBatches] = useState<DemoBatch[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
@@ -152,6 +155,15 @@ export default function SecretariaLotesPage() {
   const [context, setContext] = useState<SecretaryContext | null>(null);
 
   const effectiveReadyFormulas = batchIndication === "bacteriana" ? immunobacterialReadyFormulas : readyFormulas;
+  const manualBottleCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of stockRecords) {
+      if (item.batchCode !== "ADICIONADO MANUALMENTE" || !item.patientId) continue;
+      const key = `${item.patientId}:${indicationForTreatment(item.treatment)}`;
+      counts.set(key, (counts.get(key) ?? 0) + Math.max(0, Math.trunc(item.bottles)));
+    }
+    return counts;
+  }, [stockRecords]);
   const readyFormulaTotal = useMemo(
     () => effectiveReadyFormulas.reduce((total, formula) => total + formula.percentage, 0),
     [effectiveReadyFormulas],
@@ -162,15 +174,17 @@ export default function SecretariaLotesPage() {
     void (async () => {
       try {
         const workspace = await loadSecretaryPatients();
-        const [loadedPrescriptions, loadedBatches] = await Promise.all([
+        const [loadedPrescriptions, loadedBatches, loadedStock] = await Promise.all([
           loadSecretaryPrescriptions(workspace.context),
           loadSecretaryBatches(workspace.context),
+          loadSecretaryStock(workspace.context),
         ]);
         if (!active) return;
         setContext(workspace.context);
         setPatients(workspace.patients);
         setPrescriptions(loadedPrescriptions);
         setBatches(loadedBatches);
+        setStockRecords(loadedStock);
       } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : "Não foi possível carregar os lotes reais.");
       }
@@ -212,7 +226,8 @@ export default function SecretariaLotesPage() {
     const previouslyPaidAdditionalBottles = batches.reduce((total, batch) => total + batch.items
       .filter((item) => item.patientId === patient.id && indicationForTreatment(item.treatment) === indicationForTreatment(prescription.treatment))
       .reduce((count, item) => count + (item.additionalPaidBottles ?? 0), 0), 0);
-    const nextBottleNumber = pendingBatchBottles + additionalBottles + 1;
+    const previouslyReceivedManualBottles = manualBottleCounts.get(`${patient.id}:${indicationForTreatment(prescription.treatment)}`) ?? 0;
+    const nextBottleNumber = previouslyReceivedManualBottles + pendingBatchBottles + additionalBottles + 1;
     const lastBottleNumber = nextBottleNumber + Math.max(1, Math.trunc(prescription.bottles)) - 1;
     const totalCoveredBottles = (bottlesIncluded ?? 0) + previouslyPaidAdditionalBottles;
     const bottlesBeforeThisPrescription = nextBottleNumber - 1;
@@ -227,14 +242,17 @@ export default function SecretariaLotesPage() {
     const paymentRequired = bottlesBeyondAllowance > 0 && !prescriptionPaymentConfirmed;
     const asaasRequired = !prescriptionPaymentConfirmed && (recurringAsaas || paymentRequired && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas"));
     const paymentStatus = trackFinancial?.paymentStatus ?? (legacyFinancialAllowed ? patient.paymentStatus : undefined);
+    const manualBottleNote = previouslyReceivedManualBottles > 0
+      ? ` ${previouslyReceivedManualBottles} frasco(s) antigo(s) cadastrado(s) manualmente já entram nessa contagem.`
+      : "";
     const explanation = !financialConfigured
       ? "Selecione uma modalidade e informe quantos frascos o valor cobre no Financeiro do paciente."
       : paymentRequired
-        ? `Pagamento adicional necessário: ${bottlesBeyondAllowance} frasco(s) ultrapassam os ${bottlesIncluded} cobertos pelo valor cadastrado.`
+        ? `Pagamento adicional necessário: ${bottlesBeyondAllowance} frasco(s) ultrapassam os ${bottlesIncluded} cobertos pelo valor cadastrado.${manualBottleNote}`
         : recurringAsaas
           ? "Confirme no ASAAS se a cobrança recorrente está em dia."
-        : `Frascos ${nextBottleNumber} a ${lastBottleNumber} dentro do limite de ${totalCoveredBottles} frasco(s) já coberto(s).`;
-    return { track, financialConfigured, acquisitionMethod, paymentMethod, paymentStatus, bottlesIncluded, totalCoveredBottles, bottlesBeyondAllowance, nextBottleNumber, lastBottleNumber, paymentRequired, asaasRequired, explanation };
+        : `Frascos ${nextBottleNumber} a ${lastBottleNumber} dentro do limite de ${totalCoveredBottles} frasco(s) já coberto(s).${manualBottleNote}`;
+    return { track, financialConfigured, acquisitionMethod, paymentMethod, paymentStatus, bottlesIncluded, totalCoveredBottles, bottlesBeyondAllowance, previouslyReceivedManualBottles, nextBottleNumber, lastBottleNumber, paymentRequired, asaasRequired, explanation };
   }
 
   const patientById = useMemo(
