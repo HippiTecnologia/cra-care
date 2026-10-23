@@ -423,8 +423,6 @@ export default function NursingPage() {
     const responsible = escapeHtml(String(report.content.examResponsible ?? "Responsável não informado"));
     const responsibleCrm = escapeHtml(String(report.content.examResponsibleCrm ?? "Não informado"));
     const examinerIsDoctor = report.content.examinerRole === "medico";
-    const nurse = escapeHtml(String(report.content.nurseName ?? profile?.fullName ?? "Enfermagem"));
-    const nurseCoren = escapeHtml(String(report.content.nurseCoren ?? profile?.coren ?? "Não informado"));
     const savedResults = (report.content.results ?? {}) as Record<string, unknown>;
     const positiveItems = Object.entries(savedResults).filter(([, value]) => ["+", "++", "+++"].includes(patchResultText(value)));
     const rows = patchBatteries.map((battery) => `<section class="battery"><h2>${escapeHtml(battery.name)}</h2><table><thead><tr><th>Substância</th><th>1ª leitura · 48h</th><th>2ª leitura · 48h</th><th>Resultado</th></tr></thead><tbody>${battery.items.map((item) => { const result = savedResults[item] as Partial<PatchResult> | undefined; return `<tr><td>${escapeHtml(item)}</td><td>${escapeHtml(result?.firstReading || "—")}</td><td>${escapeHtml(result?.secondReading || "—")}</td><td><strong>${escapeHtml(patchResultText(result))}</strong></td></tr>`; }).join("")}</tbody></table></section>`).join("");
@@ -456,24 +454,17 @@ export default function NursingPage() {
       detailSections.forEach((details) => secondPage.append(details));
       for (const page of [firstPage, secondPage]) {
         const signatures = printable.document.createElement("div");
-        const executorColumn = printable.document.createElement("div");
-        const responsibleColumn = printable.document.createElement("div");
-        const executorLine = printable.document.createElement("div");
-        const responsibleLine = printable.document.createElement("div");
+        const signatureLine = printable.document.createElement("div");
         signatures.className = "signatures";
-        executorLine.className = "line";
-        responsibleLine.className = "line";
-        executorLine.innerHTML = examinerIsDoctor ? `${nurse}<br/>Médico executor · CRM ${nurseCoren}` : `${nurse}<br/>Enfermagem · COREN ${nurseCoren}`;
-        responsibleLine.innerHTML = `${responsible}<br/>CRM ${responsibleCrm}`;
-        executorColumn.append(executorLine);
-        responsibleColumn.append(responsibleLine);
-        signatures.append(executorColumn, responsibleColumn);
+        signatureLine.className = "line";
+        signatureLine.innerHTML = `${responsible}<br/>CRM ${responsibleCrm}`;
+        signatures.append(signatureLine);
         page.append(signatures);
       }
       printable.document.body.replaceChildren(firstPage, secondPage);
     }
     const readableStyle = printable.document.createElement("style");
-    readableStyle.textContent = "html{background:#3a3a3a}body{font-size:10.5px;width:210mm;margin:18px auto;background:#fff;box-shadow:0 4px 24px #1118}.print-page{display:flex;flex-direction:column;width:210mm;min-height:297mm;margin:0 auto 18px;padding:11mm;background:#fff;box-shadow:0 4px 24px #1118;break-after:page;page-break-after:always}.print-page:last-child{break-after:auto;page-break-after:auto}.patient{font-size:10.5px;line-height:17px}th{font-size:9px;padding:6px}td{font-size:11px;line-height:14px;padding:8px 7px}.battery h2,.details h2{font-size:10.5px;padding:7px 9px}.details h3{font-size:11px}.details p{font-size:9.5px;line-height:13px}.details article{margin:8px 0;padding:10px;border:1px solid #e2d8d5;border-radius:8px;background:#fffafa;break-inside:avoid}.details article p:first-of-type{margin-bottom:14px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:auto;padding-top:16mm;text-align:center;font-size:9px}.line{border-top:1px solid #111;padding-top:3px;margin:auto;width:170px}@media print{html,body{background:white}body{padding:0;width:auto;min-height:0;margin:0;box-shadow:none}.print-page{width:auto;height:275mm;min-height:0;margin:0;padding:0;box-shadow:none;break-after:page;page-break-after:always}.print-page:last-child{break-after:auto;page-break-after:auto}}";
+    readableStyle.textContent = "html{background:#3a3a3a}body{font-size:10.5px;width:210mm;margin:18px auto;background:#fff;box-shadow:0 4px 24px #1118}.print-page{display:flex;flex-direction:column;width:210mm;min-height:297mm;margin:0 auto 18px;padding:11mm;background:#fff;box-shadow:0 4px 24px #1118;break-after:page;page-break-after:always}.print-page:last-child{break-after:auto;page-break-after:auto}.patient{font-size:10.5px;line-height:17px}th{font-size:9px;padding:6px}td{font-size:11px;line-height:14px;padding:8px 7px}.battery h2,.details h2{font-size:10.5px;padding:7px 9px}.details h3{font-size:11px}.details p{font-size:9.5px;line-height:13px}.details article{margin:8px 0;padding:10px;border:1px solid #e2d8d5;border-radius:8px;background:#fffafa;break-inside:avoid}.details article p:first-of-type{margin-bottom:14px}.signatures{margin-top:auto;padding-top:16mm;text-align:center;font-size:9px}.line{border-top:1px solid #111;padding-top:3px;margin:auto;width:170px}@media print{html,body{background:white}body{padding:0;width:auto;min-height:0;margin:0;box-shadow:none}.print-page{width:auto;height:275mm;min-height:0;margin:0;padding:0;box-shadow:none;break-after:page;page-break-after:always}.print-page:last-child{break-after:auto;page-break-after:auto}}";
     printable.document.head.append(readableStyle);
     printable.document.close();
     if (openPrintDialog) {
