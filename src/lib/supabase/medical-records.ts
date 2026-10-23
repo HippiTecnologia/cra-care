@@ -134,6 +134,10 @@ export function mapMedicalPatient(
     stringValue(address, "city") ||
     stringValue(financial, "acquisitionMethod"),
   );
+  const sourceDoctorLabel = stringValue(treatment, "sourceDoctorLabel");
+  const displayDoctorName = doctorName === "Médico não vinculado" && sourceDoctorLabel
+    ? `A confirmar: ${sourceDoctorLabel}`
+    : doctorName;
   const registrationStatus: DemoPatientRecord["registrationStatus"] = hasSecretaryData
     ? "completed"
     : "pending-secretary";
@@ -144,7 +148,7 @@ export function mapMedicalPatient(
     name: row.full_name,
     cpf: row.cpf,
     birthDate: row.birth_date,
-    doctor: doctorName,
+    doctor: displayDoctorName,
     doctorId: row.doctor_profile_id ?? undefined,
     createdAt: row.created_at,
     registrationStatus,
