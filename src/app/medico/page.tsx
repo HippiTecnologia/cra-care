@@ -114,6 +114,10 @@ export default function MedicoPage() {
     });
   }, [allDoctorPatients, patientFilter, search]);
 
+  const clinicOnlyMatches = clinicMatches.filter(
+    (patient) => !visiblePatients.some((visiblePatient) => visiblePatient.id === patient.id),
+  );
+
   const totalPatients = allDoctorPatients.length;
   const countByStatus = (status: DoctorPatientFilter) => status === "todos" ? totalPatients : allDoctorPatients.filter((patient) => status === "ativo" ? ["ativo", "em-conversa", "bacteriana"].includes(patient.status ?? "") : patient.status === status).length;
   const percentage = (value: number) => totalPatients ? Math.round((value / totalPatients) * 100) : 0;
@@ -350,7 +354,7 @@ export default function MedicoPage() {
             <div className="mt-5 flex flex-wrap gap-2">{([{ id: "todos", label: "Todos" }, ...statusMetrics.map((item) => ({ id: item.id, label: item.label })), { id: "tentar-novamente", label: "Tentar novamente" }] as { id: DoctorPatientFilter; label: string }[]).map((item) => <button key={item.id} type="button" onClick={() => setPatientFilter(item.id)} className={`rounded-full px-4 py-2 text-xs font-semibold ${patientFilter === item.id ? "bg-[#a3113a] text-white" : "bg-[#f6efec] text-[#716569]"}`}>{item.label} ({countByStatus(item.id)})</button>)}</div>
 
             <div className="mt-6 space-y-3">
-              {clinicMatches.map((patient) => {
+              {clinicOnlyMatches.map((patient) => {
                 const isMine = patient.doctorId === doctor?.id;
                 return <article key={`clinic-${patient.id}`} className="flex flex-col gap-4 rounded-2xl border border-[#d9c8d0] bg-[#fff7fa] p-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-wide text-[#a3113a]">Resultado da clínica</p><h3 className="mt-1 text-sm font-bold text-[#403237]">{patient.name}</h3><p className="mt-1 text-xs text-[#776b6e]">CPF: {patient.cpf} · Acompanhamento atual: {patient.doctor || "Equipe médica"}</p></div><div className="flex flex-wrap items-center gap-3"><Link href={`/medico/paciente/${patient.id}`} className="rounded-xl border border-[#e3d4d9] bg-white px-4 py-2 text-xs font-semibold text-[#a3113a]">Visualizar</Link>{!isMine && <button type="button" onClick={() => void assumePatient(patient)} className="rounded-xl bg-[#a3113a] px-4 py-2 text-xs font-semibold text-white">Assumir acompanhamento</button>}</div></article>;
               })}
@@ -385,7 +389,7 @@ export default function MedicoPage() {
                 </article>
               ))}
 
-              {visiblePatients.length === 0 && (
+              {visiblePatients.length === 0 && clinicOnlyMatches.length === 0 && (
                 <p className="rounded-2xl border border-dashed border-[#e6dbd6] px-4 py-8 text-center text-sm text-[#817578]">
                   Nenhum paciente encontrado.
                 </p>
