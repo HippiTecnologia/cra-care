@@ -89,7 +89,7 @@ type Patient = {
 
 function missingPatientIdentity(patient: Pick<Patient, "cpf" | "birthDate">) {
   const missing: string[] = [];
-  if (!patient.cpf.trim()) missing.push("CPF");
+  if (!patient.cpf?.trim()) missing.push("CPF");
   if (!patient.birthDate) missing.push("data de nascimento");
   return missing;
 }
@@ -279,8 +279,8 @@ function patientFromMedicalRecord(record: DemoPatientRecord): Patient {
     username: record.username,
     createdAt: record.createdAt,
     name: record.name,
-    cpf: record.cpf,
-    birthDate: record.birthDate,
+    cpf: record.cpf ?? "",
+    birthDate: record.birthDate ?? "",
     doctor: record.doctor,
     phone: record.phone ?? "",
     email: record.email ?? "",
