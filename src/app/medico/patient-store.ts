@@ -301,8 +301,10 @@ export const availableFormulas = [
   "Epitélio de gato",
   "Epitélio de cão",
   "Mix de gramíneas",
-  "Lolium perene",
+  "Cynodon dactylon",
+  "Lolium perenne",
   "Lolium multiflorum",
+  "Phleum pratense",
   "Poa pratensis",
   "Paspalum",
 ];
