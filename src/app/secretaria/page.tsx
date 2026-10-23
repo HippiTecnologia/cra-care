@@ -87,6 +87,13 @@ type Patient = {
   registrationComplete?: boolean;
 };
 
+function missingPatientIdentity(patient: Pick<Patient, "cpf" | "birthDate">) {
+  const missing: string[] = [];
+  if (!patient.cpf.trim()) missing.push("CPF");
+  if (!patient.birthDate) missing.push("data de nascimento");
+  return missing;
+}
+
 type NewPatientForm = {
   name: string;
   cpf: string;
