@@ -287,6 +287,9 @@ export const treatmentPhases = [
   "FASE 1:100 - 100 UBE",
   "FASE 1:1000 - 10 UBE",
   "FASE 1:4 - 1250 UBE",
+  "FASE 1:5 - 1000 UBE",
+  "FASE 1:1.000.000 - 0,005 UBE",
+  "FASE 1:10.000",
 ];
 
 export const availableFormulas = [
