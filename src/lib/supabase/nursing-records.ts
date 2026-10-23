@@ -79,11 +79,13 @@ export async function updateNursingReport(profile: NursingProfile, reportId: str
 }
 
 export async function deleteNursingReport(profile: NursingProfile, reportId: string) {
-  const { error } = await (getSupabaseClient().from("nursing_reports") as any)
+  const { data: deletedRows, error } = await (getSupabaseClient().from("nursing_reports") as any)
     .delete()
     .eq("id", reportId)
-    .eq("clinic_id", profile.clinicId);
+    .eq("clinic_id", profile.clinicId)
+    .select("id");
   if (error) throw error;
+  if (!deletedRows?.length) throw new Error("LAUDO_NAO_EXCLUIDO");
 }
 
 export async function findNursingPatientByCpf(profile: NursingProfile, cpf: string): Promise<NursingPatient | null> {
