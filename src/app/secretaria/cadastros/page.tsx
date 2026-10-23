@@ -14,6 +14,7 @@ import type {
   PrescriptionFormula,
 } from "../../medico/patient-store";
 import { buildBottleHistory } from "../../paciente/bottle-history";
+import { getNextOrderReminders, hasNextOrderDue, hasNextOrderInProgress } from "../next-order";
 import {
   PatientPortalState,
   createDefaultPortalState,
@@ -214,11 +215,16 @@ export default function PatientRecordsPage() {
   const invoices = patient ? invoiceRecords.filter((item) => item.patientId === patient.id) : [];
   const stock = patient ? stockRecords.filter((item) => item.patientId === patient.id) : [];
   const bottleHistory = patient && portal ? buildBottleHistory(patient, portal, stock, prescriptions) : [];
-  const overdueBottles = bottleHistory.filter((item) => {
-    if (item.status !== "em-uso" || !item.startedAt) return false;
-    const startedAt = new Date(`${item.startedAt.slice(0, 10)}T12:00:00`);
-    return !Number.isNaN(startedAt.getTime()) && referenceNow.getTime() - startedAt.getTime() >= 30 * 24 * 60 * 60 * 1000;
-  });
+  const dueOrderReminders = patient && portal
+    ? getNextOrderReminders(patient, bottleHistory, prescriptions, referenceNow).filter((reminder) =>
+      hasNextOrderDue(reminder.date, referenceNow)
+      && !hasNextOrderInProgress(patient.id, reminder.treatment, stockRecords, batchRecords),
+    )
+    : [];
+  const overdueBottles = dueOrderReminders.map((reminder) => bottleHistory
+    .filter((item) => treatmentTrack(item.treatment) === (reminder.treatment === "imunobacteriana" ? "Imunobacteriana" : "Rinite"))
+    .sort((first, second) => second.number - first.number)[0])
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
   const treatmentTracks = Array.from(new Set([
     ...prescriptions.map((item) => treatmentTrack(item.treatment)),
     ...(patient?.treatmentBottles ?? []).map((item) => item.treatment),
@@ -734,11 +740,11 @@ export default function PatientRecordsPage() {
               <Field label="Observações da secretaria" wide><textarea rows={4} value={draft.notes ?? ""} onChange={(event) => updateDraft("notes", event.target.value)} className={textareaClass} /></Field>
               <div className="flex justify-end sm:col-span-2"><button type="button" onClick={() => saveDraft("Dados pessoais")} className={primaryButtonClass}>Salvar dados pessoais</button></div>
             </div> : <div className="grid gap-4 text-sm sm:grid-cols-2">{[
-              ["Nascimento", formatDate(patient.birthDate)], ["Telefone", patient.phone || "Não informado"], ["E-mail", patient.email || "Não informado"], ["Médico responsável", patient.doctor], ["CEP", patient.zipCode || "Não informado"], ["Endereço", `${patient.street ?? patient.address ?? "Não informado"}, ${patient.addressNumber || "s/n"}`], ["Complemento", patient.addressComplement || "Não informado"], ["Bairro", patient.neighborhood || "Não informado"], ["Cidade/Estado", `${patient.city || "Não informada"}/${patient.state || "--"}`], ["Dados para nota fiscal", `${patient.billingName || patient.name} · ${patient.billingDocumentType === "cnpj" ? "CNPJ" : "CPF"} ${patient.billingCpf || patient.cpf}`], ["Observações de entrega", patient.deliveryNotes || "Nenhuma"], ["Observações da secretaria", patient.notes || "Nenhuma"],
+              ["Nascimento", formatDate(patient.birthDate)], ["Telefone", patient.phone || "Não informado"], ["E-mail", patient.email || "Não informado"], ["Médico responsável", patient.doctor], ["CEP", patient.zipCode || "Não informado"], ["Endereço", `${patient.street ?? patient.address ?? "Não informado"}, ${patient.addressNumber || "s/n"}`], ["Complemento", patient.addressComplement || "Não informado"], ["Bairro", patient.neighborhood || "Não informado"], ["Cidade/Estado", `${patient.city || "Não informada"}/${patient.state || "--"}`], ["Dados para nota fiscal", `${patient.billingName || patient.name} · ${patient.billingDocumentType === "cnpj" ? "CNPJ" : "CPF"} ${patient.billingCpf || patient.cpf || "Pendente"}`], ["Observações de entrega", patient.deliveryNotes || "Nenhuma"], ["Observações da secretaria", patient.notes || "Nenhuma"],
             ].map(([label, value]) => <DataCard key={label} label={label} value={value} />)}</div>}</div>}
 
             {tab === "tratamento" && <div className="mt-6 space-y-5">
-              {overdueBottles.length > 0 && <section className="rounded-2xl border border-[#f1cf8f] bg-[#fff8e8] p-4 text-sm text-[#76521e]"><strong>Atenção: frasco em uso há 30 dias ou mais.</strong><p className="mt-1">{overdueBottles.map((item) => `${treatmentTrack(item.treatment)} · frasco ${item.number}`).join(" · ")}. Confira a evolução ou registre a troca do frasco.</p></section>}
+              {overdueBottles.length > 0 && <section className="rounded-2xl border border-[#f1cf8f] bg-[#fff8e8] p-4 text-sm text-[#76521e]"><strong>Próximo pedido necessário.</strong><p className="mt-1">{overdueBottles.map((item) => `${treatmentTrack(item.treatment)} · frasco ${item.number}`).join(" · ")}. O prazo de uso foi atingido ou o frasco foi concluído; confira se o pedido já está em andamento.</p></section>}
               {visibleTreatmentTracks.length > 0 ? <div className="grid min-w-0 grid-cols-1 gap-5">{visibleTreatmentTracks.map((track) => {
                 const trackPrescriptions = prescriptions.filter((item) => treatmentTrack(item.treatment) === track);
                 const latest = trackPrescriptions[0];

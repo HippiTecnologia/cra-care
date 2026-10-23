@@ -8,8 +8,11 @@ import {
   bottleVolumeOptions,
   treatmentPhases,
 } from "../medico/patient-store";
-import type { BottleVolumeMl, DemoPatientRecord, DemoPrescription, PatientPaymentRecord, TreatmentBottlePlan } from "../medico/patient-store";
+import type { BottleVolumeMl, DemoBatch, DemoPatientRecord, DemoPrescription, DemoStockItem, PatientPaymentRecord, TreatmentBottlePlan } from "../medico/patient-store";
 import { createDefaultPortalState, type PatientPortalState } from "../paciente/patient-portal-store";
+import { buildBottleHistory } from "../paciente/bottle-history";
+import { getBottleBillingState } from "./bottle-billing";
+import { getNextOrderDate, getNextOrderReminders, hasNextOrderDue, hasNextOrderInProgress } from "./next-order";
 import { patientUsername } from "../../lib/auth/credentials";
 import { normalizeBirthDate } from "../../lib/birth-date";
 import {
@@ -17,6 +20,8 @@ import {
   loadSecretaryPatients,
   loadSecretaryPortals,
   loadSecretaryPrescriptions,
+  loadSecretaryBatches,
+  loadSecretaryStock,
   saveSecretaryPatient,
   updateSecretaryPatientStatus,
   type SecretaryContext,
@@ -307,15 +312,6 @@ function patientFromMedicalRecord(record: DemoPatientRecord): Patient {
   };
 }
 
-function getDaysSince(date: string) {
-  const reference = new Date(`${date}T12:00:00`);
-  const today = new Date();
-
-  const difference = today.getTime() - reference.getTime();
-
-  return Math.max(0, Math.floor(difference / 86_400_000));
-}
-
 function formatDate(date: string) {
   return new Date(`${date}T12:00:00`).toLocaleDateString("pt-BR");
 }
@@ -337,33 +333,52 @@ function isBirthdayToday(date: string) {
   );
 }
 
-function requiresNewOrder(patient: Patient) {
-  if (patient.status !== "ativo" || patient.treatment.toLowerCase().includes("bacteriana")) {
-    return false;
-  }
-
-  return getDaysSince(patient.lastReceivedDate) >= 30;
+function remindersForPatient(
+  patient: Patient,
+  portal: PatientPortalState | undefined,
+  stock: DemoStockItem[],
+  prescriptions: DemoPrescription[],
+) {
+  const safePortal = portal ?? createDefaultPortalState(patient.id);
+  const history = buildBottleHistory(patient, safePortal, stock, prescriptions);
+  return getNextOrderReminders(patient, history, prescriptions);
 }
 
-function getNextContactDate(portal: PatientPortalState | undefined) {
-  const currentBottle = portal?.bottles.find((bottle) => bottle.status === "em-uso");
-  if (!currentBottle) return null;
-
-  const date = new Date(`${currentBottle.startedAt}T12:00:00`);
-  date.setDate(date.getDate() + 30);
-  return date;
+function hasAnyOrderInProgress(patientId: string, stock: DemoStockItem[], batches: DemoBatch[]) {
+  return stock.some((item) => item.patientId === patientId && item.status !== "entregue")
+    || batches.some((batch) => batch.status !== "conferido" && batch.items.some((item) => item.patientId === patientId));
 }
 
-function hasPendingNextContact(patient: Patient, portal: PatientPortalState | undefined, now = new Date()) {
-  const currentBottle = portal?.bottles.find((bottle) => bottle.status === "em-uso");
-  const nextContact = getNextContactDate(portal);
-  const receivedAfterCurrentStart = Boolean(
-    currentBottle &&
-      patient.lastReceivedDate &&
-      patient.lastReceivedDate > currentBottle.startedAt.slice(0, 10),
+function getNextContactDate(
+  patient: Patient,
+  portal: PatientPortalState | undefined,
+  stock: DemoStockItem[],
+  prescriptions: DemoPrescription[],
+) {
+  return getNextOrderDate(remindersForPatient(patient, portal, stock, prescriptions));
+}
+
+function hasPendingNextContact(
+  patient: Patient,
+  portal: PatientPortalState | undefined,
+  stock: DemoStockItem[],
+  batches: DemoBatch[],
+  prescriptions: DemoPrescription[],
+  now = new Date(),
+) {
+  return remindersForPatient(patient, portal, stock, prescriptions).some((reminder) =>
+    hasNextOrderDue(reminder.date, now) && !hasNextOrderInProgress(patient.id, reminder.treatment, stock, batches),
   );
+}
 
-  return Boolean(nextContact && nextContact <= now && !receivedAfterCurrentStart);
+function requiresNewOrder(
+  patient: Patient,
+  portal: PatientPortalState | undefined,
+  stock: DemoStockItem[],
+  batches: DemoBatch[],
+  prescriptions: DemoPrescription[],
+) {
+  return hasPendingNextContact(patient, portal, stock, batches, prescriptions);
 }
 
 function hasPendingPayment(patient: Patient) {
@@ -376,6 +391,8 @@ export default function SecretariaPage() {
   const cardWasDragged = useRef(false);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
+  const [stockItems, setStockItems] = useState<DemoStockItem[]>([]);
+  const [batches, setBatches] = useState<DemoBatch[]>([]);
   const [context, setContext] = useState<SecretaryContext | null>(null);
   const [portals, setPortals] = useState<Record<string, PatientPortalState>>({});
   const [search, setSearch] = useState("");
@@ -390,6 +407,7 @@ export default function SecretariaPage() {
   );
   const [formError, setFormError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [draggedPatientId, setDraggedPatientId] = useState<string | null>(null);
   const [dragOverStatus, setDragOverStatus] = useState<PatientStatus | null>(null);
   const [abandoningPatient, setAbandoningPatient] = useState<Patient | null>(null);
@@ -397,6 +415,7 @@ export default function SecretariaPage() {
   const [abandonmentError, setAbandonmentError] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentDate, setPaymentDate] = useState(() => dateDaysAgo(0));
+  const [paymentAdditionalBottles, setPaymentAdditionalBottles] = useState(0);
   const [paymentNotes, setPaymentNotes] = useState("");
   const [savingPatient, setSavingPatient] = useState(false);
   const [kanbanMenuOpen, setKanbanMenuOpen] = useState(false);
@@ -407,17 +426,21 @@ export default function SecretariaPage() {
     void (async () => {
       try {
         const workspace = await loadSecretaryPatients();
-        const [loadedPortals, loadedPrescriptions] = await Promise.all([
+        const [loadedPortals, loadedPrescriptions, loadedStock, loadedBatches] = await Promise.all([
           loadSecretaryPortals(workspace.patients.map((patient) => patient.id)),
           loadSecretaryPrescriptions(workspace.context),
+          loadSecretaryStock(workspace.context),
+          loadSecretaryBatches(workspace.context),
         ]);
         if (!active) return;
         setContext(workspace.context);
         setPatients(workspace.patients.map(patientFromMedicalRecord));
         setPortals(loadedPortals);
         setPrescriptions(loadedPrescriptions);
+        setStockItems(loadedStock);
+        setBatches(loadedBatches);
       } catch {
-        if (active) setSuccessMessage("Não foi possível carregar a operação real da Secretaria.");
+        if (active) setLoadError("Não foi possível carregar os dados da Secretaria. Atualize a página e tente novamente.");
       }
     })();
     return () => { active = false; };
@@ -440,7 +463,7 @@ export default function SecretariaPage() {
 
   const summary = useMemo(() => {
     return {
-      newOrders: patients.filter(requiresNewOrder).length,
+      newOrders: patients.filter((patient) => requiresNewOrder(patient, portals[patient.id], stockItems, batches, prescriptions)).length,
       birthdays: patients.filter((patient) =>
         isBirthdayToday(patient.birthDate),
       ).length,
@@ -449,7 +472,7 @@ export default function SecretariaPage() {
         (patient) => patient.status === "concluido",
       ).length,
     };
-  }, [patients]);
+  }, [batches, patients, portals, prescriptions, stockItems]);
 
   const pendingAssessments = patients.reduce(
     (total, patient) => total + (portals[patient.id]?.assessments ?? []).filter((assessment) => !assessment.response).length,
@@ -480,7 +503,7 @@ export default function SecretariaPage() {
       let matchesFilter = true;
 
       if (filter === "novo-pedido") {
-        matchesFilter = requiresNewOrder(patient);
+        matchesFilter = requiresNewOrder(patient, portals[patient.id], stockItems, batches, prescriptions);
       }
 
       if (filter === "aniversario") {
@@ -497,8 +520,8 @@ export default function SecretariaPage() {
 
       const matchesKanbanStatus = kanbanStatusFilter === "todos" || patient.status === kanbanStatusFilter;
       const portal = portals[patient.id];
-      const nextContact = getNextContactDate(portal);
-      const isPendingNextContact = hasPendingNextContact(patient, portal);
+      const nextContact = getNextContactDate(patient, portal, stockItems, prescriptions);
+      const isPendingNextContact = hasPendingNextContact(patient, portal, stockItems, batches, prescriptions);
       const matchesNextContact =
         nextContactFilter === "todos" ||
         (nextContactFilter === "pendente" && isPendingNextContact) ||
@@ -516,15 +539,15 @@ export default function SecretariaPage() {
 
       const leftPortal = portals[left.id];
       const rightPortal = portals[right.id];
-      const leftPending = hasPendingNextContact(left, leftPortal);
-      const rightPending = hasPendingNextContact(right, rightPortal);
+      const leftPending = hasPendingNextContact(left, leftPortal, stockItems, batches, prescriptions);
+      const rightPending = hasPendingNextContact(right, rightPortal, stockItems, batches, prescriptions);
       if (leftPending !== rightPending) return leftPending ? -1 : 1;
 
-      const leftDate = getNextContactDate(leftPortal)?.getTime() ?? Number.POSITIVE_INFINITY;
-      const rightDate = getNextContactDate(rightPortal)?.getTime() ?? Number.POSITIVE_INFINITY;
+      const leftDate = getNextContactDate(left, leftPortal, stockItems, prescriptions)?.getTime() ?? Number.POSITIVE_INFINITY;
+      const rightDate = getNextContactDate(right, rightPortal, stockItems, prescriptions)?.getTime() ?? Number.POSITIVE_INFINITY;
       return leftDate - rightDate || left.name.localeCompare(right.name, "pt-BR", { sensitivity: "base" });
     });
-  }, [filter, kanbanStatusFilter, nextContactFilter, patients, portals, search, selectedDoctor, sortMode]);
+  }, [batches, filter, kanbanStatusFilter, nextContactFilter, patients, portals, prescriptions, search, selectedDoctor, sortMode, stockItems]);
 
   function openKanbanFilter(status: PatientStatus | "todos") {
     setKanbanStatusFilter(status);
@@ -624,6 +647,7 @@ export default function SecretariaPage() {
       abandonmentReason: patient.abandonmentReason ?? "",
     });
     setPaymentAmount("");
+    setPaymentAdditionalBottles(0);
     setPaymentNotes("");
     setFormError("");
     setShowPatientForm(true);
@@ -649,6 +673,8 @@ export default function SecretariaPage() {
 
     const payment: PatientPaymentRecord = {
       id: crypto.randomUUID(),
+      treatment: /bacteriana|imunobacteriana/i.test(newPatient.treatment) ? "Imunobacteriana" : "Rinite",
+      additionalBottles: Math.max(0, Math.trunc(paymentAdditionalBottles)),
       amount,
       paidAt: paymentDate,
       method: newPatient.paymentMethod,
@@ -664,6 +690,7 @@ export default function SecretariaPage() {
       payments: [payment, ...current.payments],
     }));
     setPaymentAmount("");
+    setPaymentAdditionalBottles(0);
     setPaymentNotes("");
     setFormError("");
   }
@@ -1122,6 +1149,19 @@ export default function SecretariaPage() {
             </div>
           )}
 
+          {loadError && (
+            <div role="alert" className="mt-4 flex items-center justify-between gap-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              <span>{loadError}</span>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="font-bold underline"
+              >
+                Recarregar
+              </button>
+            </div>
+          )}
+
           {/* Colunas do Kanban */}
 
           <section className="mt-6 overflow-x-auto pb-6">
@@ -1174,8 +1214,26 @@ export default function SecretariaPage() {
                       {columnPatients.map((patient) => {
                         const portal = portals[patient.id] ?? createDefaultPortalState(patient.id);
                         const currentBottle = portal.bottles.find((bottle) => bottle.status === "em-uso");
-                        const nextContact = getNextContactDate(portal);
-                        const showAlert = hasPendingNextContact(patient, portal);
+                        const nextContact = getNextContactDate(patient, portal, stockItems, prescriptions);
+                        const showAlert = hasPendingNextContact(patient, portal, stockItems, batches, prescriptions);
+                        const missingIdentity = missingPatientIdentity(patient);
+                        const patientPrescriptions = prescriptions.filter((item) => item.patientId === patient.id);
+                        const billingTreatments = patientPrescriptions.length
+                          ? Array.from(new Set(patientPrescriptions.map((item) => item.treatment)))
+                          : [patient.treatment];
+                        const billingStates = billingTreatments.map((treatment) => getBottleBillingState(patient, treatment, stockItems, batches));
+                        const configuredBillingStates = billingStates.filter((state) => state.coveredBottles > 0);
+                        const newChargeNeeded = configuredBillingStates.some((state) => state.deliveredBottles >= state.coveredBottles);
+                        const billingLabel = configuredBillingStates.length === 0
+                          ? "Cobrança não configurada"
+                          : newChargeNeeded
+                            ? "Nova cobrança necessária"
+                            : "Cobrança em dia";
+                        const deliveredBottleCount = stockItems
+                          .filter((item) => item.patientId === patient.id && item.status === "entregue")
+                          .reduce((total, item) => total + Math.max(0, Math.trunc(item.bottles)), 0);
+                        const bottlesReceived = Math.max(patient.bottlesReceived, deliveredBottleCount);
+                        const orderInProgress = hasAnyOrderInProgress(patient.id, stockItems, batches);
 
                         return (
                           <article
@@ -1260,17 +1318,18 @@ export default function SecretariaPage() {
                                 <span className="font-semibold">
                                   Próximo pedido/contato:
                                 </span>{" "}
-                                {nextContact ? nextContact.toLocaleDateString("pt-BR") : "Aguardando início do frasco"}
+                                {orderInProgress ? "Pedido em andamento" : nextContact ? nextContact.toLocaleDateString("pt-BR") : "Aguardando recebimento do frasco"}
                               </p>
 
                               <p>
                                 <span className="font-semibold">
                                   Frascos recebidos:
                                 </span>{" "}
-                                {patient.bottlesReceived}
+                                {bottlesReceived}
                               </p>
                               <p><span className="font-semibold">Frascos iniciados:</span> {portal.bottles.length}</p>
                               <p><span className="font-semibold">Frasco atual:</span> {currentBottle ? currentBottle.number : "Nenhum"}</p>
+                              <p><span className="font-semibold">Cobrança:</span> <span className={newChargeNeeded ? "font-bold text-[#a3113a]" : configuredBillingStates.length ? "font-semibold text-[#187157]" : "font-semibold text-[#966419]"}>{billingLabel}</span></p>
                               <p><span className="font-semibold">Status:</span> {column.title}</p>
                               {patient.status === "desistente" && patient.abandonmentReason && (
                                 <p className="rounded-xl bg-[#fdf0ee] px-3 py-2 text-[#9b5047]">
@@ -1748,6 +1807,11 @@ export default function SecretariaPage() {
                     <input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142]" />
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
+                    Frascos adicionais liberados
+                    <input type="number" min="0" step="1" value={paymentAdditionalBottles} onChange={(event) => setPaymentAdditionalBottles(Math.max(0, Math.trunc(Number(event.target.value))))} className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142]" />
+                    <span className="mt-1 block text-[11px] font-normal text-[#817578]">0 para parcela sem nova cota.</span>
+                  </label>
+                  <label className="text-sm font-medium text-[#544449]">
                     Observação
                     <input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: 2º frasco" className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142]" />
                   </label>
@@ -1763,10 +1827,16 @@ export default function SecretariaPage() {
                     <article key={payment.id} className="flex flex-col gap-2 rounded-xl bg-[#fbf5f2] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
                       <div>
                         <p className="text-sm font-bold text-[#433438]">{formatCurrency(payment.amount)}</p>
-                        <p className="mt-1 text-xs text-[#716569]">{formatDate(payment.paidAt)} · {payment.method}{payment.installments ? ` · ${payment.installments}x` : ""}</p>
+                        <p className="mt-1 text-xs text-[#716569]">{formatDate(payment.paidAt)} · {payment.method}{payment.installments ? ` · ${payment.installments}x` : ""}{payment.additionalBottles ? ` · +${payment.additionalBottles} frasco(s)` : ""}</p>
                         {payment.notes && <p className="mt-1 text-xs text-[#817578]">{payment.notes}</p>}
                       </div>
-                      <button type="button" onClick={() => setNewPatient((current) => ({ ...current, payments: current.payments.filter((item) => item.id !== payment.id) }))} className="self-start rounded-lg bg-[#fff1f3] px-3 py-2 text-xs font-semibold text-[#a3113a]">
+                      <button type="button" disabled={Boolean(payment.additionalBottles)} title={payment.additionalBottles ? "Edite esse pagamento em Cadastros para validar o saldo de frascos." : undefined} onClick={() => {
+                        if (payment.additionalBottles) {
+                          setFormError("Esse pagamento libera frascos. Edite ou remova em Cadastros, onde o sistema confere se essa cota já foi usada.");
+                          return;
+                        }
+                        setNewPatient((current) => ({ ...current, payments: current.payments.filter((item) => item.id !== payment.id) }));
+                      }} className="self-start rounded-lg bg-[#fff1f3] px-3 py-2 text-xs font-semibold text-[#a3113a] disabled:cursor-not-allowed disabled:opacity-50">
                         Remover
                       </button>
                     </article>

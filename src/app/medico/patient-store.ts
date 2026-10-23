@@ -507,6 +507,7 @@ export function openDemoInvoicePdf(invoice: DemoInvoice) {
   if (typeof window === "undefined") return false;
 
   try {
+    if (typeof invoice.fileData !== "string") return false;
     const encoded = invoice.fileData.split(",")[1];
     if (!encoded) return false;
 

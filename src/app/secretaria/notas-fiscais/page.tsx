@@ -24,7 +24,10 @@ function normalizeCpf(value: unknown) {
 }
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "data não informada"
+    : new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(date);
 }
 
 function formatSize(value: number) {
@@ -67,8 +70,8 @@ export default function SecretariaNotasFiscaisPage() {
 
     return invoices.filter((invoice) =>
       !text ||
-      invoice.patientName.toLowerCase().includes(text) ||
-      invoice.fileName.toLowerCase().includes(text) ||
+      String(invoice.patientName ?? "").toLowerCase().includes(text) ||
+      String(invoice.fileName ?? "").toLowerCase().includes(text) ||
       normalizeCpf(invoice.patientCpf).includes(normalized),
     );
   }, [invoices, search]);
@@ -93,19 +96,24 @@ export default function SecretariaNotasFiscaisPage() {
     const data = new Uint8Array(await file.arrayBuffer());
     const pdf = await getDocument({ data }).promise;
     const pages: string[] = [];
-
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      const page = await pdf.getPage(pageNumber);
-      const content = await page.getTextContent();
-      pages.push(
-        content.items
-          .map((item) => ("str" in item ? item.str : ""))
-          .join(" "),
-      );
+    try {
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+        const page = await pdf.getPage(pageNumber);
+        const content = await page.getTextContent();
+        pages.push(
+          (content.items ?? [])
+            .map((item) => {
+              if (!item || typeof item !== "object") return "";
+              const text = (item as { str?: unknown }).str;
+              return typeof text === "string" ? text : "";
+            })
+            .join(" "),
+        );
+      }
+      return pages.join(" ");
+    } finally {
+      pdf.cleanup();
     }
-
-    pdf.cleanup();
-    return pages.join(" ");
   }
 
   async function uploadInvoice(event: ChangeEvent<HTMLInputElement>) {
@@ -128,7 +136,14 @@ export default function SecretariaNotasFiscaisPage() {
 
     setUploading(true);
     try {
-      const pdfText = await extractPdfText(file);
+      let pdfText = "";
+      let extractionFailed = false;
+      try {
+        pdfText = await extractPdfText(file);
+      } catch {
+        // Preserve o PDF para a Secretaria vincular manualmente se a extração falhar.
+        extractionFailed = true;
+      }
       const normalizedText = normalizeCpf(pdfText);
       const matchingPatients = patients.filter((record) => {
         const patientCpf = normalizeCpf(record.cpf);
@@ -144,7 +159,13 @@ export default function SecretariaNotasFiscaisPage() {
         fileName: file.name, fileData, fileSize: file.size, uploadedAt: new Date().toISOString(), uploadedBy: "Secretaria CRA", assignmentStatus: status,
       })));
       setInvoices((current) => [...savedInvoices, ...current]);
-      setMessage(status === "vinculada" ? `${file.name} vinculado automaticamente a ${matchingPatients[0].name}.` : status === "em_analise" ? `${file.name} apareceu para ${matchingPatients.length} pacientes e aguarda confirmação da Secretaria.` : `${file.name} foi salvo como pendente para vinculação manual.`);
+      setMessage(status === "vinculada"
+        ? `${file.name} vinculado automaticamente a ${matchingPatients[0].name}.`
+        : status === "em_analise"
+          ? `${file.name} apareceu para ${matchingPatients.length} pacientes e aguarda confirmação da Secretaria.`
+          : extractionFailed || !pdfText.trim()
+            ? `${file.name} foi armazenado, mas não foi possível extrair texto pesquisável. Ele está pendente para vinculação manual.`
+            : `${file.name} foi salvo como pendente para vinculação manual.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível armazenar a nota neste navegador.");
     } finally {

@@ -205,6 +205,7 @@ function paymentFromRow(row: Record<string, unknown>): PatientPaymentRecord {
       ? "Imunobacteriana"
       : text(row.treatment) ? "Rinite" : undefined,
     bottlePlanId: text(row.bottle_reference) || undefined,
+    additionalBottles: number(row.additional_bottles),
     amount: number(row.amount),
     paidAt: text(row.paid_at) || text(row.due_at),
     method: text(row.payment_method, "A definir"),
@@ -360,6 +361,7 @@ export async function saveSecretaryPatient(
       notes: payment.notes ?? null,
       treatment: payment.treatment ?? null,
       bottle_reference: payment.bottlePlanId ?? null,
+      additional_bottles: Math.max(0, Math.trunc(payment.additionalBottles ?? 0)),
     };
     if (isUuid(payment.id)) {
       const { error: paymentError } = await supabase.from("payments").upsert({ id: payment.id, ...payload });
@@ -403,7 +405,13 @@ export async function saveSecretaryTreatmentFinance(
     .single();
   if (saveError || !saved) throw saveError ?? new Error("O financeiro não foi gravado. Tente novamente.");
   const persisted = objectValue(saved.financial).treatmentPayments;
-  if (!Array.isArray(persisted) || !persisted.some((item) => objectValue(item).treatment === payment.treatment)) {
+  const persistedPayment = Array.isArray(persisted)
+    ? persisted.map(objectValue).find((item) => item.treatment === payment.treatment)
+    : undefined;
+  const valuesToConfirm = Object.entries(payment).filter(([, value]) => value !== undefined);
+  const hasAllSavedValues = Boolean(persistedPayment)
+    && valuesToConfirm.every(([key, value]) => Object.is(persistedPayment?.[key], value));
+  if (!hasAllSavedValues) {
     throw new Error("Não foi possível confirmar o financeiro salvo. Atualize a página antes de tentar novamente.");
   }
   void audit(context, "update", "patient_financial", patientId, { treatment: payment.treatment });
@@ -958,6 +966,7 @@ export async function confirmSecretaryBatch(
       status: "disponivel",
       paymentConfirmedAt: item.paymentConfirmedAt,
       asaasConfirmedAt: item.asaasConfirmedAt,
+      additionalPaidBottles: item.additionalPaidBottles,
     });
     stockItems.push(saved);
   }

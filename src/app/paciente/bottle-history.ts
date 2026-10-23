@@ -21,7 +21,7 @@ export type BottleHistoryEntry = {
 };
 
 export function buildBottleHistory(
-  patient: DemoPatientRecord,
+  patient: Pick<DemoPatientRecord, "id" | "bottlesReceived" | "lastReceivedDate">,
   portal: PatientPortalState,
   stock: DemoStockItem[],
   prescriptions: DemoPrescription[] = [],

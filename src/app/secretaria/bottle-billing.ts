@@ -26,7 +26,7 @@ function positiveInteger(value?: number) {
 }
 
 export function getBottleBillingState(
-  patient: DemoPatientRecord,
+  patient: Pick<DemoPatientRecord, "id" | "treatmentPayments" | "payments">,
   treatment: string,
   stockItems: DemoStockItem[],
   batches: DemoBatch[],
