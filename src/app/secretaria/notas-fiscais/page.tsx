@@ -19,8 +19,8 @@ import {
   SecretaryContext,
 } from "../../../lib/supabase/secretary-records";
 
-function normalizeCpf(value: string) {
-  return value.replace(/\D/g, "");
+function normalizeCpf(value: unknown) {
+  return typeof value === "string" ? value.replace(/\D/g, "") : "";
 }
 
 function formatDate(value: string) {
@@ -130,9 +130,10 @@ export default function SecretariaNotasFiscaisPage() {
     try {
       const pdfText = await extractPdfText(file);
       const normalizedText = normalizeCpf(pdfText);
-      const matchingPatients = patients.filter((record) =>
-        normalizedText.includes(normalizeCpf(record.cpf)),
-      );
+      const matchingPatients = patients.filter((record) => {
+        const patientCpf = normalizeCpf(record.cpf);
+        return patientCpf.length === 11 && normalizedText.includes(patientCpf);
+      });
 
       if (!context) throw new Error("A sessão da Secretaria ainda não foi carregada.");
       const fileData = await readFile(file);
