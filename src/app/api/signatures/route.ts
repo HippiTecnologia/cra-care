@@ -3,7 +3,6 @@ import { createHash, randomBytes, randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { authenticatedSignatureUser, requestMetadata } from "../../../lib/signatures/auth";
 import { writeSignatureAudit } from "../../../lib/signatures/audit";
-import { prepareA1Pdf } from "../../../lib/signatures/a1";
 import { buildVerifiablePrescriptionPdf, loadPrescriptionDocument } from "../../../lib/signatures/documents";
 import { getSignatureProvider, listSignatureProviders } from "../../../lib/signatures/providers";
 import { allowSignatureRequest } from "../../../lib/signatures/rate-limit";
@@ -50,9 +49,10 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as { documentType?: string; documentId?: string; provider?: string; certificateType?: CertificateType; signerUserId?: string };
     if (body.documentType !== "prescription" || !body.documentId) return NextResponse.json({ error: "Documento não suportado." }, { status: 400 });
-    const provider = getSignatureProvider(body.provider ?? "vidaas");
+    if (body.provider === "a1") return NextResponse.json({ error: "O Hippi foi substituído pela Certillion. Selecione Certillion (A3)." }, { status: 409 });
+    const provider = getSignatureProvider(body.provider ?? "a3");
     if (!provider) return NextResponse.json({ error: "Provedor de assinatura inválido." }, { status: 400 });
-    const certificateType = body.certificateType ?? "cloud";
+    const certificateType = body.certificateType ?? "a3";
     if (!provider.certificateTypes.includes(certificateType)) return NextResponse.json({ error: "O tipo de certificado não é compatível com o provedor selecionado." }, { status: 400 });
     const source = await loadPrescriptionDocument(user.clinicId, body.documentId);
     const signerId = body.signerUserId ?? source.signerId;
@@ -62,11 +62,16 @@ export async function POST(request: NextRequest) {
     const admin = getSupabaseAdminClient();
     const { data: existing } = await (admin.from("digital_signatures") as any).select("*").eq("clinic_id", user.clinicId).eq("document_type", body.documentType).eq("document_id", body.documentId).eq("signer_user_id", signerId).maybeSingle();
     if (existing?.status === "signed") return NextResponse.json({ error: "Este documento já está assinado." }, { status: 409 });
+    if (existing?.provider === "a3") {
+      const certillion = existing.provider_data?.certillion;
+      if (certillion?.transaction || certillion?.signatureSubmissionInFlight || !["cancelled", "expired", "rejected"].includes(existing.status)) {
+        return NextResponse.json({ error: "Esta receita já possui uma solicitação A3. Continue pelo botão Assinar do documento existente para evitar uma assinatura duplicada." }, { status: 409 });
+      }
+    }
     const validationCode = existing?.validation_code ?? randomBytes(16).toString("hex").toUpperCase();
     const generatedPdf = await buildVerifiablePrescriptionPdf(source.document, validationCode);
-    // The A1 connector must sign this exact prepared file. Keeping the placeholder
-    // here lets the server later prove that no byte outside the CMS envelope changed.
-    const pdf = provider.key === "a1" ? await prepareA1Pdf(Buffer.from(generatedPdf)) : generatedPdf;
+    if (provider.key === "a3" && generatedPdf.byteLength > 100_000) throw new Error("O PDF da receita excede o limite de 100 KB da conta Certillion.");
+    const pdf = generatedPdf;
     const documentHash = createHash("sha256").update(pdf).digest("hex");
     const signatureId = existing?.id ?? randomUUID();
     const storagePath = `${user.clinicId}/${signatureId}/original-${documentHash.slice(0, 12)}.pdf`;
@@ -80,8 +85,14 @@ export async function POST(request: NextRequest) {
       signer_user_id: signerId, requested_by: user.id, provider: provider.key, certificate_type: certificateType,
       original_storage_path: storagePath, document_hash: documentHash, validation_code: validationCode,
       status: "awaiting_signature", requested_at: now, updated_at: now, error_code: null, error_message: null,
+      provider_state: null, provider_data: {}, provider_transaction_id: null, provider_signature_id: null,
+      signed_storage_path: null, signed_document_hash: null, validation_result: {},
+      authenticated_at: null, signed_at: null, validated_at: null, expires_at: null,
     };
-    const { data: saved, error } = await (admin.from("digital_signatures") as any).upsert(payload, { onConflict: "clinic_id,document_type,document_id,signer_user_id" }).select("*").single();
+    const mutation = existing
+      ? (admin.from("digital_signatures") as any).update(payload).eq("id", existing.id).eq("clinic_id", user.clinicId).eq("updated_at", existing.updated_at)
+      : (admin.from("digital_signatures") as any).insert(payload);
+    const { data: saved, error } = await mutation.select("*").single();
     if (error) throw error;
     const meta = requestMetadata(request);
     await writeSignatureAudit({ signatureId: saved.id, clinicId: user.clinicId, event: "signature_requested", status: "awaiting_signature", actorId: user.id, provider: provider.key, metadata: { documentType: body.documentType, documentHash }, ...meta });

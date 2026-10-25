@@ -1,8 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { X509Certificate } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { authenticatedSignatureUser } from "../../../../../lib/signatures/auth";
-import { certificateFingerprintFromDer } from "../../../../../lib/signatures/a1";
 import { getSupabaseAdminClient } from "../../../../../lib/supabase/admin";
 
 function isAdmin(role: string) {
@@ -23,27 +21,6 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const user = await authenticatedSignatureUser(request);
-  if (!user || !isAdmin(user.role)) return NextResponse.json({ error: "Apenas administradores podem vincular um certificado A1." }, { status: 403 });
-  try {
-    const body = await request.json() as { doctorUserId?: string; certificateDerBase64?: string };
-    if (!body.doctorUserId || !body.certificateDerBase64) return NextResponse.json({ error: "Médico e certificado são obrigatórios." }, { status: 400 });
-    const der = Buffer.from(body.certificateDerBase64, "base64");
-    if (!der.length || der.length > 1024 * 1024) return NextResponse.json({ error: "Certificado inválido." }, { status: 400 });
-    const certificate = new X509Certificate(der);
-    const admin = getSupabaseAdminClient();
-    const { data: doctor } = await (admin.from("profiles") as any).select("id, full_name").eq("id", body.doctorUserId).eq("clinic_id", user.clinicId).eq("role", "medico").maybeSingle();
-    if (!doctor) return NextResponse.json({ error: "Médico não encontrado nesta clínica." }, { status: 404 });
-    const payload = {
-      clinic_id: user.clinicId, doctor_user_id: doctor.id,
-      certificate_fingerprint: certificateFingerprintFromDer(der),
-      certificate_serial: certificate.serialNumber.replace(/:/g, "").toUpperCase(),
-      certificate_subject: certificate.subject, certificate_issuer: certificate.issuer,
-      active: true, enrolled_by: user.id, revoked_at: null,
-    };
-    const { data: saved, error } = await (admin.from("doctor_a1_certificates") as any).upsert(payload, { onConflict: "clinic_id,doctor_user_id,certificate_fingerprint" }).select("*").single();
-    if (error) throw error;
-    return NextResponse.json({ certificate: saved, doctor: { id: doctor.id, name: doctor.full_name } }, { status: 201 });
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Não foi possível vincular o certificado." }, { status: 400 });
-  }
+  if (!user) return NextResponse.json({ error: "Acesso não autorizado." }, { status: 401 });
+  return NextResponse.json({ error: "O vínculo do Hippi A1 foi substituído pela conexão com a Certillion. Use Conectar certificado A3." }, { status: 410 });
 }

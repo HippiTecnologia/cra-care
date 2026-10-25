@@ -361,86 +361,74 @@ export default function MedicalPatientPage() {
     }
   }
 
-  async function startVidaasSignature(targetPrescription = selectedPrescription) {
-    if (!targetPrescription || !doctor) {
-      setError("Preencha a receita antes de iniciar a assinatura digital.");
-      return;
-    }
-
-    if (targetPrescription.signatureStatus === "signed") {
-      setMessage("Esta receita já está assinada digitalmente.");
-      return;
-    }
-
+  async function startCertillionSignature(targetPrescription: DemoPrescription, signatureWindow: Window | null) {
+    if (!doctor || !targetPrescription) { signatureWindow?.close(); return; }
+    if (targetPrescription.signatureStatus === "signed") { signatureWindow?.close(); setMessage("Esta receita já está assinada digitalmente."); return; }
+    setSignatureStarting(true); setError("");
     try {
-      setSignatureStarting(true);
       const { data: session } = await getSupabaseClient().auth.getSession();
       if (!session.session?.access_token) throw new Error("Sua sessão médica expirou. Entre novamente para assinar.");
-      const response = await fetch("/api/assinatura/vidaas/iniciar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.session.access_token}` },
-        body: JSON.stringify({ prescriptionId: targetPrescription.id }),
-      });
-      const payload = await response.json() as { authorizationUrl?: string; error?: string };
-      if (!response.ok || !payload.authorizationUrl) throw new Error(payload.error ?? "Não foi possível iniciar o VIDaaS.");
-      const signatureWindow = window.open(payload.authorizationUrl, "vidaas-assinatura", "popup,width=620,height=760");
-      if (!signatureWindow) throw new Error("Permita a abertura da janela do VIDaaS para exibir o QR Code.");
-      setMessage("QR Code VIDaaS aberto. O médico deve ler e autorizar a assinatura no aplicativo.");
-      setError("");
+      const headers = { "Content-Type": "application/json", Authorization: `Bearer ${session.session.access_token}` };
+      const prepared = await fetch("/api/signatures", { method: "POST", headers, body: JSON.stringify({ documentType: "prescription", documentId: targetPrescription.id, provider: "a3", certificateType: "a3" }) });
+      const preparedPayload = await prepared.json();
+      let signatureId: string | undefined = preparedPayload.signature?.id;
+      if (!prepared.ok) {
+        if (prepared.status !== 409) throw new Error(preparedPayload.error ?? "Não foi possível preparar a receita.");
+        const existingResponse = await fetch("/api/signatures", { headers });
+        const existingPayload = await existingResponse.json();
+        const existing = existingResponse.ok ? existingPayload.signatures?.find((item: { document_id: string; provider: string }) => item.document_id === targetPrescription.id && item.provider === "a3") : null;
+        if (!existing) throw new Error(preparedPayload.error ?? "Confira a solicitação na tela Assinatura Digital.");
+        signatureId = existing.id;
+        if (existing.status === "signed") {
+          signatureWindow?.close();
+          setPrescriptions((current) => current.map((item) => item.id === targetPrescription.id ? { ...item, signatureStatus: "signed" } : item));
+          setMessage("Esta receita já está assinada e validada pela Certillion."); setSignatureStarting(false); return;
+        }
+      }
+      if (!signatureId) throw new Error("A solicitação de assinatura não foi encontrada.");
+      const response = await fetch(`/api/signatures/${signatureId}/start`, { method: "POST", headers });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Não foi possível iniciar a assinatura Certillion.");
+      if (payload.kind === "completed") {
+        signatureWindow?.close();
+        setPrescriptions((current) => current.map((item) => item.id === targetPrescription.id ? { ...item, signatureStatus: "signed" } : item));
+        setMessage("Receita assinada e validada pela Certillion. O PDF assinado está disponível em Assinatura Digital.");
+        setSignatureStarting(false); return;
+      }
+      if (!payload.authorizationUrl || !signatureWindow) throw new Error("Permita a abertura da janela para autorizar o A3.");
+      signatureWindow.location.href = payload.authorizationUrl;
+      setMessage("Selecione seu certificado A3 e autorize a assinatura no aplicativo Certillion.");
       const interval = window.setInterval(async () => {
         try {
-          const statusResponse = await fetch(`/api/assinatura/vidaas/status?prescriptionId=${encodeURIComponent(targetPrescription.id)}`, { headers: { Authorization: `Bearer ${session.session?.access_token}` } });
-          const statusPayload = await statusResponse.json() as { signature?: { status?: string; error_message?: string; certificate_alias?: string } | null };
+          const statusResponse = await fetch(`/api/signatures/${signatureId}`, { headers });
+          const statusPayload = await statusResponse.json();
           const status = statusPayload.signature?.status;
           if (status === "signed") {
             window.clearInterval(interval);
             setPrescriptions((current) => current.map((item) => item.id === targetPrescription.id ? { ...item, signatureStatus: "signed" } : item));
-            setMessage(`Receita assinada com certificado ICP-Brasil${statusPayload.signature?.certificate_alias ? ` (${statusPayload.signature.certificate_alias})` : ""}.`);
+            setMessage("Receita assinada e validada pela Certillion. O PDF assinado está disponível em Assinatura Digital.");
             setSignatureStarting(false);
-          }
-          if (["failed", "rejected", "expired"].includes(status ?? "")) {
+          } else if (["error", "invalid", "rejected", "expired", "cancelled"].includes(status ?? "")) {
             window.clearInterval(interval);
-            setError(statusPayload.signature?.error_message ?? "A assinatura VIDaaS não foi concluída.");
+            setError(statusPayload.signature?.error_message ?? "A assinatura não foi concluída. Consulte a tela Assinatura Digital.");
             setSignatureStarting(false);
           }
-        } catch { /* a consulta será repetida até o prazo da sessão */ }
+        } catch { /* A consulta será repetida até o prazo da autorização. */ }
       }, 2500);
       window.setTimeout(() => { window.clearInterval(interval); setSignatureStarting(false); }, 15 * 60_000);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Não foi possível iniciar a assinatura VIDaaS.");
+      signatureWindow?.close();
+      setError(cause instanceof Error ? cause.message : "Não foi possível iniciar a assinatura Certillion.");
       setSignatureStarting(false);
     }
   }
 
   async function createAndSignPrescription() {
+    const signatureWindow = window.open("about:blank", "cra-care-assinatura", "popup,width=620,height=760");
+    if (!signatureWindow) { setError("Permita a abertura da janela para autorizar o certificado A3."); return; }
     const prescription = selectedPrescription ?? await createPrescription();
-    if (prescription) await startVidaasSignature(prescription);
-  }
-
-  async function startDemonstrationSignature() {
-    if (!selectedPrescription || !doctor) {
-      setError("Gere a receita antes de executar a demonstração.");
-      return;
-    }
-    try {
-      setSignatureStarting(true);
-      const { data: session } = await getSupabaseClient().auth.getSession();
-      if (!session.session?.access_token) throw new Error("Sua sessão médica expirou. Entre novamente para continuar.");
-      const response = await fetch("/api/assinatura/demonstracao", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.session.access_token}` },
-        body: JSON.stringify({ prescriptionId: selectedPrescription.id }),
-      });
-      const payload = await response.json() as { message?: string; error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "Não foi possível concluir a demonstração.");
-      setPrescriptions((current) => current.map((item) => item.id === selectedPrescription.id ? { ...item, signatureStatus: "demo" } : item));
-      setMessage(payload.message ?? "Demonstração concluída.");
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Não foi possível concluir a demonstração.");
-    } finally {
-      setSignatureStarting(false);
-    }
+    if (prescription) await startCertillionSignature(prescription, signatureWindow);
+    else signatureWindow.close();
   }
 
   async function saveClinicalRecord() {

@@ -40,14 +40,15 @@ function DigitalSignatureContent() {
   const [availableDocuments, setAvailableDocuments] = useState<AvailableDocument[]>([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState(prescriptionId);
   const [role, setRole] = useState("");
-  const [provider, setProvider] = useState("vidaas");
-  const [certificateType, setCertificateType] = useState("cloud");
+  const [provider, setProvider] = useState("a3");
+  const [certificateType, setCertificateType] = useState("a3");
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [a3Session, setA3Session] = useState<{ connected: boolean; expiresAt: number | null }>({ connected: false, expiresAt: null });
 
   async function authFetch(url: string, init?: RequestInit) {
     const { data } = await getSupabaseClient().auth.getSession();
@@ -57,7 +58,8 @@ function DigitalSignatureContent() {
 
   async function load() {
     try {
-      const response = await authFetch("/api/signatures");
+      const [response, sessionResponse] = await Promise.all([authFetch("/api/signatures"), authFetch("/api/assinatura/certillion/conectar")]);
+      if (sessionResponse.ok) setA3Session(await sessionResponse.json());
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Não foi possível carregar as assinaturas.");
       const documents = payload.availableDocuments ?? [];
@@ -68,6 +70,20 @@ function DigitalSignatureContent() {
   }
 
   useEffect(() => { void load(); }, []);
+
+  useEffect(() => {
+    const onSignatureFinished = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin || event.data?.type !== "certillion-signature-finished") return;
+      setWorking(false);
+      if (event.data.ok) { setError(""); setMessage(event.data.message ?? "Assinatura A3 concluída."); }
+      else { setMessage(""); setError(event.data.message ?? "Não foi possível concluir a assinatura A3."); }
+      void load();
+    };
+    const onFocus = () => { void load(); };
+    window.addEventListener("message", onSignatureFinished);
+    window.addEventListener("focus", onFocus);
+    return () => { window.removeEventListener("message", onSignatureFinished); window.removeEventListener("focus", onFocus); };
+  }, []);
 
   const selectedProvider = providers.find((item) => item.key === provider);
   useEffect(() => {
@@ -94,48 +110,37 @@ function DigitalSignatureContent() {
   }
 
   async function startSignature(row: SignatureRow) {
+    const authorizationPopup = row.provider === "a3" ? window.open("about:blank", "cra-care-assinatura", "popup,width=620,height=760") : null;
     setWorking(true); setError(""); setMessage("");
     try {
       const response = await authFetch(`/api/signatures/${row.id}/start`, { method: "POST" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Não foi possível iniciar a assinatura.");
       if (payload.kind === "redirect" && payload.authorizationUrl) {
-        const popup = window.open(payload.authorizationUrl, "cra-care-assinatura", "popup,width=620,height=760");
+        const popup = authorizationPopup ?? window.open(payload.authorizationUrl, "cra-care-assinatura", "popup,width=620,height=760");
         if (!popup) throw new Error("Permita a abertura da janela para autenticar o certificado.");
+        popup.location.href = payload.authorizationUrl;
         setMessage("Autenticação aberta. Autorize a assinatura no provedor.");
-        const timer = window.setInterval(async () => {
-          await load();
-          const current = rows.find((item) => item.id === row.id);
-          if (current && ["signed", "error", "invalid", "rejected", "expired"].includes(current.status)) window.clearInterval(timer);
-        }, 3000);
-        window.setTimeout(() => window.clearInterval(timer), 15 * 60_000);
-      } else if (payload.connector === "hippi-a1" && payload.endpoint) {
-        const tokenKey = "cra-care-hippi-a1-token";
-        let token = window.localStorage.getItem(tokenKey) ?? "";
-        if (!token) {
-          token = window.prompt("Cole o código de pareamento exibido no Hippi Assinador A1:")?.trim() ?? "";
-          if (!token) throw new Error("Código de pareamento do Hippi não informado.");
-          window.localStorage.setItem(tokenKey, token);
-        }
-        const originalResponse = await authFetch(`/api/signatures/${row.id}/download`);
-        if (!originalResponse.ok) throw new Error("Não foi possível carregar o PDF preparado.");
-        const originalBytes = new Uint8Array(await originalResponse.arrayBuffer());
-        let binary = "";
-        for (let index = 0; index < originalBytes.length; index += 0x8000) binary += String.fromCharCode(...originalBytes.subarray(index, index + 0x8000));
-        const signResponse = await fetch(`${payload.endpoint}/sign`, { method: "POST", headers: { "Content-Type": "application/json", "X-Hippi-Connector-Token": token }, body: JSON.stringify({ pdfBase64: window.btoa(binary) }) });
-        const signedPayload = await signResponse.json();
-        if (signResponse.status === 401) { window.localStorage.removeItem(tokenKey); throw new Error("Código do Hippi inválido ou expirado. Clique novamente e informe o código atual."); }
-        if (!signResponse.ok || !signedPayload.signedPdfBase64) throw new Error(signedPayload.error ?? "O Hippi não conseguiu assinar o PDF.");
-        const certificateResponse = await fetch(`${payload.endpoint}/certificate`, { headers: { "X-Hippi-Connector-Token": token } });
-        const certificatePayload = await certificateResponse.json();
-        if (!certificateResponse.ok || !certificatePayload.certificateDerBase64) throw new Error(certificatePayload.error ?? "Não foi possível obter o certificado público do Hippi.");
-        const finishResponse = await authFetch(`/api/signatures/${row.id}/a1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ signedPdfBase64: signedPayload.signedPdfBase64, certificateDerBase64: certificatePayload.certificateDerBase64 }) });
-        const finishPayload = await finishResponse.json();
-        if (!finishResponse.ok) throw new Error(finishPayload.error ?? "Não foi possível receber o PDF assinado.");
-        setMessage("PDF assinado pelo Hippi e recebido pelo CRA Care. A validação ICP-Brasil será concluída antes do status final.");
+      } else if (payload.kind === "completed") {
+        authorizationPopup?.close();
+        setMessage(payload.message ?? "Documento assinado e validado.");
         await load();
-      } else setMessage(payload.message ?? "Conclua a autorização no conector oficial.");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível iniciar a assinatura."); }
+      } else { authorizationPopup?.close(); setMessage(payload.message ?? "Conclua a autorização no conector oficial."); }
+    } catch (cause) { authorizationPopup?.close(); setError(cause instanceof Error ? cause.message : "Não foi possível iniciar a assinatura."); }
+    finally { setWorking(false); }
+  }
+
+  async function connectCertificate() {
+    const popup = window.open("about:blank", "cra-care-assinatura", "popup,width=620,height=760");
+    if (!popup) { setError("Permita a abertura da janela para conectar o certificado A3."); return; }
+    setWorking(true); setError(""); setMessage("");
+    try {
+      const response = await authFetch("/api/assinatura/certillion/conectar", { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok || !payload.authorizationUrl) throw new Error(payload.error ?? "Não foi possível conectar o certificado.");
+      popup.location.href = payload.authorizationUrl;
+      setMessage("Selecione seu A3 e autorize a sessão no aplicativo Certillion.");
+    } catch (cause) { popup.close(); setError(cause instanceof Error ? cause.message : "Não foi possível conectar o certificado."); }
     finally { setWorking(false); }
   }
 
@@ -176,6 +181,7 @@ function DigitalSignatureContent() {
     <section className="mx-auto max-w-7xl space-y-6 px-5 py-8 sm:px-10">
       {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
       {message && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">{message}</div>}
+      {role === "medico" && <section className="rounded-3xl border border-blue-200 bg-white p-6 shadow-sm" aria-label="Certificado A3"><h2 className="text-lg font-bold">Certillion · Certificado A3</h2><p className="mt-2 text-sm text-slate-600">Conecte o token ou cartão no computador e abra o aplicativo Certillion. Autorize uma vez para assinar as receitas durante a sessão.</p><div className="mt-4 flex flex-wrap items-center gap-3"><button type="button" disabled={working || !providers.some((item) => item.key === "a3" && item.configured)} onClick={connectCertificate} className="rounded-xl bg-[#17356e] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{a3Session.connected ? "Reconectar certificado" : "Conectar certificado A3"}</button><a href="https://download.certillion.com/" target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-700 underline">Instalar aplicativo Certillion</a><span className={a3Session.connected ? "text-sm text-emerald-700" : "text-sm text-slate-500"} role="status">{a3Session.connected ? `A3 conectado até ${formatDate(new Date(a3Session.expiresAt!).toISOString())}` : "Certificado ainda não conectado neste navegador"}</span></div></section>}
       <div className="grid gap-4 sm:grid-cols-3">{[["Pendentes", counts.pending, "text-amber-600"], ["Assinados", counts.signed, "text-emerald-600"], ["Cancelados", counts.cancelled, "text-slate-500"]].map(([label, value, color]) => <div key={String(label)} className="rounded-3xl border border-[#dde4ef] bg-white p-6 shadow-sm"><p className="text-sm text-slate-500">{label}</p><p className={`mt-2 text-4xl font-bold ${color}`}>{value}</p></div>)}</div>
       {(availableDocuments.length > 0 || prescriptionId) && <div className="rounded-3xl border border-[#cfd9ea] bg-white p-6 shadow-sm"><h2 className="text-lg font-bold">Solicitar assinatura da receita</h2><p className="mt-1 text-sm text-slate-500">Confira o documento, o provedor e o tipo de certificado antes de continuar.</p><div className="mt-5 grid gap-4 lg:grid-cols-[1.4fr_1fr_1fr_auto]"><label className="text-sm font-semibold">Documento<select value={selectedDocumentId} onChange={(event) => setSelectedDocumentId(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 p-3 font-normal">{availableDocuments.map((item) => <option key={item.id} value={item.id}>{item.patientName} · {item.signer?.name ?? "Médico"} · {formatDate(item.createdAt)}</option>)}</select></label><label className="text-sm font-semibold">Provedor<select value={provider} onChange={(event) => setProvider(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 p-3 font-normal">{providers.filter((item) => item.key !== "sandbox").map((item) => <option key={item.key} value={item.key}>{item.label}{item.configured ? "" : " — pendente"}</option>)}</select></label><label className="text-sm font-semibold">Certificado<select value={certificateType} onChange={(event) => setCertificateType(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-200 p-3 font-normal">{(selectedProvider?.certificateTypes ?? ["cloud"]).map((type) => <option key={type} value={type}>{type.toUpperCase()}</option>)}</select></label><button type="button" disabled={working || !selectedDocumentId} onClick={requestSignature} className="self-end rounded-xl bg-[#17356e] px-6 py-3 font-semibold text-white disabled:opacity-50">{working ? "Preparando…" : "Solicitar assinatura"}</button></div>{selectedProvider && !selectedProvider.configured && <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-700">Integração pendente de configuração. O documento poderá ser preparado, mas não será marcado como assinado.</p>}</div>}
       <div className="rounded-3xl border border-[#dde4ef] bg-white shadow-sm"><div className="flex flex-col gap-3 border-b border-slate-100 p-5 md:flex-row md:items-center md:justify-between"><div><h2 className="text-lg font-bold">Documentos</h2><p className="text-sm text-slate-500">Acompanhe autenticação, validação e histórico.</p></div><div className="flex gap-2"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Paciente, documento ou médico" className="min-w-64 rounded-xl border border-slate-200 px-4 py-2 text-sm"/><select value={filter} onChange={(event) => setFilter(event.target.value)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm"><option value="all">Todos</option>{Object.entries(statusLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></div></div>

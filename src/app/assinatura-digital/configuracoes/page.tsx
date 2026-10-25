@@ -1,97 +1,62 @@
-/* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 "use client";
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getSupabaseClient } from "../../../lib/supabase/client";
 
-type Provider = { key: string; label: string; configured: boolean };
-type Config = { provider: string; environment: string; enabled: boolean; api_base_url?: string; authorization_url?: string; client_id_env_key?: string; client_secret_env_key?: string; webhook_secret_env_key?: string };
 type Rule = { document_type: string; label: string; signature_required: boolean; active: boolean; allowed_providers: string[] };
-type Doctor = { id: string; full_name: string; crm?: string | null };
-type Certificate = { doctor_user_id: string; certificate_subject: string; certificate_serial: string; enrolled_at: string };
 
 export default function SignatureConfigurationPage() {
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [configs, setConfigs] = useState<Config[]>([]);
+  const [configured, setConfigured] = useState(false);
   const [rules, setRules] = useState<Rule[]>([]);
-  const [doctors, setDoctors] = useState<Doctor[]>([]);
-  const [certificates, setCertificates] = useState<Certificate[]>([]);
-  const [selectedDoctor, setSelectedDoctor] = useState("");
-  const [hippiEndpoint, setHippiEndpoint] = useState("http://127.0.0.1:43127");
-  const [hippiToken, setHippiToken] = useState("");
-  const [selected, setSelected] = useState("vidaas");
-  const [draft, setDraft] = useState<Config>({ provider: "vidaas", environment: "sandbox", enabled: false });
+  const [working, setWorking] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   async function authFetch(url: string, init?: RequestInit) {
     const { data } = await getSupabaseClient().auth.getSession();
-    if (!data.session?.access_token) throw new Error("Sua sessão expirou.");
+    if (!data.session?.access_token) throw new Error("Sua sessão expirou. Entre novamente.");
     return fetch(url, { ...init, headers: { ...(init?.headers ?? {}), Authorization: `Bearer ${data.session.access_token}` } });
   }
 
-  async function load() {
-    const [configResponse, rulesResponse, certificateResponse] = await Promise.all([authFetch("/api/signatures/config"), authFetch("/api/signatures/rules"), authFetch("/api/signatures/a1/certificates")]);
-    const [payload, rulePayload, certificatePayload] = await Promise.all([configResponse.json(), rulesResponse.json(), certificateResponse.json()]);
-    if (!configResponse.ok) throw new Error(payload.error ?? "Não foi possível carregar as configurações.");
-    if (!rulesResponse.ok) throw new Error(rulePayload.error ?? "Não foi possível carregar as regras.");
-    if (!certificateResponse.ok) throw new Error(certificatePayload.error ?? "Não foi possível carregar os certificados A1.");
-    setProviders(payload.providers ?? []); setConfigs(payload.configs ?? []); setRules(rulePayload.rules ?? []);
-    setDoctors(certificatePayload.doctors ?? []); setCertificates(certificatePayload.certificates ?? []);
-    setSelectedDoctor((current) => current || certificatePayload.doctors?.[0]?.id || "");
-  }
-
-  useEffect(() => { void load().catch((cause) => setError(cause instanceof Error ? cause.message : "Erro ao carregar.")); }, []);
   useEffect(() => {
-    const current = configs.find((item) => item.provider === selected);
-    setDraft(current ?? { provider: selected, environment: "sandbox", enabled: false });
-  }, [configs, selected]);
-
-  async function save() {
-    setError(""); setMessage("");
-    try {
-      const response = await authFetch("/api/signatures/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider: draft.provider, environment: draft.environment, enabled: draft.enabled, apiBaseUrl: draft.api_base_url, authorizationUrl: draft.authorization_url, clientIdEnvKey: draft.client_id_env_key, clientSecretEnvKey: draft.client_secret_env_key, webhookSecretEnvKey: draft.webhook_secret_env_key }) });
-      const payload = await response.json(); if (!response.ok) throw new Error(payload.error ?? "Não foi possível salvar.");
-      setMessage("Configuração salva. Nenhum segredo foi armazenado no banco."); await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível salvar."); }
-  }
+    async function load() {
+      const [configResponse, rulesResponse] = await Promise.all([authFetch("/api/signatures/config"), authFetch("/api/signatures/rules")]);
+      const [config, ruleData] = await Promise.all([configResponse.json(), rulesResponse.json()]);
+      if (!configResponse.ok || !rulesResponse.ok) throw new Error(config.error ?? ruleData.error ?? "Não foi possível carregar as configurações.");
+      setConfigured(Boolean(config.providers?.find((provider: { key: string; configured: boolean }) => provider.key === "a3")?.configured));
+      setRules(ruleData.rules ?? []);
+    }
+    void load().catch((cause) => setError(cause instanceof Error ? cause.message : "Não foi possível carregar as configurações."));
+  }, []);
 
   async function testConnection() {
-    setError(""); setMessage("");
+    setWorking(true); setError(""); setMessage("");
     try {
-      const response = await authFetch("/api/signatures/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider: selected }) });
-      const payload = await response.json(); if (!response.ok) throw new Error(payload.message ?? payload.error ?? "Não foi possível conectar ao provedor.");
-      setMessage(`✓ ${payload.message}`);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível testar a conexão."); }
+      const response = await authFetch("/api/signatures/config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ provider: "a3" }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message ?? payload.error ?? "Não foi possível conectar à Certillion.");
+      setMessage(payload.message); setConfigured(true);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Falha no teste de conexão."); }
+    finally { setWorking(false); }
   }
 
   async function saveRule(rule: Rule) {
-    setError(""); setMessage("");
+    setWorking(true); setError(""); setMessage("");
     try {
-      const response = await authFetch("/api/signatures/rules", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentType: rule.document_type, label: rule.label, signatureRequired: rule.signature_required, active: rule.active, allowedProviders: rule.allowed_providers }) });
-      const payload = await response.json(); if (!response.ok) throw new Error(payload.error ?? "Não foi possível salvar a regra.");
-      setMessage("Regra de documento atualizada."); await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível salvar a regra."); }
-  }
-
-  async function enrollCertificate() {
-    setError(""); setMessage("");
-    try {
-      if (!selectedDoctor || !hippiToken.trim()) throw new Error("Selecione o médico e informe o código do Hippi.");
-      const endpoint = new URL(hippiEndpoint);
-      if (endpoint.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(endpoint.hostname) || endpoint.port !== "43127") throw new Error("O Hippi deve usar apenas http://127.0.0.1:43127.");
-      const certificateResponse = await fetch(`${endpoint.origin}/certificate`, { headers: { "X-Hippi-Connector-Token": hippiToken.trim() } });
-      const certificatePayload = await certificateResponse.json();
-      if (!certificateResponse.ok || !certificatePayload.certificateDerBase64) throw new Error(certificatePayload.error ?? "Não foi possível obter o certificado do Hippi.");
-      const response = await authFetch("/api/signatures/a1/certificates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ doctorUserId: selectedDoctor, certificateDerBase64: certificatePayload.certificateDerBase64 }) });
+      const response = await authFetch("/api/signatures/rules", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ documentType: rule.document_type, label: rule.label, signatureRequired: rule.signature_required, active: rule.active, allowedProviders: ["a3"] }) });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "Não foi possível vincular o certificado.");
-      setMessage("Certificado A1 vinculado ao médico com sucesso."); setHippiToken(""); await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível vincular o certificado."); }
+      if (!response.ok) throw new Error(payload.error ?? "Não foi possível salvar a regra.");
+      setMessage("Regra de documento atualizada.");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível salvar a regra."); }
+    finally { setWorking(false); }
   }
 
-  const field = (label: string, key: keyof Config, placeholder: string) => <label className="text-sm font-semibold text-slate-700">{label}<input value={String(draft[key] ?? "")} onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))} placeholder={placeholder} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 font-normal outline-none focus:border-blue-500"/></label>;
-
-  return <main className="min-h-screen bg-[#f6f8fc] px-5 py-8 text-[#17233b] sm:px-10"><div className="mx-auto max-w-5xl"><div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">Configurações</p><h1 className="mt-1 text-3xl font-bold">Assinatura Digital</h1><p className="mt-2 text-sm text-slate-500">Provedores, ambiente e referências dos secrets seguros.</p></div><Link href="/assinatura-digital" className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold">Voltar</Link></div>{error && <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}{message && <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">{message}</div>}<section className="mt-8 grid gap-6 lg:grid-cols-[260px_1fr]"><aside className="space-y-2 rounded-3xl border border-slate-200 bg-white p-4">{providers.filter((item) => item.key !== "sandbox").map((item) => <button key={item.key} onClick={() => setSelected(item.key)} className={`w-full rounded-xl px-4 py-3 text-left text-sm ${selected === item.key ? "bg-[#17356e] text-white" : "hover:bg-slate-50"}`}><span className="font-semibold">{item.label}</span><small className={`mt-1 block ${selected === item.key ? "text-white/70" : item.configured ? "text-emerald-600" : "text-amber-600"}`}>{item.configured ? "Variáveis encontradas" : "Pendente de configuração"}</small></button>)}</aside><div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><div className="grid gap-5 sm:grid-cols-2"><label className="text-sm font-semibold">Ambiente<select value={draft.environment} onChange={(event) => setDraft((current) => ({ ...current, environment: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 font-normal"><option value="sandbox">Sandbox</option><option value="production">Produção</option></select></label><label className="flex items-center gap-3 self-end rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold"><input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft((current) => ({ ...current, enabled: event.target.checked }))}/> Integração habilitada</label>{field("URL da API", "api_base_url", "Fornecida pelo provedor")}{field("URL de autenticação", "authorization_url", "Fornecida pelo provedor")}{field("Variável do Client ID", "client_id_env_key", "Ex.: VIDAAS_CLIENT_ID")}{field("Variável do Client Secret", "client_secret_env_key", "Ex.: VIDAAS_CLIENT_SECRET")}{field("Variável do segredo do webhook", "webhook_secret_env_key", "Ex.: SIGNATURE_VIDAAS_WEBHOOK_SECRET")}</div><div className="mt-6 rounded-2xl bg-blue-50 p-4 text-sm text-blue-800"><strong>Segurança:</strong> esta tela armazena somente os nomes das variáveis. Client Secret, PIN, senha, PFX e chave privada permanecem fora do banco, no ambiente seguro do servidor.</div><div className="mt-6 flex gap-3"><button onClick={save} className="rounded-xl bg-[#17356e] px-5 py-3 text-sm font-semibold text-white">Salvar configuração</button><button onClick={testConnection} className="rounded-xl border border-[#17356e] px-5 py-3 text-sm font-semibold text-[#17356e]">Testar conexão</button></div></div></section><section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><h2 className="text-lg font-bold">Documentos que exigem assinatura</h2><p className="mt-1 text-sm text-slate-500">Ative ou desative a exigência por tipo de documento.</p><div className="mt-5 space-y-3">{rules.map((rule, index) => <div key={rule.document_type} className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-100 p-4"><div><p className="font-semibold">{rule.label}</p><p className="text-xs text-slate-500">{rule.document_type}</p></div><div className="flex items-center gap-4"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={rule.signature_required} onChange={(event) => setRules((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, signature_required: event.target.checked } : item))}/> Assinatura obrigatória</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={rule.active} onChange={(event) => setRules((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, active: event.target.checked } : item))}/> Ativo</label><button onClick={() => saveRule(rule)} className="rounded-lg border border-[#17356e] px-3 py-2 text-xs font-semibold text-[#17356e]">Salvar regra</button></div></div>)}</div></section></div></main>;
+  return <main className="min-h-screen bg-[#f6f8fc] px-5 py-8 text-[#17233b] sm:px-10"><div className="mx-auto max-w-5xl">
+    <div className="flex items-center justify-between gap-4"><h1 className="text-3xl font-bold">Assinatura Digital · Certillion</h1><Link href="/assinatura-digital" className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold">Voltar</Link></div>
+    {error && <div role="alert" className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>}
+    {message && <div role="status" className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">{message}</div>}
+    <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><h2 className="text-lg font-bold">Certificado A3</h2><p className="mt-2 text-sm text-slate-600">{configured ? "Integração configurada. Teste a comunicação com a Certillion abaixo." : "A integração aguarda configuração no servidor."}</p><p className="mt-3 text-sm text-slate-600">Cada médico conecta seu token ou cartão pelo botão Conectar certificado A3 na tela de assinaturas. O aplicativo Certillion deve estar instalado no computador.</p><div className="mt-5 flex flex-wrap items-center gap-4"><button type="button" disabled={working} onClick={testConnection} className="rounded-xl bg-[#17356e] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{working ? "Verificando…" : "Testar conexão Certillion"}</button><a href="https://download.certillion.com/" target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-blue-700 underline">Instalar aplicativo Certillion</a></div></section>
+    <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><h2 className="text-lg font-bold">Documentos que exigem assinatura</h2><div className="mt-5 space-y-3">{rules.map((rule, index) => <div key={rule.document_type} className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-100 p-4"><p className="font-semibold">{rule.label}</p><div className="flex flex-wrap items-center gap-4"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={rule.signature_required} onChange={(event) => setRules((current) => current.map((item, i) => i === index ? { ...item, signature_required: event.target.checked } : item))}/>Assinatura obrigatória</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={rule.active} onChange={(event) => setRules((current) => current.map((item, i) => i === index ? { ...item, active: event.target.checked } : item))}/>Ativo</label><button type="button" disabled={working} onClick={() => saveRule(rule)} className="rounded-lg border border-[#17356e] px-3 py-2 text-xs font-semibold disabled:opacity-50">Salvar regra</button></div></div>)}</div></section>
+  </div></main>;
 }

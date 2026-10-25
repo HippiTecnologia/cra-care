@@ -17,7 +17,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   return new NextResponse(await result.data.arrayBuffer(), {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="${hasSignedFile ? "documento-assinado-validacao-pendente" : "documento-para-assinatura"}.pdf"`,
+      "Content-Disposition": `inline; filename="${signature.status === "signed" ? "documento-assinado" : hasSignedFile ? "documento-assinado-validacao-pendente" : "documento-para-assinatura"}.pdf"`,
       "Cache-Control": "private, no-store",
     },
   });

@@ -59,6 +59,6 @@ export async function buildVerifiablePrescriptionPdf(document: PrescriptionForSi
   page.drawText(`Código de validação: ${validationCode}`, { x: 107, y: 41, size: 7.5, font: regular });
   page.drawText("Leia o QR Code ou consulte a página de validação do CRA Care.", { x: 107, y: 28, size: 7, font: regular });
   page.drawText(`Signatário: ${document.doctor}`, { x: 310, y: 55, size: 7.5, font: bold, color: rgb(0.16, 0.25, 0.45), maxWidth: 232 });
-  page.drawText(`Assinatura digital A1 · ${new Date().toLocaleString("pt-BR")}`, { x: 310, y: 41, size: 6.5, font: regular, maxWidth: 232 });
+  page.drawText("Assinatura digital ICP-Brasil · CRA Care", { x: 310, y: 41, size: 6.5, font: regular, maxWidth: 232 });
   return pdf.save();
 }

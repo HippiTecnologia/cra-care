@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authenticatedSignatureUser } from "../../../../lib/signatures/auth";
 import { getSignatureProvider, listSignatureProviders } from "../../../../lib/signatures/providers";
 import { getSupabaseAdminClient } from "../../../../lib/supabase/admin";
+import { testCertillionConnection } from "../../../../lib/signatures/certillion";
 
 function adminOnly(role: string) {
   return role === "admin" || role === "super_admin";
@@ -48,5 +49,9 @@ export async function POST(request: NextRequest) {
   const provider = body.provider ? getSignatureProvider(body.provider) : null;
   if (!provider) return NextResponse.json({ error: "Provedor inválido." }, { status: 400 });
   if (!provider.isConfigured()) return NextResponse.json({ ok: false, message: `Integração ${provider.label} pendente de configuração.` }, { status: 409 });
+  if (provider.key === "a3") {
+    try { return NextResponse.json({ ok: true, message: await testCertillionConnection() }); }
+    catch (cause) { return NextResponse.json({ ok: false, message: cause instanceof Error ? cause.message : "Não foi possível conectar à Certillion." }, { status: 502 }); }
+  }
   return NextResponse.json({ ok: true, message: "Configuração necessária encontrada no ambiente seguro do servidor." });
 }

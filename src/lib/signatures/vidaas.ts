@@ -224,7 +224,7 @@ export async function buildPrescriptionPdf(prescription: PrescriptionForSignatur
   const crm = prescription.doctorCrm ? `CRM PR ${prescription.doctorCrm}` : "Responsável técnico";
   const crmWidth = regular.widthOfTextAtSize(crm, 9);
   page.drawText(crm, { x: (pageWidth - crmWidth) / 2, y: signatureY - 28, size: 9, font: regular, color: muted });
-  const state = "Assinatura digital A1 · validação no CRA Care";
+  const state = "Assinatura digital ICP-Brasil · validação no CRA Care";
   const stateWidth = regular.widthOfTextAtSize(state, 8);
   page.drawText(state, { x: (pageWidth - stateWidth) / 2, y: signatureY - 41, size: 8, font: regular, color: muted });
   const clinicLine = `${clinicContact.address} · ${clinicContact.phone}`;
