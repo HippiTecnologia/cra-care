@@ -19,7 +19,8 @@ test("PKCE, session encryption, tenant isolation and browser authorization state
   const pkce = api.createCertillionPkce();
   assert.equal(pkce.challenge, createHash("sha256").update(pkce.verifier).digest("base64url"));
   const url = new URL(api.certillionAuthorizationUrl(config, pkce));
-  assert.equal(url.searchParams.get("psc"), "CERTILLION_SIGNER");
+  assert.equal(url.searchParams.get("psc"), "VIDAAS");
+  assert.equal(url.origin, "https://cloud.certillion.com");
   assert.equal(url.searchParams.get("manager_id"), config.clientId);
   assert.equal(url.searchParams.get("scope"), "signature_session");
   assert.equal(url.searchParams.has("manager_secret"), false);

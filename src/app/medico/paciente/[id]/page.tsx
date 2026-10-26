@@ -395,9 +395,9 @@ export default function MedicalPatientPage() {
         setMessage("Receita assinada e validada pela Certillion. O PDF assinado está disponível em Assinatura Digital.");
         setSignatureStarting(false); return;
       }
-      if (!payload.authorizationUrl || !signatureWindow) throw new Error("Permita a abertura da janela para autorizar o A3.");
+      if (!payload.authorizationUrl || !signatureWindow) throw new Error("Permita a abertura da janela para autorizar o VIDaaS.");
       signatureWindow.location.href = payload.authorizationUrl;
-      setMessage("Selecione seu certificado A3 e autorize a assinatura no aplicativo Certillion.");
+      setMessage("Entre no VIDaaS e autorize a sessão do seu certificado.");
       const interval = window.setInterval(async () => {
         try {
           const statusResponse = await fetch(`/api/signatures/${signatureId}`, { headers });
@@ -425,7 +425,7 @@ export default function MedicalPatientPage() {
 
   async function createAndSignPrescription() {
     const signatureWindow = window.open("about:blank", "cra-care-assinatura", "popup,width=620,height=760");
-    if (!signatureWindow) { setError("Permita a abertura da janela para autorizar o certificado A3."); return; }
+    if (!signatureWindow) { setError("Permita a abertura da janela para autorizar o VIDaaS."); return; }
     const prescription = selectedPrescription ?? await createPrescription();
     if (prescription) await startCertillionSignature(prescription, signatureWindow);
     else signatureWindow.close();

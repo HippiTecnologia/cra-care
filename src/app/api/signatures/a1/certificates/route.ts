@@ -22,5 +22,5 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const user = await authenticatedSignatureUser(request);
   if (!user) return NextResponse.json({ error: "Acesso não autorizado." }, { status: 401 });
-  return NextResponse.json({ error: "O vínculo do Hippi A1 foi substituído pela conexão com a Certillion. Use Conectar certificado A3." }, { status: 410 });
+  return NextResponse.json({ error: "O vínculo do Hippi A1 foi substituído pela conexão Certillion via VIDaaS. Use Conectar VIDaaS na tela Assinatura Digital." }, { status: 410 });
 }

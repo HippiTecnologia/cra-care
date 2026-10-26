@@ -1,42 +1,30 @@
 # Módulo de Assinatura Digital do CRA Care
 
-## Instalação
+## Fluxo principal
 
-1. Execute as migrations `026`, `027` e `028` no SQL Editor do Supabase, nessa ordem.
-2. Crie no Vercel as variáveis listadas em `.env.example`.
-3. No painel administrativo, abra **Assinatura Digital → Configurações** e registre somente URLs públicas e nomes das variáveis de ambiente.
-4. Nunca cole PIN, senha, PFX, chave privada ou Client Secret na interface.
+`Receita → autorização do médico → assinatura no provedor → validação ICP-Brasil → armazenamento privado → histórico e consulta por QR Code`.
 
-## Fluxo
-
-`Documento → solicitação → autenticação → assinatura no provedor → validação → armazenamento privado → auditoria → consulta pública por QR Code`.
-
-O médico acessa **Assinatura Digital**, abre o documento e autoriza. A secretária solicita e acompanha. O administrador consulta auditoria e configura os provedores. Todos os acessos são segregados por clínica.
+O médico usa **Assinatura Digital** para conectar o VIDaaS uma vez e assinar cada receita pelo botão **Assinar** enquanto a sessão estiver válida. A secretária pode solicitar e acompanhar; somente o médico signatário autoriza. O administrador consulta auditoria e configura os provedores. Todos os acessos são segregados por clínica.
 
 ## Provedores
 
 | Provider | Estado | Observação |
 | --- | --- | --- |
-| VIDaaS | Adaptador real existente | Requer credenciais e callback cadastrados pela Valid. |
-| Soluti Bird ID | Interface preparada | A API completa exige credenciamento e documentação oficial da Soluti. Enquanto isso, aparece como `Integração pendente de configuração`. |
-| A1 | Interface preparada | Requer SDK/conector homologado; o CRA Care não recebe o PFX nem a senha. |
-| A3 | Interface preparada | Requer driver do token/cartão e conector oficial; o CRA Care não recebe o PIN. |
+| Certillion via VIDaaS | Ativo para novas assinaturas A3 em nuvem | Usa as credenciais da aplicação Certillion e PSC `VIDAAS`; autorização `signature_session` permite várias assinaturas durante a validade concedida. |
+| VIDaaS direto | Adaptador legado preservado | Não é o fluxo oferecido na tela principal; a integração em uso passa pela API Certillion. |
+| Soluti Bird ID | Interface preparada | A API completa exige credenciamento e documentação oficial da Soluti. |
+| A1 | Desativado para novas assinaturas | O CRA Care não recebe PFX nem senha. |
+| A3 local | Não configurado | `CERTILLION_SIGNER` exige assinador e certificado local; não é o fluxo atual. |
 | Cloud genérico | Interface preparada | Requer API oficial do provedor escolhido. |
 
-Não foram inventados endpoints para Soluti, A1 ou A3. Ativar uma variável sem o conector correspondente não produz assinatura e nenhum mock é marcado como válido.
-
-### Validação A1 / ICP-Brasil
-
-O Hippi Assinador A1 assina somente no computador do médico. Antes de aceitar o retorno, o CRA Care compara o PDF assinado com o PDF preparado, confere a assinatura CMS e confirma que o certificado usado é o mesmo vinculado ao médico. Em seguida, o servidor valida a cadeia até uma raiz ICP-Brasil configurada e consulta as listas de certificados revogados (CRL) publicadas pelas ACs.
-
-Para habilitar essa última etapa, execute `npm run icp:env`. Isso cria o arquivo público `icp-brasil-roots.env` com as raízes atualizadas. No Vercel, use **Settings → Environment Variables → Import .env** e importe esse arquivo, selecionando **Production** e depois repetindo para **Preview**. Faça um novo deploy após salvar. Sem essa variável, ou se uma CRL não puder ser consultada, o documento permanece em `signing` e o QR Code não informa que ele é autêntico.
+A documentação operacional e as variáveis do fluxo atual estão em [certillion-a3.md](certillion-a3.md). O CRA Care não armazena PIN, PFX ou chave privada do médico.
 
 ## Banco e armazenamento
 
 - `digital_signatures`: estado e evidências da assinatura.
 - `signature_audit_logs`: trilha imutável de eventos funcionais.
 - `signature_webhook_events`: deduplicação idempotente dos webhooks.
-- `signature_provider_configs`: apenas configuração não sensível e nomes das variáveis de ambiente.
+- `signature_provider_configs`: configuração não sensível e nomes das variáveis de ambiente.
 - `signature_document_rules`: quais documentos exigem assinatura.
 - Bucket privado `digital-signatures`: PDF original preparado e PDF final assinado.
 
@@ -44,10 +32,9 @@ Para habilitar essa última etapa, execute `npm run icp:env`. Isso cria o arquiv
 
 - APIs autenticadas usam token de sessão e verificam clínica/perfil no servidor.
 - O documento é conferido por SHA-256 antes de iniciar a assinatura.
-- Webhooks exigem HMAC e o mesmo evento não é processado duas vezes.
-- O webhook nunca marca um documento como assinado sozinho: ainda é necessário consultar/confirmar o provedor e validar o PDF.
-- Tokens, PKCE e segredos permanecem no servidor.
-- O QR Code aponta para `/validar-documento/{codigo}` e nunca expõe CPF ou dados clínicos.
+- Tokens OAuth, PKCE e segredos permanecem protegidos no servidor ou em cookie HttpOnly cifrado.
+- O webhook nunca marca um documento como assinado sozinho: o provedor precisa confirmar e o PDF precisa ser validado.
+- O QR Code aponta para `/validar-documento/{codigo}` e não expõe CPF ou dados clínicos.
 - O rate limit implementado é local ao processo. Em produção com múltiplas instâncias, configure também rate limiting no gateway/edge.
 
 ## Estados
@@ -65,16 +52,3 @@ Somente `signed`, com `validation_result.valid = true` e `validated_at` preenchi
 - `GET /api/signatures/verify?code=...`
 - `GET/PUT/POST /api/signatures/config`
 - `POST /api/signatures/webhook/{provider}`
-
-## Soluti
-
-O portal público da Soluti confirma o Bird ID e o Hub de Integrações, mas o contrato da API de assinatura, autenticação, consulta, webhook e sandbox precisa ser fornecido pela Soluti ao integrador. Para finalizar o provider, solicite:
-
-1. credenciais de sandbox e produção;
-2. documentação OpenAPI/SDK oficial atual;
-3. fluxo OAuth/OTP ou autorização móvel;
-4. formato de assinatura PAdES;
-5. endpoint oficial de consulta/validação;
-6. esquema e assinatura dos webhooks;
-7. URLs de callback permitidas.
-

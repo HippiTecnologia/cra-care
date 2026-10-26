@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as { documentType?: string; documentId?: string; provider?: string; certificateType?: CertificateType; signerUserId?: string };
     if (body.documentType !== "prescription" || !body.documentId) return NextResponse.json({ error: "Documento não suportado." }, { status: 400 });
-    if (body.provider === "a1") return NextResponse.json({ error: "O Hippi foi substituído pela Certillion. Selecione Certillion (A3)." }, { status: 409 });
+    if (body.provider === "a1") return NextResponse.json({ error: "O Hippi foi substituído pela Certillion via VIDaaS. Selecione Certillion via VIDaaS (A3 em nuvem)." }, { status: 409 });
     const provider = getSignatureProvider(body.provider ?? "a3");
     if (!provider) return NextResponse.json({ error: "Provedor de assinatura inválido." }, { status: 400 });
     const certificateType = body.certificateType ?? "a3";

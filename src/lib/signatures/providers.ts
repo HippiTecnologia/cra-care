@@ -34,11 +34,11 @@ class PendingProvider implements SignatureProvider {
 
 class CertillionA3Provider implements SignatureProvider {
   readonly key = "a3" as const;
-  readonly label = "Certillion (A3)";
+  readonly label = "Certillion via VIDaaS (A3 em nuvem)";
   readonly certificateTypes = ["a3"] as const satisfies readonly ["a3"];
   isConfigured() { return isCertillionConfigured(); }
   async start(): Promise<ProviderStartResult> {
-    if (!this.isConfigured()) return { kind: "unavailable", message: "Integração Certillion A3 pendente de configuração segura no servidor." };
+    if (!this.isConfigured()) return { kind: "unavailable", message: "Integração Certillion via VIDaaS pendente de configuração segura no servidor." };
     const config = getCertillionConfig();
     const pkce = createCertillionPkce();
     return {

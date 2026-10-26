@@ -38,13 +38,13 @@ export async function GET(request: NextRequest) {
   try { config = getCertillionConfig(); }
   catch { return resultPage(origin, { ok: false, message: "A integração Certillion está pendente de configuração." }); }
   const pending = readCertillionAuthorization(request, config);
-  if (!pending || pending.state !== state) return resultPage(origin, { ok: false, message: "A autorização não corresponde a este navegador ou expirou. Clique novamente em Conectar certificado." });
+  if (!pending || pending.state !== state) return resultPage(origin, { ok: false, message: "A autorização não corresponde a este navegador ou expirou. Clique novamente em Conectar VIDaaS." });
   if (!pending.signatureId) {
     if (oauthError || !code) return resultPage(origin, { ok: false, message: "Conexão cancelada. Nenhum documento foi assinado." });
     try {
       const tokenPayload = await exchangeCertillionCode(config, code, pending.verifier);
       const session = certillionSessionFromToken({ payload: tokenPayload, userId: pending.userId, clinicId: pending.clinicId });
-      return resultPage(new URL(config.redirectUri).origin, { ok: true, message: "Certificado A3 conectado. Agora selecione a receita e clique em Assinar." }, { value: certillionSessionCookieValue(config, session), expiresAt: session.expiresAt });
+      return resultPage(new URL(config.redirectUri).origin, { ok: true, message: "VIDaaS conectado. Agora selecione a receita e clique em Assinar." }, { value: certillionSessionCookieValue(config, session), expiresAt: session.expiresAt });
     } catch (cause) {
       return resultPage(new URL(config.redirectUri).origin, { ok: false, message: cause instanceof Error ? cause.message : "Não foi possível conectar o A3." });
     }

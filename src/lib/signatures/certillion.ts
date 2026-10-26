@@ -3,6 +3,8 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypt
 import type { NextRequest } from "next/server";
 
 const API_PATH = "/css/restful/application/oauth";
+const CERTILLION_PSC = "VIDAAS" as const;
+const CERTILLION_API_BASE_URL = "https://cloud.certillion.com";
 export const CERTILLION_SESSION_COOKIE = process.env.NODE_ENV === "production"
   ? "__Host-cra-certillion-session"
   : "cra-certillion-session";
@@ -14,7 +16,7 @@ const MAX_ORIGINAL_DOCUMENT_BYTES = 100_000;
 const MAX_SIGNED_DOCUMENT_BYTES = 20 * 1024 * 1024;
 
 export type CertillionConfig = {
-  baseUrl: string; clientId: string; clientSecret: string; managerId: string;
+  baseUrl: string; psc: typeof CERTILLION_PSC; clientId: string; clientSecret: string; managerId: string;
   managerSecret: string; redirectUri: string; encryptionKey: Buffer; sessionLifetimeSeconds: number;
 };
 export type CertillionSession = { accessToken: string; expiresAt: number; userId: string; clinicId: string; scope: string };
@@ -37,7 +39,9 @@ export function getCertillionConfig(): CertillionConfig {
   const encryptionSecret = required(process.env.CERTILLION_SESSION_ENCRYPTION_KEY, "CERTILLION_SESSION_ENCRYPTION_KEY");
   const lifetime = Number.parseInt(process.env.CERTILLION_SESSION_LIFETIME_SECONDS ?? "3600", 10);
   return {
-    baseUrl: (process.env.CERTILLION_API_BASE_URL ?? "https://cloud-ws.certillion.com").replace(/\/$/, ""),
+    // VIDaaS is a cloud PSC, so all API calls use the cloud.certillion.com endpoint.
+    baseUrl: CERTILLION_API_BASE_URL,
+    psc: CERTILLION_PSC,
     clientId, clientSecret,
     managerId: process.env.CERTILLION_MANAGER_ID?.trim() || clientId,
     managerSecret: process.env.CERTILLION_MANAGER_SECRET?.trim() || clientSecret,
@@ -64,7 +68,7 @@ export function certillionAuthorizationUrl(config: CertillionConfig, pkce: Retur
   url.searchParams.set("manager_id", config.managerId);
   // The public API contract documents manager_id on this GET endpoint. Never put
   // manager_secret in its URL: query strings can leak via browser history/logs.
-  url.searchParams.set("psc", "CERTILLION_SIGNER");
+  url.searchParams.set("psc", config.psc);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("lifetime", String(config.sessionLifetimeSeconds));
   url.searchParams.set("redirect_uri", config.redirectUri);
@@ -102,7 +106,7 @@ async function jsonRequest(url: string, init: RequestInit, stage: string) {
 }
 
 export async function exchangeCertillionCode(config: CertillionConfig, code: string, verifier: string) {
-  const body = new URLSearchParams({ grant_type: "authorization_code", manager_id: config.managerId, manager_secret: config.managerSecret, code, code_verifier: verifier, psc: "CERTILLION_SIGNER", redirect_uri: config.redirectUri });
+  const body = new URLSearchParams({ grant_type: "authorization_code", manager_id: config.managerId, manager_secret: config.managerSecret, code, code_verifier: verifier, psc: config.psc, redirect_uri: config.redirectUri });
   return jsonRequest(`${config.baseUrl}${API_PATH}/token`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" }, body }, "token");
 }
 
@@ -148,7 +152,7 @@ export function readCertillionSession(request: NextRequest, config: CertillionCo
 
 export async function testCertillionConnection() {
   await getClientToken(getCertillionConfig());
-  return "Credenciais aceitas pela Certillion. Conecte o A3 pelo botão Conectar certificado no CRA Care.";
+  return "Credenciais aceitas pela Certillion. Conecte o A3 em nuvem pelo VIDaaS no CRA Care.";
 }
 
 async function getClientToken(config: CertillionConfig) {

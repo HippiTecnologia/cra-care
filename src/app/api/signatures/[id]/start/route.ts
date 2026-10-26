@@ -22,7 +22,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   if (signature.signer_user_id !== user.id || user.role !== "medico") return NextResponse.json({ error: "Somente o médico signatário pode autorizar esta assinatura." }, { status: 403 });
   if (signature.status === "signed") return NextResponse.json({ error: "O documento já está assinado." }, { status: 409 });
   if (["cancelled", "invalid"].includes(signature.status)) return NextResponse.json({ error: "Prepare uma nova solicitação para esta receita antes de assinar." }, { status: 409 });
-  if (signature.provider === "a1") return NextResponse.json({ error: "O Hippi foi substituído pela Certillion. Cancele esta solicitação e prepare a receita com Certillion (A3)." }, { status: 409 });
+  if (signature.provider === "a1") return NextResponse.json({ error: "O Hippi foi substituído pela Certillion via VIDaaS. Cancele esta solicitação e prepare a receita com Certillion via VIDaaS (A3 em nuvem)." }, { status: 409 });
   const provider = getSignatureProvider(signature.provider);
   if (!provider) return NextResponse.json({ error: "Provedor inválido." }, { status: 400 });
   if (provider.key === "vidaas" && process.env.VIDAAS_DOCTOR_CRM?.trim() && process.env.VIDAAS_DOCTOR_CRM.trim() !== String(user.crm ?? "")) {
