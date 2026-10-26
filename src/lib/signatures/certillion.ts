@@ -219,13 +219,29 @@ async function validateDocument(config: CertillionConfig, clientToken: string, s
     body: JSON.stringify({ signature: Buffer.from(signedPdf).toString("base64"), pki_name: "ICP_BR" }),
   }, "validate");
   const status = payload.status && typeof payload.status === "object" ? payload.status as Record<string, any> : {};
-  if (!(status.name === "SIGNATURE_VALID" || status.code === 140 || status.code === "140")) {
+  const signatureResults = Array.isArray(payload.signatures) ? payload.signatures : [];
+  const isValidStatus = (item: Record<string, any>) => item.name === "SIGNATURE_VALID" || item.code === 140 || item.code === "140";
+  const allSignaturesValid = signatureResults.length > 0 && signatureResults.every((item: unknown) => {
+    if (!item || typeof item !== "object") return false;
+    const result = item as Record<string, any>;
+    const nested = result.status && typeof result.status === "object" ? result.status as Record<string, any> : {};
+    return isValidStatus(nested);
+  });
+  if (!(signatureResults.length > 0 ? allSignaturesValid : isValidStatus(status))) {
     const name = typeof status.name === "string" ? status.name.replace(/[^A-Za-z_]/g, "").slice(0, 40) : "SEM_STATUS";
     const code = typeof status.code === "number" || typeof status.code === "string" ? String(status.code).replace(/[^0-9]/g, "").slice(0, 8) : "";
     const fields = Object.keys(payload).filter((key) => key !== "status" && /^[A-Za-z_]{1,40}$/.test(key)).slice(0, 8).join(", ");
-    throw new CertillionApiError(`A validação ICP-Brasil não confirmou a assinatura (status ${name}${code ? ` ${code}` : ""}${fields ? `; campos ${fields}` : ""}).`, "validate", true);
+    const nestedCodes = signatureResults.slice(0, 5).map((item: unknown) => {
+      const result = item && typeof item === "object" ? item as Record<string, any> : {};
+      const nested = result.status && typeof result.status === "object" ? result.status as Record<string, any> : {};
+      return `${String(nested.name ?? "SEM_STATUS").replace(/[^A-Za-z_]/g, "").slice(0, 40)} ${String(nested.code ?? "").replace(/[^0-9]/g, "").slice(0, 8)}`.trim();
+    }).join(", ");
+    throw new CertillionApiError(`A validação ICP-Brasil não confirmou a assinatura (status ${name}${code ? ` ${code}` : ""}${fields ? `; campos ${fields}` : ""}${nestedCodes ? `; assinaturas ${nestedCodes}` : ""}).`, "validate", true);
   }
-  return status;
+  return {
+    status: { code: status.code, name: status.name },
+    signatures: signatureResults.map((item: Record<string, any>) => ({ code: item.status?.code, name: item.status?.name })),
+  };
 }
 
 function record(value: unknown) { return value && typeof value === "object" && !Array.isArray(value) ? { ...(value as Record<string, any>) } : {}; }
