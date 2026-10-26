@@ -18,6 +18,10 @@ const CERTILLION_SUCCESS_STATUS_CODES = new Set([100, 110, 120, 130, 131, 132, 1
 const MAX_ORIGINAL_DOCUMENT_BYTES = 100_000;
 const MAX_SIGNED_DOCUMENT_BYTES = 20 * 1024 * 1024;
 
+function isDocumentHash(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9+/]{43}=$/.test(value) && Buffer.from(value, "base64").byteLength === 32;
+}
+
 export type CertillionConfig = {
   baseUrl: string; psc: typeof CERTILLION_PSC; clientId: string; clientSecret: string; managerId: string;
   managerSecret: string; redirectUri: string; encryptionKey: Buffer; sessionLifetimeSeconds: number;
@@ -105,7 +109,8 @@ async function jsonRequest(url: string, init: RequestInit, stage: string) {
     const knownSuccess = CERTILLION_SUCCESS_STATUS_CODES.has(code);
     // Some successful OAuth responses use the generic name "OK". Accept that
     // only when the code is not one of Certillion's documented error codes.
-    const genericOk = name === "OK" && (!Number.isFinite(code) || code < 200);
+    const uploadHash = stage === "upload" && (isDocumentHash((payload as Record<string, any>).document_hash) || isDocumentHash(status.detail));
+    const genericOk = name === "OK" && ((!Number.isFinite(code) || code < 200) || uploadHash);
     if (knownSuccess || genericOk) return payload as Record<string, any>;
     const rejected = stage !== "signature" || (code >= 200 && code < 300) || code === 400 || code >= 600;
     const label = name || String(status.code);
@@ -178,8 +183,10 @@ async function uploadDocument(config: CertillionConfig, clientToken: string, sig
   const form = new FormData();
   form.set("file", new Blob([Buffer.from(pdf)], { type: "application/pdf" }), `${signatureId}.pdf`);
   const payload = await jsonRequest(`${config.baseUrl}${API_PATH}/document`, { method: "POST", headers: { Authorization: `Bearer ${clientToken}`, Accept: "application/json" }, body: form }, "upload");
-  if (typeof payload.document_hash !== "string" || !payload.document_hash) throw new CertillionApiError("Certillion não retornou o hash do documento enviado.", "upload", true);
-  return payload.document_hash as string;
+  const hash = isDocumentHash(payload.document_hash) ? payload.document_hash : payload.status?.detail;
+  if (!isDocumentHash(hash)) throw new CertillionApiError("Certillion não retornou um hash válido do documento enviado.", "upload", true);
+  if (hash !== createHash("sha256").update(pdf).digest("base64")) throw new CertillionApiError("O hash informado pela Certillion não corresponde ao PDF enviado.", "upload", true);
+  return hash;
 }
 
 async function requestSignature(config: CertillionConfig, accessToken: string, signatureId: string, documentHash: string) {
@@ -291,6 +298,21 @@ export async function signCertillionDocument(input: { admin: any; signature: Rec
   }
   await saveProviderData(admin, signature, providerData, { status: "signed", validation_result: validationResult, validated_at: now, signed_at: now, authenticated_at: signature.authenticated_at ?? now, error_code: null, error_message: null });
   return { transaction: String(certillion.transaction), signedStoragePath: String(certillion.signedStoragePath) };
+  } catch (cause) {
+    // Before /signature, a retry cannot create a duplicate signature. Record
+    // the failed stage so the pending document explains why it did not advance.
+    if (!certillion.documentHash && !certillion.signatureSubmissionInFlight && !certillion.transaction) {
+      const stage = cause instanceof CertillionApiError ? cause.stage : "preparation";
+      const message = cause instanceof Error ? cause.message : "Não foi possível preparar o documento para assinatura.";
+      certillion = { ...certillion, lastFailureStage: stage, lastFailureAt: new Date().toISOString() };
+      providerData.certillion = certillion;
+      await saveProviderData(admin, signature, providerData, {
+        status: "awaiting_signature",
+        error_code: `CERTILLION_${stage.toUpperCase()}`,
+        error_message: message.slice(0, 500),
+      }).catch(() => undefined);
+    }
+    throw cause;
   } finally {
     certillion = { ...certillion, processingStartedAt: null };
     providerData.certillion = certillion;
