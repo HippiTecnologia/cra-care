@@ -12,6 +12,9 @@ export const CERTILLION_AUTH_COOKIE = process.env.NODE_ENV === "production"
   ? "__Host-cra-certillion-auth"
   : "cra-certillion-auth";
 const SIGNATURE_SESSION_SCOPE = "signature_session";
+// Certillion's status catalog includes several successful states beyond the
+// request-accepted, in-progress, and signature-valid codes.
+const CERTILLION_SUCCESS_STATUS_CODES = new Set([100, 110, 120, 130, 131, 132, 140, 150, 151]);
 const MAX_ORIGINAL_DOCUMENT_BYTES = 100_000;
 const MAX_SIGNED_DOCUMENT_BYTES = 20 * 1024 * 1024;
 
@@ -96,11 +99,19 @@ async function jsonRequest(url: string, init: RequestInit, stage: string) {
   const payload = await response.json().catch(() => null);
   if (!payload || typeof payload !== "object") throw new CertillionApiError(`Resposta inválida do Certillion na etapa ${stage}.`, stage, true);
   const status = (payload as Record<string, any>).status;
-  if (status && typeof status === "object" && status.code !== undefined && ![100, "100", 110, "110", 140, "140"].includes(status.code)) {
-    const detail = typeof status.detail === "string" ? `: ${status.detail.slice(0, 200)}` : "";
+  if (status && typeof status === "object" && status.code !== undefined) {
     const code = Number(status.code);
+    const name = typeof status.name === "string" ? status.name.trim().toUpperCase() : "";
+    const knownSuccess = CERTILLION_SUCCESS_STATUS_CODES.has(code);
+    // Some successful OAuth responses use the generic name "OK". Accept that
+    // only when the code is not one of Certillion's documented error codes.
+    const genericOk = name === "OK" && (!Number.isFinite(code) || code < 200);
+    if (knownSuccess || genericOk) return payload as Record<string, any>;
     const rejected = stage !== "signature" || (code >= 200 && code < 300) || code === 400 || code >= 600;
-    throw new CertillionApiError(`Certillion retornou status ${status.name ?? status.code}${detail}.`, stage, true, rejected);
+    const label = name || String(status.code);
+    // Never include status.detail here: Certillion may place temporary tokens
+    // or authorization values in that field.
+    throw new CertillionApiError(`Certillion retornou status ${label} na etapa ${stage}.`, stage, true, rejected);
   }
   return payload as Record<string, any>;
 }
