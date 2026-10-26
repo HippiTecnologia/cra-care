@@ -19,7 +19,7 @@ const MAX_ORIGINAL_DOCUMENT_BYTES = 100_000;
 const MAX_SIGNED_DOCUMENT_BYTES = 20 * 1024 * 1024;
 
 function isDocumentHash(value: unknown): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9+/]{43}=$/.test(value) && Buffer.from(value, "base64").byteLength === 32;
+  return typeof value === "string" && /^[A-Za-z0-9+/_-]{43}=?$/.test(value) && Buffer.from(value, "base64url").byteLength === 32;
 }
 
 export type CertillionConfig = {
@@ -185,7 +185,9 @@ async function uploadDocument(config: CertillionConfig, clientToken: string, sig
   const payload = await jsonRequest(`${config.baseUrl}${API_PATH}/document`, { method: "POST", headers: { Authorization: `Bearer ${clientToken}`, Accept: "application/json" }, body: form }, "upload");
   const hash = isDocumentHash(payload.document_hash) ? payload.document_hash : payload.status?.detail;
   if (!isDocumentHash(hash)) throw new CertillionApiError("Certillion não retornou um hash válido do documento enviado.", "upload", true);
-  if (hash !== createHash("sha256").update(pdf).digest("base64")) throw new CertillionApiError("O hash informado pela Certillion não corresponde ao PDF enviado.", "upload", true);
+  if (hash.replace(/\+/g, "-").replace(/\//g, "_").replace(/=$/, "") !== createHash("sha256").update(pdf).digest("base64url")) {
+    throw new CertillionApiError("O hash informado pela Certillion não corresponde ao PDF enviado.", "upload", true);
+  }
   return hash;
 }
 
