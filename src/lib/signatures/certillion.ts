@@ -239,6 +239,7 @@ async function validateDocument(config: CertillionConfig, clientToken: string, s
     throw new CertillionApiError(`A validação ICP-Brasil não confirmou a assinatura (status ${name}${code ? ` ${code}` : ""}${fields ? `; campos ${fields}` : ""}${nestedCodes ? `; assinaturas ${nestedCodes}` : ""}).`, "validate", true);
   }
   return {
+    valid: true,
     status: { code: status.code, name: status.name },
     signatures: signatureResults.map((item: Record<string, any>) => ({ code: item.status?.code, name: item.status?.name })),
   };
