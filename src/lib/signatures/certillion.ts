@@ -219,7 +219,12 @@ async function validateDocument(config: CertillionConfig, clientToken: string, s
     body: JSON.stringify({ signature: Buffer.from(signedPdf).toString("base64"), pki_name: "ICP_BR" }),
   }, "validate");
   const status = payload.status && typeof payload.status === "object" ? payload.status as Record<string, any> : {};
-  if (!(status.name === "SIGNATURE_VALID" || status.code === 140 || status.code === "140")) throw new CertillionApiError("A validação ICP-Brasil não confirmou a assinatura. O documento não foi marcado como assinado.", "validate", true);
+  if (!(status.name === "SIGNATURE_VALID" || status.code === 140 || status.code === "140")) {
+    const name = typeof status.name === "string" ? status.name.replace(/[^A-Za-z_]/g, "").slice(0, 40) : "SEM_STATUS";
+    const code = typeof status.code === "number" || typeof status.code === "string" ? String(status.code).replace(/[^0-9]/g, "").slice(0, 8) : "";
+    const fields = Object.keys(payload).filter((key) => key !== "status" && /^[A-Za-z_]{1,40}$/.test(key)).slice(0, 8).join(", ");
+    throw new CertillionApiError(`A validação ICP-Brasil não confirmou a assinatura (status ${name}${code ? ` ${code}` : ""}${fields ? `; campos ${fields}` : ""}).`, "validate", true);
+  }
   return status;
 }
 
@@ -303,13 +308,13 @@ export async function signCertillionDocument(input: { admin: any; signature: Rec
   } catch (cause) {
     // Before /signature, a retry cannot create a duplicate signature. Record
     // the failed stage so the pending document explains why it did not advance.
-    if (!certillion.documentHash && !certillion.signatureSubmissionInFlight && !certillion.transaction) {
+    if ((!certillion.documentHash || certillion.transaction) && !certillion.signatureSubmissionInFlight) {
       const stage = cause instanceof CertillionApiError ? cause.stage : "preparation";
-      const message = cause instanceof Error ? cause.message : "Não foi possível preparar o documento para assinatura.";
+      const message = cause instanceof Error ? cause.message : "Não foi possível concluir a assinatura.";
       certillion = { ...certillion, lastFailureStage: stage, lastFailureAt: new Date().toISOString() };
       providerData.certillion = certillion;
       await saveProviderData(admin, signature, providerData, {
-        status: "awaiting_signature",
+        status: certillion.transaction ? "signing" : "awaiting_signature",
         error_code: `CERTILLION_${stage.toUpperCase()}`,
         error_message: message.slice(0, 500),
       }).catch(() => undefined);
