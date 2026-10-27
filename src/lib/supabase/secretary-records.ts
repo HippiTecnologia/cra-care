@@ -230,12 +230,17 @@ function paymentFromRow(row: Record<string, unknown>): PatientPaymentRecord {
   };
 }
 
-export async function loadSecretaryPatients(context?: SecretaryContext) {
+export async function loadSecretaryPatients(
+  context?: SecretaryContext,
+  options: { includeLaudo?: boolean } = {},
+) {
   const current = context ?? await loadSecretaryContext();
   const supabase = getSupabaseClient();
+  const patientQuery = supabase.from("patients").select("*").eq("clinic_id", current.clinicId).is("archived_at", null);
+  const filteredPatientQuery = options.includeLaudo ? patientQuery : patientQuery.neq("status", "laudo");
   const [doctors, patientResult, paymentResult] = await Promise.all([
     loadSecretaryDoctors(current),
-    supabase.from("patients").select("*").eq("clinic_id", current.clinicId).is("archived_at", null).neq("status", "laudo").order("created_at", { ascending: false }),
+    filteredPatientQuery.order("created_at", { ascending: false }),
     supabase.from("payments").select("*").eq("clinic_id", current.clinicId).order("paid_at", { ascending: false }),
   ]);
   if (patientResult.error) throw patientResult.error;

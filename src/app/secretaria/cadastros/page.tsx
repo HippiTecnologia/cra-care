@@ -69,6 +69,7 @@ const statusOptions: Array<[NonNullable<DemoPatientRecord["status"]>, string]> =
   ["desistente", "Desistente"],
   ["em-alta", "Em alta"],
   ["concluido", "Concluído"],
+  ["laudo", "Laudo"],
 ];
 
 const paymentOptions: NonNullable<DemoPatientRecord["paymentMethod"]>[] = [
@@ -178,7 +179,7 @@ export default function PatientRecordsPage() {
     let active = true;
     void (async () => {
       try {
-        const workspace = await loadSecretaryPatients();
+        const workspace = await loadSecretaryPatients(undefined, { includeLaudo: true });
         const [loadedPortals, loadedPrescriptions, loadedInvoices, loadedStock, loadedBatches, loadedMethods] = await Promise.all([
           loadSecretaryPortals(workspace.patients.map((item) => item.id)),
           loadSecretaryPrescriptions(workspace.context),
