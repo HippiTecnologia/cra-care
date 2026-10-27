@@ -218,30 +218,56 @@ function paymentFromRow(row: Record<string, unknown>): PatientPaymentRecord {
   };
 }
 
+const SUPABASE_PAGE_SIZE = 500;
+
+async function loadAllPages<Row>(
+  fetchPage: (from: number, to: number) => PromiseLike<{
+    data: Row[] | null;
+    error: { message: string } | null;
+  }>,
+): Promise<Row[]> {
+  const rows: Row[] = [];
+  for (let from = 0; ; from += SUPABASE_PAGE_SIZE) {
+    const { data, error } = await fetchPage(from, from + SUPABASE_PAGE_SIZE - 1);
+    if (error) throw error;
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < SUPABASE_PAGE_SIZE) return rows;
+  }
+}
+
 export async function loadSecretaryPatients(
   context?: SecretaryContext,
   options: { includeLaudo?: boolean } = {},
 ) {
   const current = context ?? await loadSecretaryContext();
   const supabase = getSupabaseClient();
-  const patientQuery = supabase.from("patients").select("*").eq("clinic_id", current.clinicId).is("archived_at", null);
-  const filteredPatientQuery = options.includeLaudo ? patientQuery : patientQuery.neq("status", "laudo");
-  const [doctors, patientResult, paymentResult] = await Promise.all([
+  const [doctors, patientRows, paymentRows] = await Promise.all([
     loadSecretaryDoctors(current),
-    filteredPatientQuery.order("created_at", { ascending: false }),
-    supabase.from("payments").select("*").eq("clinic_id", current.clinicId).order("paid_at", { ascending: false }),
+    loadAllPages<MedicalPatientRow>((from, to) => {
+      const patientQuery = supabase.from("patients").select("*").eq("clinic_id", current.clinicId).is("archived_at", null);
+      const filteredPatientQuery = options.includeLaudo ? patientQuery : patientQuery.neq("status", "laudo");
+      return filteredPatientQuery
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to);
+    }),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("payments")
+      .select("*")
+      .eq("clinic_id", current.clinicId)
+      .order("paid_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to)),
   ]);
-  if (patientResult.error) throw patientResult.error;
-  if (paymentResult.error) throw paymentResult.error;
 
   const doctorById = new Map(doctors.map((doctor) => [doctor.id, doctor]));
   const paymentsByPatient = new Map<string, PatientPaymentRecord[]>();
-  for (const row of (paymentResult.data ?? []) as unknown as Record<string, unknown>[]) {
+  for (const row of paymentRows) {
     const patientId = text(row.patient_id);
     paymentsByPatient.set(patientId, [...(paymentsByPatient.get(patientId) ?? []), paymentFromRow(row)]);
   }
 
-  const patients = ((patientResult.data ?? []) as unknown as MedicalPatientRow[]).map((row) => ({
+  const patients = patientRows.map((row) => ({
     ...mapMedicalPatient(row, row.doctor_profile_id ? doctorById.get(row.doctor_profile_id)?.fullName ?? "Médico não vinculado" : "Médico não vinculado"),
     payments: paymentsByPatient.get(row.id) ?? [],
   }));
