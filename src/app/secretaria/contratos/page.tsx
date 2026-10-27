@@ -125,7 +125,7 @@ export default function ContractsPage() {
         const context = await loadSecretaryContext();
         const workspace = await loadSecretaryPatients(context);
         const currentPatients = workspace.patients.filter((item) => item.status === "ativo");
-        const loadedPortals = await loadSecretaryPortals(currentPatients.map((item) => item.id));
+        const loadedPortals = await loadSecretaryPortals(currentPatients.map((item) => item.id), context);
         if (!active) return;
         setPatients(currentPatients);
         setPortals(loadedPortals);

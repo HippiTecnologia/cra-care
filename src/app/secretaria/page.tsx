@@ -427,21 +427,23 @@ export default function SecretariaPage() {
   const [savingPatient, setSavingPatient] = useState(false);
   const [kanbanMenuOpen, setKanbanMenuOpen] = useState(false);
   const [kanbanStatusFilter, setKanbanStatusFilter] = useState<PatientStatus | "todos">("todos");
+  const [visibleCardsByStatus, setVisibleCardsByStatus] = useState<Partial<Record<PatientStatus, number>>>({});
 
   useEffect(() => {
     let active = true;
     void (async () => {
       try {
         const workspace = await loadSecretaryPatients();
+        if (!active) return;
+        setContext(workspace.context);
+        setPatients(workspace.patients.map(patientFromMedicalRecord));
         const [loadedPortals, loadedPrescriptions, loadedStock, loadedBatches] = await Promise.all([
-          loadSecretaryPortals(workspace.patients.map((patient) => patient.id)),
+          loadSecretaryPortals(workspace.patients.map((patient) => patient.id), workspace.context),
           loadSecretaryPrescriptions(workspace.context),
           loadSecretaryStock(workspace.context),
           loadSecretaryBatches(workspace.context),
         ]);
         if (!active) return;
-        setContext(workspace.context);
-        setPatients(workspace.patients.map(patientFromMedicalRecord));
         setPortals(loadedPortals);
         setPrescriptions(loadedPrescriptions);
         setStockItems(loadedStock);
@@ -1177,6 +1179,7 @@ export default function SecretariaPage() {
                 const columnPatients = filteredPatients.filter(
                   (patient) => patient.status === column.id,
                 );
+                const visibleCount = visibleCardsByStatus[column.id] ?? 40;
 
                 return (
                   <div
@@ -1218,7 +1221,7 @@ export default function SecretariaPage() {
                         </div>
                       )}
 
-                      {columnPatients.map((patient) => {
+                      {columnPatients.slice(0, visibleCount).map((patient) => {
                         const portal = portals[patient.id] ?? createDefaultPortalState(patient.id);
                         const currentBottle = portal.bottles.find((bottle) => bottle.status === "em-uso");
                         const nextContact = getNextContactDate(patient, portal, stockItems, prescriptions);
@@ -1364,6 +1367,18 @@ export default function SecretariaPage() {
                           </article>
                         );
                       })}
+                      {columnPatients.length > visibleCount && (
+                        <button
+                          type="button"
+                          onClick={() => setVisibleCardsByStatus((current) => ({
+                            ...current,
+                            [column.id]: (current[column.id] ?? 40) + 40,
+                          }))}
+                          className="w-full rounded-xl border border-[#d9b4bf] bg-white px-4 py-3 text-xs font-bold text-[#a3113a] hover:bg-[#fff0f3]"
+                        >
+                          Mostrar mais ({columnPatients.length - visibleCount} restantes)
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

@@ -75,7 +75,7 @@ export default function SecretaryAssessmentsPage() {
       try {
         const loadedContext = await loadSecretaryContext();
         const workspace = await loadSecretaryPatients(loadedContext);
-        const loadedPortals = await loadSecretaryPortals(workspace.patients.map((patient) => patient.id));
+        const loadedPortals = await loadSecretaryPortals(workspace.patients.map((patient) => patient.id), loadedContext);
         if (!active) return;
         setContext(loadedContext);
         setPatients(workspace.patients);

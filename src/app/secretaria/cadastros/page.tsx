@@ -176,8 +176,15 @@ export default function PatientRecordsPage() {
     void (async () => {
       try {
         const workspace = await loadSecretaryPatients(undefined, { includeLaudo: true });
+        if (!active) return;
+        setContext(workspace.context);
+        setPatients(workspace.patients);
+        const hash = window.location.hash.slice(1);
+        const initialId = workspace.patients.some((item) => item.id === hash) ? hash : workspace.patients[0]?.id ?? "";
+        setSelectedId(initialId);
+        setDraft(workspace.patients.find((item) => item.id === initialId) ?? null);
         const [loadedPortals, loadedPrescriptions, loadedInvoices, loadedStock, loadedBatches, loadedMethods] = await Promise.all([
-          loadSecretaryPortals(workspace.patients.map((item) => item.id)),
+          loadSecretaryPortals(workspace.patients.map((item) => item.id), workspace.context),
           loadSecretaryPrescriptions(workspace.context),
           loadSecretaryInvoices(workspace.context),
           loadSecretaryStock(workspace.context),
@@ -185,18 +192,12 @@ export default function PatientRecordsPage() {
           loadActiveAdminMethods(workspace.context),
         ]);
         if (!active) return;
-        setContext(workspace.context);
-        setPatients(workspace.patients);
         setPortals(loadedPortals);
         setPrescriptionRecords(loadedPrescriptions);
         setInvoiceRecords(loadedInvoices);
         setStockRecords(loadedStock);
         setBatchRecords(loadedBatches);
         setAdminMethods(loadedMethods);
-        const hash = window.location.hash.slice(1);
-        const initialId = workspace.patients.some((item) => item.id === hash) ? hash : workspace.patients[0]?.id ?? "";
-        setSelectedId(initialId);
-        setDraft(workspace.patients.find((item) => item.id === initialId) ?? null);
       } catch {
         if (active) setMessage("Não foi possível carregar os cadastros reais da Secretaria.");
       }

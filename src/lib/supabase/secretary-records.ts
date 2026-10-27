@@ -227,12 +227,17 @@ async function loadAllPages<Row>(
   }>,
 ): Promise<Row[]> {
   const rows: Row[] = [];
-  for (let from = 0; ; from += SUPABASE_PAGE_SIZE) {
-    const { data, error } = await fetchPage(from, from + SUPABASE_PAGE_SIZE - 1);
-    if (error) throw error;
-    const page = data ?? [];
-    rows.push(...page);
-    if (page.length < SUPABASE_PAGE_SIZE) return rows;
+  for (let from = 0; ; from += SUPABASE_PAGE_SIZE * 3) {
+    const pages = await Promise.all([0, 1, 2].map((index) => {
+      const start = from + index * SUPABASE_PAGE_SIZE;
+      return fetchPage(start, start + SUPABASE_PAGE_SIZE - 1);
+    }));
+    for (const { data, error } of pages) {
+      if (error) throw error;
+      const page = data ?? [];
+      rows.push(...page);
+      if (page.length < SUPABASE_PAGE_SIZE) return rows;
+    }
   }
 }
 
@@ -546,40 +551,17 @@ function bottleFromRow(row: Record<string, unknown>): PatientBottle {
   };
 }
 
-export async function loadSecretaryPortals(patientIds: string[]) {
+export async function loadSecretaryPortals(patientIds: string[], context?: SecretaryContext) {
   if (!patientIds.length) return {} as Record<string, PatientPortalState>;
+  const current = context ?? await loadSecretaryContext();
   const supabase = getSupabaseClient();
-  const patientIdBatchSize = 100;
-  const patientIdBatches = Array.from(
-    { length: Math.ceil(patientIds.length / patientIdBatchSize) },
-    (_, index) => patientIds.slice(index * patientIdBatchSize, (index + 1) * patientIdBatchSize),
-  );
-  const portalBatches = await Promise.all(patientIdBatches.map(async (patientIdBatch) => {
-    const [assessmentResult, bottleResult, contractResult, settingsResult, useResult] = await Promise.all([
-      supabase.from("patient_assessments").select("*").in("patient_id", patientIdBatch).order("created_at", { ascending: false }),
-      supabase.from("bottles").select("*").in("patient_id", patientIdBatch).order("bottle_number", { ascending: false }),
-      supabase.from("patient_contracts").select("*").in("patient_id", patientIdBatch),
-      supabase.from("patient_portal_settings").select("*").in("patient_id", patientIdBatch),
-      supabase.from("patient_use_records").select("*").in("patient_id", patientIdBatch).order("use_date", { ascending: false }),
-    ]);
-    if (assessmentResult.error) throw assessmentResult.error;
-    if (bottleResult.error) throw bottleResult.error;
-    if (contractResult.error) throw contractResult.error;
-    if (settingsResult.error) throw settingsResult.error;
-    if (useResult.error) throw useResult.error;
-    return {
-      assessments: assessmentResult.data ?? [],
-      bottles: bottleResult.data ?? [],
-      contracts: contractResult.data ?? [],
-      settings: settingsResult.data ?? [],
-      useRecords: useResult.data ?? [],
-    };
-  }));
-  const assessmentRows = portalBatches.flatMap((batch) => batch.assessments);
-  const bottleRows = portalBatches.flatMap((batch) => batch.bottles);
-  const contractRows = portalBatches.flatMap((batch) => batch.contracts);
-  const settingsRows = portalBatches.flatMap((batch) => batch.settings);
-  const useRows = portalBatches.flatMap((batch) => batch.useRecords);
+  const [assessmentRows, bottleRows, contractRows, settingsRows, useRows] = await Promise.all([
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_assessments").select("*").eq("clinic_id", current.clinicId).order("created_at", { ascending: false }).order("id").range(from, to)),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("bottles").select("*").eq("clinic_id", current.clinicId).order("bottle_number", { ascending: false }).order("id").range(from, to)),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_contracts").select("*").eq("clinic_id", current.clinicId).order("id").range(from, to)),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_portal_settings").select("*").eq("clinic_id", current.clinicId).order("patient_id").range(from, to)),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_use_records").select("*").eq("clinic_id", current.clinicId).order("use_date", { ascending: false }).order("id").range(from, to)),
+  ]);
   const result = Object.fromEntries(patientIds.map((id) => [id, createDefaultPortalState(id)])) as Record<string, PatientPortalState>;
   for (const row of assessmentRows as unknown as Record<string, unknown>[]) {
     const patientId = text(row.patient_id);
