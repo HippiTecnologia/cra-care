@@ -48,19 +48,6 @@ export type TeamNotification = {
   readAt?: string;
 };
 
-export type SecretaryPatientOrderHistory = {
-  id: string;
-  sourceRowNumber: number;
-  receivedDate: string;
-  doctor: string;
-  phase: string;
-  formula: string;
-  bottles: string;
-  amount: string;
-  paymentMethod: string;
-  installment: string;
-};
-
 type PrescriptionRow = {
   id: string;
   patient_id: string;
@@ -214,6 +201,7 @@ export async function markTeamNotificationRead(context: SecretaryContext, notifi
 function paymentFromRow(row: Record<string, unknown>): PatientPaymentRecord {
   return {
     id: text(row.id),
+    historicalImport: row.historical_import === true,
     treatment: /bacteriana|imunobacteriana/i.test(text(row.treatment))
       ? "Imunobacteriana"
       : text(row.treatment) ? "Rinite" : undefined,
@@ -368,6 +356,7 @@ export async function saveSecretaryPatient(
     const payload = {
       clinic_id: context.clinicId,
       patient_id: patient.id,
+      historical_import: payment.historicalImport ?? false,
       installment_number: payment.installmentNumber ?? 1,
       installment_count: payment.installments ?? patient.paymentInstallments ?? 1,
       amount: payment.amount,
@@ -488,35 +477,6 @@ export async function loadSecretaryPrescriptions(context?: SecretaryContext) {
   return ((result.data ?? []) as unknown as PrescriptionRow[]).map((row) => prescriptionFromRow(row, doctorById));
 }
 
-export async function loadSecretaryPatientOrderHistory(
-  patientId: string,
-  context?: SecretaryContext,
-): Promise<SecretaryPatientOrderHistory[]> {
-  const current = context ?? await loadSecretaryContext();
-  const { data, error } = await getSupabaseClient()
-    .from("patient_order_history")
-    .select("id, source_row_number, source_record")
-    .eq("clinic_id", current.clinicId)
-    .eq("patient_id", patientId)
-    .order("source_row_number", { ascending: true });
-  if (error) throw error;
-  return ((data ?? []) as unknown as Record<string, unknown>[]).map((row) => {
-    const source = objectValue(row.source_record);
-    return {
-      id: text(row.id),
-      sourceRowNumber: number(row.source_row_number),
-      receivedDate: text(source.receivedDate),
-      doctor: text(source.doctor),
-      phase: text(source.phase),
-      formula: text(source.formula),
-      bottles: text(source.bottles),
-      amount: text(source.amount),
-      paymentMethod: text(source.paymentMethod),
-      installment: text(source.installment),
-    };
-  });
-}
-
 function assessmentFromRow(row: Record<string, unknown>): PatientAssessment {
   return {
     id: text(row.id),
@@ -538,11 +498,17 @@ function assessmentFromRow(row: Record<string, unknown>): PatientAssessment {
 
 function bottleFromRow(row: Record<string, unknown>): PatientBottle {
   const rawStatus = text(row.status).toLowerCase();
+  const metadata = objectValue(row.metadata);
   return {
     id: text(row.id),
     number: number(row.bottle_number),
     prescriptionId: text(row.prescription_id) || undefined,
-    treatment: text(objectValue(row.metadata).treatment) || undefined,
+    treatment: text(metadata.treatment) || undefined,
+    phase: text(metadata.phase) || undefined,
+    bottleVolumeMl: number(row.volume_ml) || number(metadata.bottleVolumeMl) || undefined,
+    formulas: Array.isArray(metadata.formulas) ? metadata.formulas as PatientBottle["formulas"] : undefined,
+    formulaText: text(metadata.formulaText) || undefined,
+    historicalImport: Boolean(metadata.historicalImportSource),
     receivedAt: text(row.received_at) || undefined,
     startedAt: text(row.started_at),
     finishedAt: text(row.completed_at) || undefined,
@@ -901,7 +867,7 @@ export async function loadSecretaryStock(context?: SecretaryContext) {
     .order("received_at", { ascending: false });
   if (error) throw error;
   return ((data ?? []) as unknown as Record<string, unknown>[])
-    .filter((row) => objectValue(row.metadata).manuallyDeleted !== true)
+    .filter((row) => objectValue(row.metadata).manuallyDeleted !== true && !objectValue(row.metadata).historicalImportSource)
     .map(stockFromRow);
 }
 

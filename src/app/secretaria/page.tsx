@@ -1795,8 +1795,8 @@ export default function SecretariaPage() {
                   </div>
                   <div className="grid grid-cols-3 gap-2 text-right">
                     <div className="rounded-xl bg-[#f5f0ed] px-3 py-2"><p className="text-[10px] text-[#716569]">Total</p><p className="mt-0.5 text-sm font-bold text-[#433438]">{formatCurrency(newPatient.contractValue)}</p></div>
-                    <div className="rounded-xl bg-[#edf8f3] px-3 py-2"><p className="text-[10px] text-[#187157]">Pago</p><p className="mt-0.5 text-sm font-bold text-[#187157]">{formatCurrency(newPatient.payments.reduce((total, payment) => total + payment.amount, 0))}</p></div>
-                    <div className="rounded-xl bg-[#fff4e4] px-3 py-2"><p className="text-[10px] text-[#966419]">Saldo</p><p className="mt-0.5 text-sm font-bold text-[#966419]">{formatCurrency(Math.max(0, newPatient.contractValue - newPatient.payments.reduce((total, payment) => total + payment.amount, 0)))}</p></div>
+                    <div className="rounded-xl bg-[#edf8f3] px-3 py-2"><p className="text-[10px] text-[#187157]">Pago</p><p className="mt-0.5 text-sm font-bold text-[#187157]">{formatCurrency(newPatient.payments.filter((payment) => !payment.historicalImport).reduce((total, payment) => total + payment.amount, 0))}</p></div>
+                    <div className="rounded-xl bg-[#fff4e4] px-3 py-2"><p className="text-[10px] text-[#966419]">Saldo</p><p className="mt-0.5 text-sm font-bold text-[#966419]">{formatCurrency(Math.max(0, newPatient.contractValue - newPatient.payments.filter((payment) => !payment.historicalImport).reduce((total, payment) => total + payment.amount, 0)))}</p></div>
                   </div>
                 </div>
 

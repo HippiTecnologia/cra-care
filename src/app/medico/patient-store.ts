@@ -121,6 +121,8 @@ export type ClinicalRecord = {
 export type PatientPaymentRecord = {
   id: string;
   treatment?: "Rinite" | "Imunobacteriana";
+  /** Pagamento histórico importado; permanece no histórico, fora dos totais do contrato atual. */
+  historicalImport?: boolean;
   bottlePlanId?: string;
   /** Quantidade extra de frascos liberada por este pagamento, além da cobertura inicial. */
   additionalBottles?: number;

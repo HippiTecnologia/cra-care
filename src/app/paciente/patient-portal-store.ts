@@ -4,6 +4,11 @@ export type PatientBottle = {
   /** Receita que originou o frasco; preserva trilhas simultâneas de tratamento. */
   prescriptionId?: string;
   treatment?: string;
+  phase?: string;
+  bottleVolumeMl?: number;
+  formulas?: Array<{ id: string; name: string; percentage: number }>;
+  formulaText?: string;
+  historicalImport?: boolean;
   receivedAt?: string;
   startedAt: string;
   finishedAt?: string;

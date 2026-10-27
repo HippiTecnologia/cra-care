@@ -14,6 +14,8 @@ export type BottleHistoryEntry = {
   phase?: string;
   bottleVolumeMl?: BottleVolumeMl;
   formulas?: PrescriptionFormula[];
+  formulaText?: string;
+  historicalImport?: boolean;
   receivedAt?: string;
   startedAt?: string;
   finishedAt?: string;
@@ -77,9 +79,11 @@ export function buildBottleHistory(
       number,
       prescriptionId: bottle?.prescriptionId,
       treatment: bottle?.treatment ?? prescription?.treatment ?? stockItem?.treatment,
-      phase: adjustment?.phase ?? stockItem?.phase ?? prescription?.phase,
-      bottleVolumeMl: (adjustment?.bottleVolumeMl as BottleVolumeMl | undefined) ?? stockItem?.bottleVolumeMl ?? prescription?.bottleVolumeMl,
-      formulas: adjustment?.formulas ?? stockItem?.formulas ?? prescription?.formulas,
+      phase: adjustment?.phase ?? bottle?.phase ?? stockItem?.phase ?? prescription?.phase,
+      bottleVolumeMl: (adjustment?.bottleVolumeMl as BottleVolumeMl | undefined) ?? (bottle?.bottleVolumeMl as BottleVolumeMl | undefined) ?? stockItem?.bottleVolumeMl ?? prescription?.bottleVolumeMl,
+      formulas: adjustment?.formulas ?? bottle?.formulas ?? stockItem?.formulas ?? prescription?.formulas,
+      formulaText: bottle?.formulaText,
+      historicalImport: bottle?.historicalImport,
       receivedAt: adjustment?.receivedAt ?? bottle?.receivedAt ?? receiptDates[index],
       startedAt: adjustment?.startedAt ?? bottle?.startedAt,
       finishedAt: adjustment?.finishedAt ?? bottle?.finishedAt,

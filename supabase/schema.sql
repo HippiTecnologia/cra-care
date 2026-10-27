@@ -82,6 +82,7 @@ create table if not exists public.payments (
   payment_method text not null,
   status text not null default 'pendente',
   asaas_reference text,
+  historical_import boolean not null default false,
   created_at timestamptz not null default now()
 );
 

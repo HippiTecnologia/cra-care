@@ -114,6 +114,7 @@ function prescriptionFromRow(row: Record<string, unknown>): DemoPrescription {
 }
 
 function bottleFromRow(row: Record<string, unknown>): PatientBottle {
+  const metadata = objectValue(row.metadata);
   const completedAt = text(row.completed_at) || undefined;
   const startedAt = text(row.started_at) || undefined;
   const rawStatus = text(row.status).toLowerCase();
@@ -126,9 +127,14 @@ function bottleFromRow(row: Record<string, unknown>): PatientBottle {
     id: text(row.id),
     number: number(row.bottle_number, 1),
     prescriptionId: text(row.prescription_id) || undefined,
-    treatment: text(objectValue(row.metadata).treatment) || undefined,
+    treatment: text(metadata.treatment) || undefined,
+    phase: text(metadata.phase) || undefined,
+    bottleVolumeMl: number(row.volume_ml) || number(metadata.bottleVolumeMl) || undefined,
+    formulas: Array.isArray(metadata.formulas) ? metadata.formulas as PatientBottle["formulas"] : undefined,
+    formulaText: text(metadata.formulaText) || undefined,
+    historicalImport: Boolean(metadata.historicalImportSource),
     receivedAt: text(row.received_at) || undefined,
-    startedAt: startedAt ?? text(row.received_at, text(row.created_at)),
+    startedAt: metadata.historicalImportSource ? startedAt ?? "" : startedAt ?? text(row.received_at, text(row.created_at)),
     finishedAt: completedAt,
     status,
   };
