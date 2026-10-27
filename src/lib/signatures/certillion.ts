@@ -238,7 +238,13 @@ async function validateDocument(config: CertillionConfig, clientToken: string, s
   };
   const isValidStatus = (signals: ValidationSignal[]) => signals.some((item) => item.name === "SIGNATURE_VALID" || item.code === "140");
   const signatureSignals = signatureResults.map((item: unknown) => collectSignals(item));
-  const allSignaturesValid = signatureSignals.length > 0 && signatureSignals.every(isValidStatus);
+  const hasValidationError = (value: unknown) => value !== null && value !== undefined && value !== "" && value !== false;
+  const allSignaturesValid = signatureSignals.length > 0 && signatureSignals.every((signals, index) => {
+    const result = signatureResults[index] && typeof signatureResults[index] === "object" && !Array.isArray(signatureResults[index])
+      ? signatureResults[index] as Record<string, unknown> : {};
+    if (result.valid === false || hasValidationError(result.error)) return false;
+    return result.valid === true || isValidStatus(signals);
+  });
   const topLevelValid = isValidStatus(collectSignals(status));
   if (!(signatureResults.length > 0 ? allSignaturesValid : topLevelValid)) {
     const name = typeof status.name === "string" ? status.name.replace(/[^A-Za-z_]/g, "").slice(0, 40) : "SEM_STATUS";
@@ -251,14 +257,19 @@ async function validateDocument(config: CertillionConfig, clientToken: string, s
       const relevant = signals.filter((item) => item.name || item.code).slice(0, 3);
       return relevant.length ? relevant.map((item) => `${item.name || "SEM_NOME"} ${item.code}`.trim()).join("/") : "SEM_STATUS";
     }).join(", ");
-    throw new CertillionApiError(`A validação ICP-Brasil não confirmou a assinatura (status ${name}${code ? ` ${code}` : ""}${fields ? `; campos ${fields}` : ""}${signatureFields ? `; campos por assinatura ${signatureFields}` : ""}${nestedCodes ? `; assinaturas ${nestedCodes}` : ""}).`, "validate", true);
+    const validity = signatureResults.slice(0, 5).map((item: unknown) => {
+      const result = item && typeof item === "object" && !Array.isArray(item) ? item as Record<string, unknown> : {};
+      return `${result.valid === true ? "valid=true" : result.valid === false ? "valid=false" : "valid=indefinido"}${hasValidationError(result.error) ? "/erro" : ""}`;
+    }).join(", ");
+    throw new CertillionApiError(`A validação ICP-Brasil não confirmou a assinatura (status ${name}${code ? ` ${code}` : ""}${fields ? `; campos ${fields}` : ""}${signatureFields ? `; campos por assinatura ${signatureFields}` : ""}${nestedCodes ? `; assinaturas ${nestedCodes}` : ""}${validity ? `; resultado ${validity}` : ""}).`, "validate", true);
   }
   return {
     valid: true,
     status: { code: status.code, name: status.name },
-    signatures: signatureSignals.map((signals) => {
+    signatures: signatureSignals.map((signals, index) => {
       const valid = signals.find((item) => item.name === "SIGNATURE_VALID" || item.code === "140");
-      return { code: valid?.code, name: valid?.name };
+      const result = signatureResults[index] as Record<string, unknown>;
+      return { code: valid?.code, name: valid?.name, valid: result.valid === true || Boolean(valid) };
     }),
   };
 }
