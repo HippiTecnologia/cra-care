@@ -29,6 +29,7 @@ import { bottlesBeyondCoverage, getBottleBillingState } from "../bottle-billing"
 import {
   loadSecretaryBatches,
   loadSecretaryInvoices,
+  loadSecretaryPatientOrderHistory,
   loadSecretaryPatients,
   loadSecretaryPortals,
   loadSecretaryPrescriptions,
@@ -40,6 +41,7 @@ import {
   saveSecretaryPatient,
   saveSecretaryTreatmentFinance,
   type SecretaryContext,
+  type SecretaryPatientOrderHistory,
 } from "../../../lib/supabase/secretary-records";
 
 type Tab = "pessoais" | "tratamento" | "financeiro";
@@ -129,6 +131,8 @@ export default function PatientRecordsPage() {
   const [portals, setPortals] = useState<Record<string, PatientPortalState>>({});
   const [context, setContext] = useState<SecretaryContext | null>(null);
   const [prescriptionRecords, setPrescriptionRecords] = useState<DemoPrescription[]>([]);
+  const [historicalOrders, setHistoricalOrders] = useState<SecretaryPatientOrderHistory[]>([]);
+  const [historicalOrdersLoading, setHistoricalOrdersLoading] = useState(false);
   const [invoiceRecords, setInvoiceRecords] = useState<DemoInvoice[]>([]);
   const [stockRecords, setStockRecords] = useState<DemoStockItem[]>([]);
   const [batchRecords, setBatchRecords] = useState<DemoBatch[]>([]);
@@ -202,6 +206,20 @@ export default function PatientRecordsPage() {
     })();
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!context || !selectedId) {
+      setHistoricalOrders([]);
+      return;
+    }
+    let active = true;
+    setHistoricalOrdersLoading(true);
+    void loadSecretaryPatientOrderHistory(selectedId, context)
+      .then((orders) => { if (active) setHistoricalOrders(orders); })
+      .catch(() => { if (active) setHistoricalOrders([]); })
+      .finally(() => { if (active) setHistoricalOrdersLoading(false); });
+    return () => { active = false; };
+  }, [context, selectedId]);
 
   const patient = patients.find((item) => item.id === selectedId);
 
@@ -756,6 +774,17 @@ export default function PatientRecordsPage() {
               })}</div> : <Info title="Tratamentos">Nenhuma receita de Rinite ou Imunobacteriana registrada.</Info>}
               {editing && <div className="grid gap-4 rounded-2xl border border-[#eee5e0] p-5 sm:grid-cols-2"><Field label="Status geral do cadastro"><select value={draft.status ?? "em-conversa"} onChange={(event) => updateDraft("status", event.target.value as DemoPatientRecord["status"])} className={inputClass}>{statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field><Field label="Método de recebimento"><select value={draft.delivery ?? "Retirada"} onChange={(event) => updateDraft("delivery", event.target.value as DemoPatientRecord["delivery"])} className={inputClass}>{["Motoboy", "Retirada", "Sedex", "Aéreo"].map((value) => <option key={value}>{value}</option>)}</select></Field>{draft.status === "desistente" && <Field label="Motivo da desistência" wide><textarea rows={3} value={draft.abandonmentReason ?? ""} onChange={(event) => updateDraft("abandonmentReason", event.target.value)} className={textareaClass} /></Field>}<div className="flex justify-end sm:col-span-2"><button type="button" onClick={() => saveDraft("Dados do tratamento")} className={primaryButtonClass}>Salvar dados gerais</button></div></div>}
               <Info title="Observações dos médicos">{prescriptions.filter((item) => item.notes.trim()).map((item) => `${formatDate(item.createdAt)} · ${item.doctor}\n${item.notes}`).join("\n\n") || "Nenhuma observação médica registrada nas receitas."}</Info>
+              <div className="rounded-2xl border border-[#ead5dc] bg-[#fff9fb] p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div><h3 className="font-bold">Histórico de pedidos da planilha ({historicalOrders.length})</h3><p className="mt-1 text-xs text-[#817578]">Registro histórico original; não cria receita assinada nem altera os totais do financeiro.</p></div>
+                </div>
+                {historicalOrdersLoading ? <p className="mt-4 text-sm text-[#817578]">Carregando histórico…</p> : historicalOrders.length ? <div className="mt-4 space-y-3">{historicalOrders.map((order) => <article key={order.id} className="rounded-xl border border-[#eadfd9] bg-white p-4 text-sm">
+                  <div className="flex flex-wrap justify-between gap-2"><strong>Pedido importado · linha {order.sourceRowNumber}</strong><span>{order.receivedDate || "Data não informada"}</span></div>
+                  <p className="mt-2 text-[#66595d]"><strong>Fase:</strong> {order.phase || "—"} · <strong>Frascos:</strong> {order.bottles || "—"} · <strong>Valor:</strong> {order.amount ? `R$ ${order.amount}` : "—"}</p>
+                  <p className="mt-1 text-[#66595d]"><strong>Forma de pagamento:</strong> {order.paymentMethod || "—"} · <strong>Parcela:</strong> {order.installment || "—"} · <strong>Médico:</strong> {order.doctor || "—"}</p>
+                  <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-[#817578]"><strong>Fórmula registrada:</strong> {order.formula || "Não informada"}</p>
+                </article>)}</div> : <p className="mt-4 text-sm text-[#817578]">Nenhum pedido importado para este paciente.</p>}
+              </div>
               <div className="rounded-2xl bg-[#fbf7f5] p-5"><h3 className="font-bold">Histórico completo de receitas e fórmulas ({prescriptions.length})</h3><div className="mt-4 space-y-3">{prescriptions.map((item) => <article key={item.id} className="rounded-xl border border-[#eadfd9] bg-white p-4 text-sm"><div className="flex flex-wrap justify-between gap-2"><strong>{treatmentTrack(item.treatment)} · {formatDate(item.createdAt)}{item.phase ? ` · ${item.phase}` : ""}</strong><span>{item.bottles} frasco(s) · {item.bottleVolumeMl ? `${item.bottleVolumeMl} mL por frasco` : "volume não informado"}</span></div><p className="mt-2 text-[#66595d]">{item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ")}</p><p className="mt-2 text-xs text-[#817578]">{item.posology} · {item.doctor} · CRM {item.doctorCrm}</p></article>)}{prescriptions.length === 0 && <p className="text-sm text-[#817578]">Nenhuma receita registrada.</p>}</div></div>
               <div className="rounded-2xl bg-[#fbf7f5] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold">Histórico das avaliações ({portal?.assessments.length ?? 0})</h3><Link href="/secretaria/avaliacoes" className="rounded-xl border border-[#e5d9d4] bg-white px-4 py-2 text-xs font-bold text-[#a3113a]">Gerenciar avaliações</Link></div><div className="mt-4 space-y-3">{portal?.assessments.map((item) => <article key={item.id} className="rounded-xl border border-[#eadfd9] bg-white p-4 text-sm leading-6"><strong>Frasco {item.bottleNumber} · {formatDate(item.createdAt)}</strong><p>Frequência: {item.symptomFrequency ?? "Avaliação anterior"}</p><p>Severidade: {item.symptomSeverity ?? item.feeling ?? "Não informada"}</p><p>Uso de medicamentos: {item.medicationFrequency ?? "Não informado"}</p><p>Relato: {item.notes || "Sem comentário"}</p><p className="mt-2 text-xs text-[#817578]">{item.viewedAt ? `Conferida por ${item.viewedBy ?? "equipe"} em ${formatDate(item.viewedAt, true)}` : "Aguardando conferência da equipe"}</p>{item.response && <p className="mt-2 rounded-lg bg-[#edf8f3] px-3 py-2 text-[#187157]">Resposta: {item.response}</p>}</article>)}{!portal?.assessments.length && <p className="text-sm text-[#817578]">Nenhuma avaliação registrada.</p>}</div></div>
               <div className="rounded-2xl bg-[#fbf7f5] p-5">

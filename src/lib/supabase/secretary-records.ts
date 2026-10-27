@@ -48,6 +48,19 @@ export type TeamNotification = {
   readAt?: string;
 };
 
+export type SecretaryPatientOrderHistory = {
+  id: string;
+  sourceRowNumber: number;
+  receivedDate: string;
+  doctor: string;
+  phase: string;
+  formula: string;
+  bottles: string;
+  amount: string;
+  paymentMethod: string;
+  installment: string;
+};
+
 type PrescriptionRow = {
   id: string;
   patient_id: string;
@@ -468,6 +481,35 @@ export async function loadSecretaryPrescriptions(context?: SecretaryContext) {
   if (result.error) throw result.error;
   const doctorById = new Map(doctors.map((doctor) => [doctor.id, doctor]));
   return ((result.data ?? []) as unknown as PrescriptionRow[]).map((row) => prescriptionFromRow(row, doctorById));
+}
+
+export async function loadSecretaryPatientOrderHistory(
+  patientId: string,
+  context?: SecretaryContext,
+): Promise<SecretaryPatientOrderHistory[]> {
+  const current = context ?? await loadSecretaryContext();
+  const { data, error } = await getSupabaseClient()
+    .from("patient_order_history")
+    .select("id, source_row_number, source_record")
+    .eq("clinic_id", current.clinicId)
+    .eq("patient_id", patientId)
+    .order("source_row_number", { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map((row) => {
+    const source = objectValue(row.source_record);
+    return {
+      id: text(row.id),
+      sourceRowNumber: number(row.source_row_number),
+      receivedDate: text(source.receivedDate),
+      doctor: text(source.doctor),
+      phase: text(source.phase),
+      formula: text(source.formula),
+      bottles: text(source.bottles),
+      amount: text(source.amount),
+      paymentMethod: text(source.paymentMethod),
+      installment: text(source.installment),
+    };
+  });
 }
 
 function assessmentFromRow(row: Record<string, unknown>): PatientAssessment {
