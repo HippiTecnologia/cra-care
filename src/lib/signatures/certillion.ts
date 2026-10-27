@@ -220,28 +220,46 @@ async function validateDocument(config: CertillionConfig, clientToken: string, s
   }, "validate");
   const status = payload.status && typeof payload.status === "object" ? payload.status as Record<string, any> : {};
   const signatureResults = Array.isArray(payload.signatures) ? payload.signatures : [];
-  const isValidStatus = (item: Record<string, any>) => item.name === "SIGNATURE_VALID" || item.code === 140 || item.code === "140";
-  const allSignaturesValid = signatureResults.length > 0 && signatureResults.every((item: unknown) => {
-    if (!item || typeof item !== "object") return false;
-    const result = item as Record<string, any>;
-    const nested = result.status && typeof result.status === "object" ? result.status as Record<string, any> : {};
-    return isValidStatus(nested);
-  });
-  if (!(signatureResults.length > 0 ? allSignaturesValid : isValidStatus(status))) {
+  type ValidationSignal = { name: string; code: string };
+  const collectSignals = (value: unknown, depth = 0, field = ""): ValidationSignal[] => {
+    if (typeof value === "string" && /^(SIGNATURE_VALID|140)$/i.test(value.trim()) && /status|result|valid/i.test(field)) {
+      return [{ name: value.trim().toUpperCase() === "140" ? "" : value.trim().toUpperCase(), code: value.trim() === "140" ? "140" : "" }];
+    }
+    if (depth > 6 || value === null || typeof value !== "object") return [];
+    if (Array.isArray(value)) return value.flatMap((item) => collectSignals(item, depth + 1, field)).slice(0, 20);
+    const object = value as Record<string, unknown>;
+    const nameValue = object.name ?? object.status_name ?? object.statusName;
+    const codeValue = object.code ?? object.status_code ?? object.statusCode;
+    const name = typeof nameValue === "string" ? nameValue.toUpperCase().replace(/[^A-Z_]/g, "").slice(0, 40) : "";
+    const code = typeof codeValue === "number" || typeof codeValue === "string" ? String(codeValue).replace(/[^0-9]/g, "").slice(0, 8) : "";
+    const ownSignal = name || code ? [{ name, code }] : [];
+    const nestedSignals = Object.entries(object).flatMap(([key, item]) => collectSignals(item, depth + 1, key));
+    return [...ownSignal, ...nestedSignals].slice(0, 20);
+  };
+  const isValidStatus = (signals: ValidationSignal[]) => signals.some((item) => item.name === "SIGNATURE_VALID" || item.code === "140");
+  const signatureSignals = signatureResults.map((item: unknown) => collectSignals(item));
+  const allSignaturesValid = signatureSignals.length > 0 && signatureSignals.every(isValidStatus);
+  const topLevelValid = isValidStatus(collectSignals(status));
+  if (!(signatureResults.length > 0 ? allSignaturesValid : topLevelValid)) {
     const name = typeof status.name === "string" ? status.name.replace(/[^A-Za-z_]/g, "").slice(0, 40) : "SEM_STATUS";
     const code = typeof status.code === "number" || typeof status.code === "string" ? String(status.code).replace(/[^0-9]/g, "").slice(0, 8) : "";
     const fields = Object.keys(payload).filter((key) => key !== "status" && /^[A-Za-z_]{1,40}$/.test(key)).slice(0, 8).join(", ");
-    const nestedCodes = signatureResults.slice(0, 5).map((item: unknown) => {
-      const result = item && typeof item === "object" ? item as Record<string, any> : {};
-      const nested = result.status && typeof result.status === "object" ? result.status as Record<string, any> : {};
-      return `${String(nested.name ?? "SEM_STATUS").replace(/[^A-Za-z_]/g, "").slice(0, 40)} ${String(nested.code ?? "").replace(/[^0-9]/g, "").slice(0, 8)}`.trim();
+    const signatureFields = signatureResults.slice(0, 3).map((item: unknown) => item && typeof item === "object" && !Array.isArray(item)
+      ? Object.keys(item as Record<string, unknown>).filter((key) => /^[A-Za-z_]{1,40}$/.test(key)).slice(0, 8).join("/") || "SEM_CAMPOS"
+      : "SEM_CAMPOS").join(", ");
+    const nestedCodes = signatureSignals.slice(0, 5).map((signals) => {
+      const relevant = signals.filter((item) => item.name || item.code).slice(0, 3);
+      return relevant.length ? relevant.map((item) => `${item.name || "SEM_NOME"} ${item.code}`.trim()).join("/") : "SEM_STATUS";
     }).join(", ");
-    throw new CertillionApiError(`A validação ICP-Brasil não confirmou a assinatura (status ${name}${code ? ` ${code}` : ""}${fields ? `; campos ${fields}` : ""}${nestedCodes ? `; assinaturas ${nestedCodes}` : ""}).`, "validate", true);
+    throw new CertillionApiError(`A validação ICP-Brasil não confirmou a assinatura (status ${name}${code ? ` ${code}` : ""}${fields ? `; campos ${fields}` : ""}${signatureFields ? `; campos por assinatura ${signatureFields}` : ""}${nestedCodes ? `; assinaturas ${nestedCodes}` : ""}).`, "validate", true);
   }
   return {
     valid: true,
     status: { code: status.code, name: status.name },
-    signatures: signatureResults.map((item: Record<string, any>) => ({ code: item.status?.code, name: item.status?.name })),
+    signatures: signatureSignals.map((signals) => {
+      const valid = signals.find((item) => item.name === "SIGNATURE_VALID" || item.code === "140");
+      return { code: valid?.code, name: valid?.name };
+    }),
   };
 }
 
