@@ -27,6 +27,7 @@ import { loadActiveAdminMethods } from "../../../lib/supabase/admin-records";
 import { normalizeBirthDate } from "../../../lib/birth-date";
 import { bottlesBeyondCoverage, getBottleBillingState } from "../bottle-billing";
 import {
+  loadSecretaryBottleRows,
   loadSecretaryBatches,
   loadSecretaryInvoices,
   loadSecretaryPatients,
@@ -183,11 +184,12 @@ export default function PatientRecordsPage() {
         const initialId = workspace.patients.some((item) => item.id === hash) ? hash : workspace.patients[0]?.id ?? "";
         setSelectedId(initialId);
         setDraft(workspace.patients.find((item) => item.id === initialId) ?? null);
+        const bottleRows = await loadSecretaryBottleRows(workspace.context);
         const [loadedPortals, loadedPrescriptions, loadedInvoices, loadedStock, loadedBatches, loadedMethods] = await Promise.all([
-          loadSecretaryPortals(workspace.patients.map((item) => item.id), workspace.context),
+          loadSecretaryPortals(workspace.patients.map((item) => item.id), workspace.context, bottleRows),
           loadSecretaryPrescriptions(workspace.context),
           loadSecretaryInvoices(workspace.context),
-          loadSecretaryStock(workspace.context),
+          loadSecretaryStock(workspace.context, bottleRows),
           loadSecretaryBatches(workspace.context),
           loadActiveAdminMethods(workspace.context),
         ]);

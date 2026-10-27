@@ -226,8 +226,12 @@ async function loadAllPages<Row>(
     error: { message: string } | null;
   }>,
 ): Promise<Row[]> {
-  const rows: Row[] = [];
-  for (let from = 0; ; from += SUPABASE_PAGE_SIZE * 3) {
+  const first = await fetchPage(0, SUPABASE_PAGE_SIZE - 1);
+  if (first.error) throw first.error;
+  const rows = [...(first.data ?? [])];
+  if (rows.length < SUPABASE_PAGE_SIZE) return rows;
+
+  for (let from = SUPABASE_PAGE_SIZE; ; from += SUPABASE_PAGE_SIZE * 3) {
     const pages = await Promise.all([0, 1, 2].map((index) => {
       const start = from + index * SUPABASE_PAGE_SIZE;
       return fetchPage(start, start + SUPABASE_PAGE_SIZE - 1);
@@ -239,6 +243,18 @@ async function loadAllPages<Row>(
       if (page.length < SUPABASE_PAGE_SIZE) return rows;
     }
   }
+}
+
+const SECRETARY_BOTTLE_COLUMNS = "id, clinic_id, patient_id, prescription_id, batch_id, bottle_number, received_at, started_at, completed_at, status, volume_ml, reserved_at, delivered_at, checked_by, metadata";
+
+export async function loadSecretaryBottleRows(context: SecretaryContext) {
+  const supabase = getSupabaseClient();
+  return loadAllPages<Record<string, unknown>>((from, to) => supabase.from("bottles")
+    .select(SECRETARY_BOTTLE_COLUMNS)
+    .eq("clinic_id", context.clinicId)
+    .order("received_at", { ascending: false })
+    .order("id", { ascending: true })
+    .range(from, to));
 }
 
 export async function loadSecretaryPatients(
@@ -551,16 +567,20 @@ function bottleFromRow(row: Record<string, unknown>): PatientBottle {
   };
 }
 
-export async function loadSecretaryPortals(patientIds: string[], context?: SecretaryContext) {
+export async function loadSecretaryPortals(
+  patientIds: string[],
+  context?: SecretaryContext,
+  sharedBottleRows?: Record<string, unknown>[],
+) {
   if (!patientIds.length) return {} as Record<string, PatientPortalState>;
   const current = context ?? await loadSecretaryContext();
   const supabase = getSupabaseClient();
   const [assessmentRows, bottleRows, contractRows, settingsRows, useRows] = await Promise.all([
-    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_assessments").select("*").eq("clinic_id", current.clinicId).order("created_at", { ascending: false }).order("id").range(from, to)),
-    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("bottles").select("*").eq("clinic_id", current.clinicId).order("bottle_number", { ascending: false }).order("id").range(from, to)),
-    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_contracts").select("*").eq("clinic_id", current.clinicId).order("id").range(from, to)),
-    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_portal_settings").select("*").eq("clinic_id", current.clinicId).order("patient_id").range(from, to)),
-    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_use_records").select("*").eq("clinic_id", current.clinicId).order("use_date", { ascending: false }).order("id").range(from, to)),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_assessments").select("id, patient_id, bottle_reference, bottle_number, feeling, frequency, severity, medication_frequency, comment, created_at, viewed_at, viewed_by, response, responded_at, responded_by").eq("clinic_id", current.clinicId).order("created_at", { ascending: false }).order("id").range(from, to)),
+    sharedBottleRows ? Promise.resolve(sharedBottleRows) : loadSecretaryBottleRows(current),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_contracts").select("patient_id, signed_at, signed_name, signed_cpf").eq("clinic_id", current.clinicId).order("patient_id").range(from, to)),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_portal_settings").select("patient_id, reminders, day_overrides, read_notification_ids, manual_notifications").eq("clinic_id", current.clinicId).order("patient_id").range(from, to)),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_use_records").select("id, patient_id, bottle_id, use_date, registered_at, drops").eq("clinic_id", current.clinicId).order("use_date", { ascending: false }).order("id").range(from, to)),
   ]);
   const result = Object.fromEntries(patientIds.map((id) => [id, createDefaultPortalState(id)])) as Record<string, PatientPortalState>;
   for (const row of assessmentRows as unknown as Record<string, unknown>[]) {
@@ -630,6 +650,7 @@ export async function loadSecretaryPortals(patientIds: string[], context?: Secre
       drops: number(row.drops, 6),
     });
   }
+  for (const portal of Object.values(result)) portal.bottles.sort((first, second) => second.number - first.number);
   return result;
 }
 
@@ -867,14 +888,15 @@ function stockFromRow(row: Record<string, unknown>): DemoStockItem {
   };
 }
 
-export async function loadSecretaryStock(context?: SecretaryContext) {
+export async function loadSecretaryStock(context?: SecretaryContext, sharedBottleRows?: Record<string, unknown>[]) {
   const current = context ?? await loadSecretaryContext();
-  const { data, error } = await getSupabaseClient().from("bottles")
-    .select("*")
+  const rows = sharedBottleRows ?? await loadAllPages<Record<string, unknown>>((from, to) => getSupabaseClient().from("bottles")
+    .select(SECRETARY_BOTTLE_COLUMNS)
     .eq("clinic_id", current.clinicId)
-    .order("received_at", { ascending: false });
-  if (error) throw error;
-  return ((data ?? []) as unknown as Record<string, unknown>[])
+    .order("received_at", { ascending: false })
+    .order("id", { ascending: true })
+    .range(from, to));
+  return rows
     .filter((row) => objectValue(row.metadata).manuallyDeleted !== true && !objectValue(row.metadata).historicalImportSource)
     .map(stockFromRow);
 }

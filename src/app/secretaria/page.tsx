@@ -17,6 +17,7 @@ import { patientUsername } from "../../lib/auth/credentials";
 import { normalizeBirthDate } from "../../lib/birth-date";
 import {
   createSecretaryPatientAccess,
+  loadSecretaryBottleRows,
   loadSecretaryPatients,
   loadSecretaryPortals,
   loadSecretaryPrescriptions,
@@ -437,10 +438,11 @@ export default function SecretariaPage() {
         if (!active) return;
         setContext(workspace.context);
         setPatients(workspace.patients.map(patientFromMedicalRecord));
+        const bottleRows = await loadSecretaryBottleRows(workspace.context);
         const [loadedPortals, loadedPrescriptions, loadedStock, loadedBatches] = await Promise.all([
-          loadSecretaryPortals(workspace.patients.map((patient) => patient.id), workspace.context),
+          loadSecretaryPortals(workspace.patients.map((patient) => patient.id), workspace.context, bottleRows),
           loadSecretaryPrescriptions(workspace.context),
-          loadSecretaryStock(workspace.context),
+          loadSecretaryStock(workspace.context, bottleRows),
           loadSecretaryBatches(workspace.context),
         ]);
         if (!active) return;
