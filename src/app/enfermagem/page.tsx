@@ -163,7 +163,7 @@ export default function NursingPage() {
     () => getPrickGroupsForDoctor(selectedReportDoctor?.fullName ?? "", selectedReportDoctor?.crm, includeImmunotechBattery),
     [includeImmunotechBattery, selectedReportDoctor?.crm, selectedReportDoctor?.fullName],
   );
-  const canCreatePatients = profile?.role === "enfermagem";
+  const canCreatePatients = profile?.role === "enfermagem" || isDoctorWithNursingAccess(profile);
   const canEditPatients = profile?.role === "enfermagem";
   const canEditReports = profile?.role === "enfermagem" || profile?.role === "medico";
   const canReturnToMedicalMenu = isDoctorWithNursingAccess(profile);
@@ -228,8 +228,9 @@ export default function NursingPage() {
         setDuplicatePatient(duplicate);
         return;
       }
+      const doctorId = profile.role === "medico" ? profile.id : undefined;
       const id = await createNursingPatient(profile, { name, cpf: normalizedCpf, birthDate, phone });
-      const patient: NursingPatient = { id, name, cpf: normalizedCpf, birthDate, phone, doctorName: "Equipe médica CRA Care", createdAt: new Date().toISOString() };
+      const patient: NursingPatient = { id, name, cpf: normalizedCpf, birthDate, phone, doctorId, doctorName: profile.role === "medico" ? profile.fullName : "Equipe médica CRA Care", createdAt: new Date().toISOString() };
       setPatients((current) => [patient, ...current]);
       setModal(null);
       setName(""); setCpf(""); setBirthDate(""); setPhone("");

@@ -42,11 +42,14 @@ export async function loadNursingWorkspace() {
   return { profile: { id: profile.id, clinicId, fullName: profile.full_name, coren: profile.crm ?? undefined, role: profile.role as "enfermagem" | "medico" } as NursingProfile, patients, doctors: (doctorsResult.data ?? []).map((doctor) => ({ id: doctor.id, fullName: doctor.full_name, crm: doctor.crm ?? undefined })), reports: reportsResult.data ?? [] };
 }
 
-export async function createNursingPatient(profile: NursingProfile, input: { name: string; cpf: string; birthDate: string; phone?: string; doctorId?: string }) {
+export async function createNursingPatient(profile: NursingProfile, input: { name: string; cpf: string; birthDate: string; phone?: string }) {
+  const isNursingStaff = profile.role === "enfermagem";
+  const isAuthorizedDoctor = profile.role === "medico" && doctorCanAccessNursing(profile.fullName, profile.coren ?? null);
+  if (!isNursingStaff && !isAuthorizedDoctor) throw new Error("Este perfil não pode cadastrar pacientes nesta área.");
   const normalizedCpf = input.cpf.replace(/\D/g, "");
   if (normalizedCpf.length !== 11) throw new Error("CPF_INVALIDO");
   if (await findNursingPatientByCpf(profile, normalizedCpf)) throw new Error("CPF_DUPLICADO");
-  const { data, error } = await (getSupabaseClient().from("patients") as any).insert({ clinic_id: profile.clinicId, nursing_profile_id: profile.id, doctor_profile_id: null, full_name: input.name.trim(), cpf: normalizedCpf, birth_date: input.birthDate, phone: input.phone?.trim() || null, status: "laudo", address: {}, treatment: {}, financial: {} }).select("id").single();
+  const { data, error } = await (getSupabaseClient().from("patients") as any).insert({ clinic_id: profile.clinicId, nursing_profile_id: isNursingStaff ? profile.id : null, doctor_profile_id: isAuthorizedDoctor ? profile.id : null, full_name: input.name.trim(), cpf: normalizedCpf, birth_date: input.birthDate, phone: input.phone?.trim() || null, status: "laudo", address: {}, treatment: {}, financial: {} }).select("id").single();
   if (error?.code === "23505" || error?.message === "CPF_DUPLICADO") throw new Error("CPF_DUPLICADO");
   if (error) throw error;
   return data.id as string;
