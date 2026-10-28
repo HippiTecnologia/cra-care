@@ -202,6 +202,7 @@ function paymentFromRow(row: Record<string, unknown>): PatientPaymentRecord {
   return {
     id: text(row.id),
     historicalImport: row.historical_import === true,
+    status: text(row.status),
     treatment: /bacteriana|imunobacteriana/i.test(text(row.treatment))
       ? "Imunobacteriana"
       : text(row.treatment) ? "Rinite" : undefined,
@@ -424,7 +425,7 @@ export async function saveSecretaryPatient(
       due_at: payment.dueAt ?? null,
       paid_at: payment.paidAt || null,
       payment_method: payment.method,
-      status: payment.paidAt ? "recebido" : "pendente",
+      status: payment.status ?? (payment.paidAt ? "recebido" : "pendente"),
       asaas_reference: payment.asaasReference ?? null,
       notes: payment.notes ?? null,
       treatment: payment.treatment ?? null,

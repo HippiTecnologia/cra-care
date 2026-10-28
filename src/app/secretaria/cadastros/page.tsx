@@ -255,8 +255,14 @@ export default function PatientRecordsPage() {
   const activePayments = (patient?.payments ?? []).filter((item) =>
     item.treatment === activeFinancialTrack || (!item.treatment && legacyFinancialAllowed),
   );
-  const totalPaid = activePayments.filter((item) => !item.historicalImport).reduce((sum, item) => sum + item.amount, 0);
-  const remaining = Math.max(0, activeContractValue - totalPaid);
+  const isPaymentReceived = (item: PatientPaymentRecord) => item.status
+    ? item.status === "recebido"
+    : Boolean(item.paidAt);
+  const totalPaid = activePayments.filter(isPaymentReceived).reduce((sum, item) => sum + item.amount, 0);
+  const currentContractPaid = activePayments
+    .filter((item) => !item.historicalImport && isPaymentReceived(item))
+    .reduce((sum, item) => sum + item.amount, 0);
+  const remaining = Math.max(0, activeContractValue - currentContractPaid);
   const newBottleBilling = patient
     ? getBottleBillingState(patient, newBottleTreatment, stockRecords, batchRecords)
     : undefined;
@@ -474,6 +480,7 @@ export default function PatientRecordsPage() {
       ...draft,
       payments: (draft.payments ?? []).map((payment) => payment.id === editingPaymentId ? {
         ...payment,
+        status: "recebido",
         amount: parsed,
         paidAt: paidAt.toISOString(),
         installmentNumber: Math.max(1, Math.trunc(editingPaymentInstallmentNumber)),
@@ -827,7 +834,8 @@ export default function PatientRecordsPage() {
 
             {tab === "financeiro" && <div className="mt-4 space-y-3">
               <div className="rounded-2xl border border-[#eee5e0] bg-[#fffdfc] p-4"><p className="text-xs font-bold uppercase tracking-[.14em] text-[#a3113a]">Financeiro por tratamento</p><div className="mt-3 flex flex-wrap gap-2">{visibleTreatmentTracks.map((track) => <button key={track} type="button" onClick={() => { cancelEditingPayment(); setFinancialTrack(track); setEditing(false); setDraft(patient); }} className={`rounded-xl px-4 py-3 text-sm font-semibold ${activeFinancialTrack === track ? "bg-[#a3113a] text-white" : "bg-[#f6efec] text-[#716569]"}`}>{track}</button>)}</div></div>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><Metric label={`Total · ${activeFinancialTrack}`} value={money(activeContractValue)} /><Metric label="Pago" value={money(totalPaid)} /><Metric label="Saldo" value={money(remaining)} /><Metric label="Status" value={activeTreatmentPayment?.paymentStatus ?? (legacyFinancialAllowed ? patient.paymentStatus : undefined) ?? "A definir"} /></div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><Metric label={`Total · ${activeFinancialTrack}`} value={money(activeContractValue)} /><Metric label="Pago registrado" value={money(totalPaid)} /><Metric label="Saldo do contrato atual" value={money(remaining)} /><Metric label="Status" value={activeTreatmentPayment?.paymentStatus ?? (legacyFinancialAllowed ? patient.paymentStatus : undefined) ?? "A definir"} /></div>
+              <p className="text-xs text-[#817578]">O total pago inclui os pagamentos importados. O saldo considera apenas pagamentos vinculados ao contrato atual.</p>
               <div className="rounded-2xl border border-[#eee5e0] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Condições financeiras de {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">Estes dados pertencem exclusivamente a este tratamento.</p></div>{!editing && <button type="button" onClick={() => setEditing(true)} className="rounded-xl border border-[#e5d9d4] px-4 py-2 text-xs font-bold text-[#a3113a]">Editar financeiro</button>}</div>
                 {editing ? <><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} methods={adminMethods} onSelectMethod={(method, condition) => chooseMethod(method, condition, activeFinancialTrack)} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" disabled={savingFinancial} onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={`${primaryButtonClass} disabled:opacity-60`}>{savingFinancial ? "Salvando…" : `Salvar financeiro de ${activeFinancialTrack}`}</button></div></> : <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3"><DataCard label="Método de aquisição" value={`${activeTreatmentPayment?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido"}${activeTreatmentPayment?.methodSnapshotVersion ? ` · versão ${activeTreatmentPayment.methodSnapshotVersion}` : ""}`} /><DataCard label="Condição escolhida" value={activeTreatmentPayment?.agreedCondition ?? (legacyFinancialAllowed ? patient.agreedCondition : undefined) ?? "Não definida"} /><DataCard label="Forma de pagamento" value={activeTreatmentPayment?.paymentMethod ?? (legacyFinancialAllowed ? patient.paymentMethod : undefined) ?? "Não definida"} /><DataCard label="Parcelas" value={(activeTreatmentPayment?.installments ?? (legacyFinancialAllowed ? patient.paymentInstallments : undefined)) ? `${activeTreatmentPayment?.installments ?? patient.paymentInstallments}x` : "Não informado"} /><DataCard label="Desconto registrado" value={money(activeTreatmentPayment?.discountAmount ?? (legacyFinancialAllowed ? patient.discountAmount : undefined) ?? 0)} /><DataCard label="Vencimento" value={formatDate(activeTreatmentPayment?.dueDate ?? (legacyFinancialAllowed ? patient.paymentDueDate : undefined))} /><DataCard label="Frascos cobertos por este valor" value={activeTreatmentPayment?.bottlesIncluded ? String(activeTreatmentPayment.bottlesIncluded) : "Não informado"} /><DataCard label="Referência ASAAS" value={activeTreatmentPayment?.asaasReference ?? (legacyFinancialAllowed ? patient.asaasReference : undefined) ?? "Não informada"} /><DataCard label="Observações" value={activeTreatmentPayment?.notes ?? (legacyFinancialAllowed ? patient.financialNotes : undefined) ?? "Nenhuma"} /></div>}
               </div>
@@ -860,7 +868,7 @@ export default function PatientRecordsPage() {
                           <button type="button" onClick={() => void saveEditedPayment()} className="rounded-lg bg-[#187157] px-3 py-2 text-xs font-semibold text-white">Salvar alterações</button>
                         </div>
                       </div> : <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div><strong>{money(item.amount)}</strong><p className="mt-1 text-xs text-[#817578]">{item.treatment ?? activeFinancialTrack} · {formatDate(item.paidAt)} · {item.method}{item.installments ? ` · ${item.installmentNumber ?? 1}/${item.installments}` : ""}{item.additionalBottles ? ` · +${item.additionalBottles} frasco(s)` : ""}{linkedPlan ? ` · Frasco ${linkedPlan.volumeMl} mL` : ""}{item.asaasReference ? ` · ASAAS ${item.asaasReference}` : ""}</p>{item.notes && <p className="mt-1 text-sm text-[#66595d]">{item.notes}</p>}</div>
+                        <div><strong>{money(item.amount)}</strong><span className={`ml-2 inline-flex rounded-full px-2 py-1 text-[10px] font-bold ${isPaymentReceived(item) ? "bg-[#edf8f3] text-[#187157]" : "bg-[#fff4e4] text-[#966419]"}`}>{isPaymentReceived(item) ? "Pago" : "Pendente"}{item.historicalImport ? " · Histórico importado" : ""}</span><p className="mt-1 text-xs text-[#817578]">{item.treatment ?? activeFinancialTrack} · {formatDate(item.paidAt)} · {item.method}{item.installments ? ` · ${item.installmentNumber ?? 1}/${item.installments}` : ""}{item.additionalBottles ? ` · +${item.additionalBottles} frasco(s)` : ""}{linkedPlan ? ` · Frasco ${linkedPlan.volumeMl} mL` : ""}{item.asaasReference ? ` · ASAAS ${item.asaasReference}` : ""}</p>{item.notes && <p className="mt-1 text-sm text-[#66595d]">{item.notes}</p>}</div>
                         <div className="flex flex-wrap gap-2">
                           <button type="button" onClick={() => startEditingPayment(item)} className="rounded-lg bg-[#f7f1ee] px-3 py-2 text-xs font-semibold text-[#a3113a]">Editar</button>
                           <button type="button" onClick={() => removePayment(item.id)} className="rounded-lg bg-[#fff1f3] px-3 py-2 text-xs font-semibold text-[#a3113a]">Remover</button>
