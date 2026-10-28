@@ -1,4 +1,5 @@
 import type { DemoBatch, DemoPatientRecord, DemoStockItem } from "../medico/patient-store";
+import { isNoChargeMethod } from "../adm/admin-store";
 
 export type BottleBillingState = {
   contractedBottles: number;
@@ -39,6 +40,7 @@ export function getBottleBillingState(
   // A paid row matching the current contract is already represented by the contract's bottle quota.
   const duplicateContractPaymentIndex = contract?.contractValue && contract.dueDate && contractedBottles
     ? treatmentPayments.findIndex((payment) => {
+      if (isNoChargeMethod(payment.method) || isNoChargeMethod(payment.acquisitionMethod)) return false;
       const isPaid = payment.status ? payment.status === "recebido" : Boolean(payment.paidAt);
       return isPaid
         && Math.round(payment.amount * 100) === Math.round(contract.contractValue! * 100)
@@ -49,6 +51,7 @@ export function getBottleBillingState(
     })
     : -1;
   const additionalPaymentBottles = treatmentPayments.reduce((total, payment, index) => {
+    if (isNoChargeMethod(payment.method) || isNoChargeMethod(payment.acquisitionMethod)) return total;
     const isPaid = payment.status ? payment.status === "recebido" : Boolean(payment.paidAt);
     if (!isPaid || index === duplicateContractPaymentIndex) return total;
     return total + positiveInteger(payment.additionalBottles);

@@ -202,6 +202,7 @@ export default function PatientRecordsPage() {
   const [message, setMessage] = useState("");
   const [financialFeedback, setFinancialFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [savingFinancial, setSavingFinancial] = useState(false);
+  const [savingPayment, setSavingPayment] = useState(false);
   const [amount, setAmount] = useState("");
   const [paidAt, setPaidAt] = useState(localDateInputValue());
   const [paymentAcquisitionMethodId, setPaymentAcquisitionMethodId] = useState("");
@@ -538,7 +539,7 @@ export default function PatientRecordsPage() {
   }
 
   async function addPayment() {
-    if (!patient || !draft) return;
+    if (!patient || !draft || savingPayment) return;
     if (!paidAt) {
       setMessage("Informe a data do pagamento ou do registro.");
       return;
@@ -578,6 +579,7 @@ export default function PatientRecordsPage() {
       payments: [payment, ...(patient.payments ?? [])],
     };
     if (!context) return;
+    setSavingPayment(true);
     try {
       await saveSecretaryPatient(context, updated);
       setDraft(updated);
@@ -596,6 +598,8 @@ export default function PatientRecordsPage() {
         : `Pagamento de ${activeFinancialTrack} registrado no Supabase pela Secretaria.`);
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "Não foi possível registrar o pagamento.");
+    } finally {
+      setSavingPayment(false);
     }
   }
 
@@ -610,9 +614,13 @@ export default function PatientRecordsPage() {
     setEditingPaymentInstallmentValue(payment.installmentValue == null ? "" : String(payment.installmentValue));
     setEditingPaymentDueDate(payment.dueAt?.slice(0, 10) ?? "");
     setEditingPaymentInstallmentNumber(Math.max(1, payment.installmentNumber ?? 1));
-    setEditingPaymentMethod(payment.method);
+    setEditingPaymentMethod(isNoChargeMethod(payment.method) || isNoChargeMethod(payment.acquisitionMethod)
+      ? NO_CHARGE_METHOD_NAME
+      : payment.method);
     setEditingPaymentBottlePlanId(payment.bottlePlanId ?? "");
-    setEditingPaymentAdditionalBottles(Math.max(0, Math.trunc(payment.additionalBottles ?? 0)));
+    setEditingPaymentAdditionalBottles(isNoChargeMethod(payment.method) || isNoChargeMethod(payment.acquisitionMethod)
+      ? 0
+      : Math.max(0, Math.trunc(payment.additionalBottles ?? 0)));
     setEditingPaymentReference(payment.asaasReference ?? "");
     setEditingPaymentNotes(payment.notes ?? "");
     setMessage("");
@@ -667,7 +675,7 @@ export default function PatientRecordsPage() {
         installmentNumber: Math.max(1, Math.trunc(editingPaymentInstallmentNumber)),
         method: editingPaymentMethod || payment.method,
         bottlePlanId: editingPaymentBottlePlanId || undefined,
-        additionalBottles: Math.max(0, Math.trunc(editingPaymentAdditionalBottles)),
+        additionalBottles: noChargePayment ? 0 : Math.max(0, Math.trunc(editingPaymentAdditionalBottles)),
         asaasReference: editingPaymentReference.trim() || undefined,
         notes: editingPaymentNotes.trim() || undefined,
       } : payment),
@@ -1066,7 +1074,7 @@ export default function PatientRecordsPage() {
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><Metric label="Valor pago" value={money(totalPaid)} /><Metric label="Frascos contratados" value={String(activeBottleBilling?.coveredBottles ?? 0)} /><Metric label="Frascos recebidos" value={String(activeBottleBilling?.deliveredBottles ?? 0)} /><Metric label="Último registro de pagamento" value={latestPaymentRegistration ? formatDate(latestPaymentRegistration) : "Nenhum"} /></div>
               <p className="text-xs text-[#817578]">Cobertura total: {activeBottleBilling?.coveredBottles ?? 0} frasco(s) ({activeBottleBilling?.contractedBottles ?? 0} contratado(s) + {activeBottleBilling?.additionalPaidBottles ?? 0} extra(s) pago(s)). Frascos recebidos incluem os entregues, em uso e concluídos.</p>
               {editing && <div className="rounded-2xl border border-[#eee5e0] p-5"><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} methods={adminMethods} paymentMethodOptions={availablePaymentMethods} onSelectMethod={(method, condition) => chooseMethod(method, condition, activeFinancialTrack)} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" disabled={savingFinancial} onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={`${primaryButtonClass} disabled:opacity-60`}>{savingFinancial ? "Salvando…" : `Salvar financeiro de ${activeFinancialTrack}`}</button></div></div>}
-              {activeFinancialNoCharge ? <div className="rounded-2xl border border-[#d7e9df] bg-[#edf8f3] p-4"><p className="text-sm text-[#187157]">N/C – Não cobrar · R$ 0,00. O registro será incluído no histórico sem gerar cobrança.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label="Data do registro"><input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} className={inputClass} /></Field><Field label="Observações"><textarea rows={2} value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Registro N/C, contrato ou atendimento" className={textareaClass} /></Field></div><button type="button" onClick={addPayment} className="mt-3 rounded-xl bg-[#187157] px-4 py-2.5 text-sm font-semibold text-white">Registrar N/C no histórico</button></div> : <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">Os campos de valor e forma são sugeridos pela configuração de aquisição e continuam editáveis.</p></div></div><div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {activeFinancialNoCharge ? <div className="rounded-2xl border border-[#d7e9df] bg-[#edf8f3] p-4"><p className="text-sm text-[#187157]">N/C – Não cobrar · R$ 0,00. Salva direto no histórico e não libera frascos.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label="Data do registro"><input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} className={inputClass} /></Field><Field label="Observações"><textarea rows={2} value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Registro N/C, contrato ou atendimento" className={textareaClass} /></Field></div><button type="button" disabled={savingPayment} onClick={addPayment} className="mt-3 rounded-xl bg-[#187157] px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">{savingPayment ? "Salvando…" : "Registrar N/C no histórico"}</button></div> : <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">Os campos de valor e forma são sugeridos pela configuração de aquisição e continuam editáveis.</p></div></div><div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <Field label="Método de aquisição"><select value={paymentAcquisitionMethodId} onChange={(event) => { const method = adminMethods.find((item) => item.id === event.target.value); if (method) applyPaymentAcquisitionMethod(method, paymentCondition); else setPaymentAcquisitionMethodId(""); }} className={inputClass}><option value="">Sem método configurado</option>{paymentAcquisitionMethodId && !adminMethods.some((item) => item.id === paymentAcquisitionMethodId) && <option value={paymentAcquisitionMethodId}>{activeDraftPayment?.acquisitionMethod ?? "Configuração anterior"} · anterior</option>}{adminMethods.map((method) => <option key={method.id} value={method.id}>{method.name} · {method.category}</option>)}</select></Field>
                 <Field label="Forma de pagamento"><PaymentMethodSelect key={`new-payment-${selectedId}-${activeFinancialTrack}`} value={paymentMethod} options={availablePaymentMethods} onChange={(value) => { const wasNoCharge = normalizePaymentMethod(paymentMethod) === NO_CHARGE_METHOD_NAME; setPaymentMethod(value); if (normalizePaymentMethod(value) === NO_CHARGE_METHOD_NAME) { setAmount("0"); setPaymentInstallmentValue("0"); } else if (wasNoCharge && amount === "0") { setAmount(""); setPaymentInstallmentValue(""); } }} /></Field>
                 <Field label="Situação do pagamento"><select value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)} className={inputClass}>{paymentEntryStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
@@ -1081,7 +1089,7 @@ export default function PatientRecordsPage() {
                 <Field label="Frasco/plano relacionado"><select value={paymentBottlePlanId} onChange={(event) => setPaymentBottlePlanId(event.target.value)} className={inputClass}><option value="">Não vincular</option>{activeBottlePlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.quantity}x {plan.volumeMl} mL</option>)}</select></Field>
                 <Field label="Referência ASAAS ou CV do cartão"><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} className={inputClass} /></Field>
                 <Field label="Observações" wide><textarea rows={2} value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Pagamento, contrato ou atendimento" className={textareaClass} /></Field>
-              </div><button type="button" onClick={addPayment} className="mt-3 rounded-xl bg-[#187157] px-4 py-2.5 text-sm font-semibold text-white">Registrar pagamento</button></div>}
+              </div><button type="button" disabled={savingPayment} onClick={addPayment} className="mt-3 rounded-xl bg-[#187157] px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">{savingPayment ? "Salvando…" : "Registrar pagamento"}</button></div>}
               <div className="rounded-2xl bg-[#fbf7f5] p-4">
                 <h3 className="font-bold">Histórico de pagamentos de {activeFinancialTrack} ({activePayments.length})</h3>
                 <div className="mt-3 space-y-2">
@@ -1090,7 +1098,8 @@ export default function PatientRecordsPage() {
                     const linkedInvoices = invoiceRecords.filter((invoice) => invoice.paymentId === item.id);
                     const isEditingPayment = editingPaymentId === item.id;
                     const paymentStatus = item.status ?? (item.paidAt ? "recebido" : "pendente");
-                    const paymentStatusLabel = isNoChargeMethod(item.method) || isNoChargeMethod(item.acquisitionMethod)
+                    const noChargePayment = isNoChargeMethod(item.method) || isNoChargeMethod(item.acquisitionMethod);
+                    const paymentStatusLabel = noChargePayment
                       ? "Não cobrado"
                       : paymentEntryStatusLabel(paymentStatus);
                     const isReceived = paymentStatus === "recebido";
@@ -1102,7 +1111,7 @@ export default function PatientRecordsPage() {
                           <Field label="Situação"><select value={editingPaymentStatus} onChange={(event) => setEditingPaymentStatus(event.target.value)} className={inputClass}>{paymentEntryStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
                           <Field label="Data do pagamento/registro"><input type="date" value={editingPaymentDate} onChange={(event) => setEditingPaymentDate(event.target.value)} className={inputClass} /></Field>
                           <Field label="Método de aquisição"><select value={editingPaymentAcquisitionMethodId} onChange={(event) => setEditingPaymentAcquisitionMethodId(event.target.value)} className={inputClass}><option value="">Não informado</option>{editingPaymentAcquisitionMethodId && !adminMethods.some((method) => method.id === editingPaymentAcquisitionMethodId) && <option value={editingPaymentAcquisitionMethodId}>{item.acquisitionMethod ?? "Método anterior"}</option>}{adminMethods.map((method) => <option key={method.id} value={method.id}>{method.name} · {method.category}</option>)}</select></Field>
-                          <Field label="Forma de pagamento"><PaymentMethodSelect key={`edit-payment-${editingPaymentId}`} value={editingPaymentMethod} options={availablePaymentMethods} onChange={(value) => { const wasNoCharge = normalizePaymentMethod(editingPaymentMethod) === NO_CHARGE_METHOD_NAME; setEditingPaymentMethod(value); if (normalizePaymentMethod(value) === NO_CHARGE_METHOD_NAME) { setEditingPaymentAmount("0"); setEditingPaymentInstallmentValue("0"); } else if (wasNoCharge && editingPaymentAmount === "0") { setEditingPaymentAmount(""); setEditingPaymentInstallmentValue(""); } }} /></Field>
+                          <Field label="Forma de pagamento"><PaymentMethodSelect key={`edit-payment-${editingPaymentId}`} value={editingPaymentMethod} options={availablePaymentMethods} onChange={(value) => { const wasNoCharge = normalizePaymentMethod(editingPaymentMethod) === NO_CHARGE_METHOD_NAME; setEditingPaymentMethod(value); if (normalizePaymentMethod(value) === NO_CHARGE_METHOD_NAME) { setEditingPaymentAmount("0"); setEditingPaymentInstallmentValue("0"); setEditingPaymentAdditionalBottles(0); } else if (wasNoCharge && editingPaymentAmount === "0") { setEditingPaymentAmount(""); setEditingPaymentInstallmentValue(""); } }} /></Field>
                           <Field label="Condição"><select value={editingPaymentCondition} onChange={(event) => { const condition = event.target.value as "À vista" | "Parcelado"; setEditingPaymentCondition(condition); if (condition === "À vista") { setEditingPaymentInstallments(1); setEditingPaymentInstallmentNumber(1); } }} className={inputClass}><option value="À vista">À vista</option><option value="Parcelado">Parcelado</option></select></Field>
                           {editingPaymentCondition === "Parcelado" && <Field label="Número de parcelas"><input type="number" min={1} max={36} value={editingPaymentInstallments} onChange={(event) => { const count = Math.max(1, Math.trunc(Number(event.target.value) || 1)); setEditingPaymentInstallments(count); setEditingPaymentInstallmentNumber((current) => Math.min(current, count)); }} className={inputClass} /></Field>}
                           {editingPaymentCondition === "Parcelado" && <Field label="Parcela registrada"><input type="number" min={1} max={editingPaymentInstallments} value={editingPaymentInstallmentNumber} onChange={(event) => setEditingPaymentInstallmentNumber(Math.min(editingPaymentInstallments, Math.max(1, Number(event.target.value))))} className={inputClass} /></Field>}
@@ -1113,7 +1122,7 @@ export default function PatientRecordsPage() {
                             {item.bottlePlanId && !activeBottlePlans.some((plan) => plan.id === item.bottlePlanId) && <option value={item.bottlePlanId}>Vínculo antigo</option>}
                             {activeBottlePlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.quantity}x {plan.volumeMl} mL</option>)}
                           </select></Field>
-                          <Field label="Frascos liberados"><input type="number" min={0} step={1} value={editingPaymentAdditionalBottles} onChange={(event) => setEditingPaymentAdditionalBottles(Math.max(0, Math.trunc(Number(event.target.value))))} className={inputClass} /></Field>
+                          <Field label="Frascos liberados"><input type="number" min={0} step={1} disabled={isNoChargeMethod(editingPaymentMethod)} value={isNoChargeMethod(editingPaymentMethod) ? 0 : editingPaymentAdditionalBottles} onChange={(event) => setEditingPaymentAdditionalBottles(Math.max(0, Math.trunc(Number(event.target.value))))} className={`${inputClass} disabled:bg-[#f7f4f2] disabled:text-[#817578]`} /></Field>
                           <Field label="Referência ASAAS/CV"><input value={editingPaymentReference} onChange={(event) => setEditingPaymentReference(event.target.value)} className={inputClass} /></Field>
                           <Field label="Observações" wide><textarea rows={2} value={editingPaymentNotes} onChange={(event) => setEditingPaymentNotes(event.target.value)} className={textareaClass} /></Field>
                         </div>
@@ -1133,7 +1142,7 @@ export default function PatientRecordsPage() {
                               <p><strong>Condição:</strong> {item.paymentCondition ?? "Não informada"}</p>
                               <p><strong>Parcela:</strong> {item.installmentNumber ?? 1}/{item.installments ?? 1}{item.installmentValue != null ? ` · ${money(item.installmentValue)}` : ""}</p>
                               <p><strong>Vencimento:</strong> {formatDate(item.dueAt)}</p>
-                              <p><strong>Frascos liberados:</strong> {item.additionalBottles ?? 0}{linkedPlan ? ` · Plano ${linkedPlan.quantity}x ${linkedPlan.volumeMl} mL` : ""}</p>
+                              <p><strong>Frascos liberados:</strong> {noChargePayment ? 0 : item.additionalBottles ?? 0}{!noChargePayment && linkedPlan ? ` · Plano ${linkedPlan.quantity}x ${linkedPlan.volumeMl} mL` : ""}</p>
                               {item.asaasReference && <p><strong>Referência ASAAS/CV:</strong> {item.asaasReference}</p>}
                             </div>
                             {item.notes && <p className="mt-2 whitespace-pre-line text-sm text-[#66595d]"><strong>Observações:</strong> {item.notes}</p>}
