@@ -33,8 +33,8 @@ create table if not exists public.patients (
   auth_user_id uuid unique references auth.users(id) on delete set null,
   doctor_profile_id uuid references public.profiles(id) on delete set null,
   full_name text not null,
-  cpf text not null,
-  birth_date date not null,
+  cpf text,
+  birth_date date,
   phone text,
   email text,
   address jsonb not null default '{}'::jsonb,
@@ -83,8 +83,12 @@ create table if not exists public.payments (
   status text not null default 'pendente',
   asaas_reference text,
   historical_import boolean not null default false,
+  additional_bottles integer not null default 0 check (additional_bottles >= 0),
   created_at timestamptz not null default now()
 );
+
+alter table public.payments
+  add column if not exists additional_bottles integer not null default 0;
 
 create table if not exists public.patient_assessments (
   id uuid primary key default gen_random_uuid(),

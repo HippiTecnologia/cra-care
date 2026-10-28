@@ -27,8 +27,8 @@ export type MedicalPatientRow = {
   auth_user_id: string | null;
   username: string | null;
   full_name: string;
-  cpf: string;
-  birth_date: string;
+  cpf: string | null;
+  birth_date: string | null;
   phone: string | null;
   email: string | null;
   status: string;
@@ -134,11 +134,12 @@ export function mapMedicalPatient(
     stringValue(address, "city") ||
     stringValue(financial, "acquisitionMethod"),
   );
+  const hasRequiredIdentity = Boolean(row.cpf?.trim() && row.birth_date);
   const sourceDoctorLabel = stringValue(treatment, "sourceDoctorLabel");
   const displayDoctorName = doctorName === "Médico não vinculado" && sourceDoctorLabel
     ? `A confirmar: ${sourceDoctorLabel}`
     : doctorName;
-  const registrationStatus: DemoPatientRecord["registrationStatus"] = hasSecretaryData
+  const registrationStatus: DemoPatientRecord["registrationStatus"] = hasRequiredIdentity && hasSecretaryData
     ? "completed"
     : "pending-secretary";
 
@@ -146,8 +147,8 @@ export function mapMedicalPatient(
     id: row.id,
     username: row.username ?? undefined,
     name: row.full_name,
-    cpf: row.cpf,
-    birthDate: row.birth_date,
+    cpf: row.cpf ?? "",
+    birthDate: row.birth_date ?? "",
     doctor: displayDoctorName,
     doctorId: row.doctor_profile_id ?? undefined,
     createdAt: row.created_at,

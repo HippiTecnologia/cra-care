@@ -332,6 +332,7 @@ function formatCurrency(value: number) {
 }
 
 function isBirthdayToday(date: string) {
+  if (!date) return false;
   const birthday = new Date(`${date}T12:00:00`);
   const today = new Date();
 
@@ -341,52 +342,9 @@ function isBirthdayToday(date: string) {
   );
 }
 
-function remindersForPatient(
-  patient: Patient,
-  portal: PatientPortalState | undefined,
-  stock: DemoStockItem[],
-  prescriptions: DemoPrescription[],
-) {
-  const safePortal = portal ?? createDefaultPortalState(patient.id);
-  const history = buildBottleHistory(patient, safePortal, stock, prescriptions);
-  return getNextOrderReminders(patient, history, prescriptions);
-}
-
 function hasAnyOrderInProgress(patientId: string, stock: DemoStockItem[], batches: DemoBatch[]) {
   return stock.some((item) => item.patientId === patientId && item.status !== "entregue")
     || batches.some((batch) => batch.status !== "conferido" && batch.items.some((item) => item.patientId === patientId));
-}
-
-function getNextContactDate(
-  patient: Patient,
-  portal: PatientPortalState | undefined,
-  stock: DemoStockItem[],
-  prescriptions: DemoPrescription[],
-) {
-  return getNextOrderDate(remindersForPatient(patient, portal, stock, prescriptions));
-}
-
-function hasPendingNextContact(
-  patient: Patient,
-  portal: PatientPortalState | undefined,
-  stock: DemoStockItem[],
-  batches: DemoBatch[],
-  prescriptions: DemoPrescription[],
-  now = new Date(),
-) {
-  return remindersForPatient(patient, portal, stock, prescriptions).some((reminder) =>
-    hasNextOrderDue(reminder.date, now) && !hasNextOrderInProgress(patient.id, reminder.treatment, stock, batches),
-  );
-}
-
-function requiresNewOrder(
-  patient: Patient,
-  portal: PatientPortalState | undefined,
-  stock: DemoStockItem[],
-  batches: DemoBatch[],
-  prescriptions: DemoPrescription[],
-) {
-  return hasPendingNextContact(patient, portal, stock, batches, prescriptions);
 }
 
 function hasPendingPayment(patient: Patient) {
@@ -438,11 +396,11 @@ export default function SecretariaPage() {
         if (!active) return;
         setContext(workspace.context);
         setPatients(workspace.patients.map(patientFromMedicalRecord));
-        const bottleRows = await loadSecretaryBottleRows(workspace.context);
+        const bottleRowsPromise = loadSecretaryBottleRows(workspace.context);
         const [loadedPortals, loadedPrescriptions, loadedStock, loadedBatches] = await Promise.all([
-          loadSecretaryPortals(workspace.patients.map((patient) => patient.id), workspace.context, bottleRows),
+          bottleRowsPromise.then((bottleRows) => loadSecretaryPortals(workspace.patients.map((patient) => patient.id), workspace.context, bottleRows)),
           loadSecretaryPrescriptions(workspace.context),
-          loadSecretaryStock(workspace.context, bottleRows),
+          bottleRowsPromise.then((bottleRows) => loadSecretaryStock(workspace.context, bottleRows)),
           loadSecretaryBatches(workspace.context),
         ]);
         if (!active) return;
@@ -462,6 +420,69 @@ export default function SecretariaPage() {
     ...Array.from(new Set(patients.map((patient) => patient.doctor))),
   ];
 
+  const metricsByPatient = useMemo(() => {
+    const prescriptionsByPatient = new Map<string, DemoPrescription[]>();
+    for (const prescription of prescriptions) {
+      const items = prescriptionsByPatient.get(prescription.patientId) ?? [];
+      items.push(prescription);
+      prescriptionsByPatient.set(prescription.patientId, items);
+    }
+
+    const stockByPatient = new Map<string, DemoStockItem[]>();
+    for (const item of stockItems) {
+      if (!item.patientId) continue;
+      const items = stockByPatient.get(item.patientId) ?? [];
+      items.push(item);
+      stockByPatient.set(item.patientId, items);
+    }
+
+    const batchesByPatient = new Map<string, DemoBatch[]>();
+    for (const batch of batches) {
+      const patientIds = new Set(batch.items.map((item) => item.patientId));
+      for (const patientId of patientIds) {
+        const items = batchesByPatient.get(patientId) ?? [];
+        items.push(batch);
+        batchesByPatient.set(patientId, items);
+      }
+    }
+
+    const result = new Map<string, {
+      prescriptions: DemoPrescription[];
+      stock: DemoStockItem[];
+      batches: DemoBatch[];
+      nextContact: Date | null;
+      hasPendingNextContact: boolean;
+      deliveredBottleCount: number;
+      orderInProgress: boolean;
+    }>();
+    const now = new Date();
+
+    for (const patient of patients) {
+      const patientPrescriptions = prescriptionsByPatient.get(patient.id) ?? [];
+      const patientStock = stockByPatient.get(patient.id) ?? [];
+      const patientBatches = batchesByPatient.get(patient.id) ?? [];
+      const portal = portals[patient.id] ?? createDefaultPortalState(patient.id);
+      const history = buildBottleHistory(patient, portal, patientStock, patientPrescriptions);
+      const reminders = getNextOrderReminders(patient, history, patientPrescriptions, now);
+      result.set(patient.id, {
+        prescriptions: patientPrescriptions,
+        stock: patientStock,
+        batches: patientBatches,
+        nextContact: getNextOrderDate(reminders),
+        hasPendingNextContact: reminders.some((reminder) =>
+          hasNextOrderDue(reminder.date, now)
+          && !hasNextOrderInProgress(patient.id, reminder.treatment, patientStock, patientBatches),
+        ),
+        deliveredBottleCount: patientStock
+          .filter((item) => item.status === "entregue")
+          .reduce((total, item) => total + Math.max(0, Math.trunc(item.bottles)), 0),
+        orderInProgress: hasAnyOrderInProgress(patient.id, patientStock, patientBatches),
+      });
+    }
+
+    return result;
+  }, [batches, patients, portals, prescriptions, stockItems]);
+
   const indicationsByPatient = useMemo(() => {
     const result = new Map<string, Set<"Rinite" | "Bacteriana">>();
     for (const prescription of prescriptions) {
@@ -474,7 +495,7 @@ export default function SecretariaPage() {
 
   const summary = useMemo(() => {
     return {
-      newOrders: patients.filter((patient) => requiresNewOrder(patient, portals[patient.id], stockItems, batches, prescriptions)).length,
+      newOrders: patients.filter((patient) => metricsByPatient.get(patient.id)?.hasPendingNextContact).length,
       birthdays: patients.filter((patient) =>
         isBirthdayToday(patient.birthDate),
       ).length,
@@ -483,7 +504,7 @@ export default function SecretariaPage() {
         (patient) => patient.status === "concluido",
       ).length,
     };
-  }, [batches, patients, portals, prescriptions, stockItems]);
+  }, [metricsByPatient, patients]);
 
   const pendingAssessments = patients.reduce(
     (total, patient) => total + (portals[patient.id]?.assessments ?? []).filter((assessment) => !assessment.response).length,
@@ -514,7 +535,7 @@ export default function SecretariaPage() {
       let matchesFilter = true;
 
       if (filter === "novo-pedido") {
-        matchesFilter = requiresNewOrder(patient, portals[patient.id], stockItems, batches, prescriptions);
+        matchesFilter = Boolean(metricsByPatient.get(patient.id)?.hasPendingNextContact);
       }
 
       if (filter === "aniversario") {
@@ -530,9 +551,9 @@ export default function SecretariaPage() {
       }
 
       const matchesKanbanStatus = kanbanStatusFilter === "todos" || patient.status === kanbanStatusFilter;
-      const portal = portals[patient.id];
-      const nextContact = getNextContactDate(patient, portal, stockItems, prescriptions);
-      const isPendingNextContact = hasPendingNextContact(patient, portal, stockItems, batches, prescriptions);
+      const patientMetrics = metricsByPatient.get(patient.id);
+      const nextContact = patientMetrics?.nextContact ?? null;
+      const isPendingNextContact = patientMetrics?.hasPendingNextContact ?? false;
       const matchesNextContact =
         nextContactFilter === "todos" ||
         (nextContactFilter === "pendente" && isPendingNextContact) ||
@@ -548,17 +569,23 @@ export default function SecretariaPage() {
         return left.name.localeCompare(right.name, "pt-BR", { sensitivity: "base" });
       }
 
-      const leftPortal = portals[left.id];
-      const rightPortal = portals[right.id];
-      const leftPending = hasPendingNextContact(left, leftPortal, stockItems, batches, prescriptions);
-      const rightPending = hasPendingNextContact(right, rightPortal, stockItems, batches, prescriptions);
+      const leftMetrics = metricsByPatient.get(left.id);
+      const rightMetrics = metricsByPatient.get(right.id);
+      const leftPending = leftMetrics?.hasPendingNextContact ?? false;
+      const rightPending = rightMetrics?.hasPendingNextContact ?? false;
       if (leftPending !== rightPending) return leftPending ? -1 : 1;
 
-      const leftDate = getNextContactDate(left, leftPortal, stockItems, prescriptions)?.getTime() ?? Number.POSITIVE_INFINITY;
-      const rightDate = getNextContactDate(right, rightPortal, stockItems, prescriptions)?.getTime() ?? Number.POSITIVE_INFINITY;
+      const leftDate = leftMetrics?.nextContact?.getTime() ?? Number.POSITIVE_INFINITY;
+      const rightDate = rightMetrics?.nextContact?.getTime() ?? Number.POSITIVE_INFINITY;
       return leftDate - rightDate || left.name.localeCompare(right.name, "pt-BR", { sensitivity: "base" });
     });
-  }, [batches, filter, kanbanStatusFilter, nextContactFilter, patients, portals, prescriptions, search, selectedDoctor, sortMode, stockItems]);
+  }, [filter, kanbanStatusFilter, metricsByPatient, nextContactFilter, patients, search, selectedDoctor, sortMode]);
+
+  const patientsByStatus = useMemo(() => {
+    const grouped = new Map<PatientStatus, Patient[]>(columns.map((column) => [column.id, [] as Patient[]] as const));
+    for (const patient of filteredPatients) grouped.get(patient.status)?.push(patient);
+    return grouped;
+  }, [filteredPatients]);
 
   function openKanbanFilter(status: PatientStatus | "todos") {
     setKanbanStatusFilter(status);
@@ -719,14 +746,18 @@ export default function SecretariaPage() {
       return;
     }
 
-    const normalizedCpf = newPatient.cpf.replace(/\D/g, "");
+    const previous = patients.find((item) => item.id === editingPatientId);
+    const cpfValue = newPatient.cpf.trim() || previous?.cpf || "";
+    const birthDateValue = newPatient.birthDate || previous?.birthDate || "";
+    const normalizedCpf = cpfValue.replace(/\D/g, "");
 
-    if (normalizedCpf.length !== 11) {
+    if (normalizedCpf && normalizedCpf.length !== 11) {
       setFormError("Informe um CPF com 11 números.");
       return;
     }
 
     if (
+      normalizedCpf &&
       patients.some(
         (patient) =>
           patient.id !== editingPatientId &&
@@ -741,7 +772,7 @@ export default function SecretariaPage() {
     const billingDocumentType = newPatient.billingDocumentType;
     const billingDocumentLength = billingDocumentType === "cnpj" ? 14 : 11;
 
-    if (billingCpf.replace(/\D/g, "").length !== billingDocumentLength) {
+    if (billingCpf && billingCpf.replace(/\D/g, "").length !== billingDocumentLength) {
       setFormError(`Informe um ${billingDocumentType === "cnpj" ? "CNPJ" : "CPF"} válido para os dados da nota fiscal.`);
       return;
     }
@@ -750,16 +781,16 @@ export default function SecretariaPage() {
       setFormError("Não foi possível identificar a sessão da Secretaria.");
       return;
     }
-    const previous = patients.find((item) => item.id === editingPatientId);
+    const hasRequiredIdentity = normalizedCpf.length === 11 && Boolean(birthDateValue);
     const patient: Patient = {
       id: editingPatientId,
       username: previous?.username,
       createdAt: previous?.createdAt ?? new Date().toISOString(),
       name: newPatient.name.trim(),
-      cpf: newPatient.cpf,
+      cpf: cpfValue,
       phone: newPatient.phone,
       email: newPatient.email.trim(),
-      birthDate: newPatient.birthDate,
+      birthDate: birthDateValue,
       doctor: newPatient.doctor,
       treatment: newPatient.treatment,
       startDate: newPatient.startDate,
@@ -790,7 +821,7 @@ export default function SecretariaPage() {
       payments: newPatient.payments,
       notes: newPatient.notes.trim(),
       abandonmentReason: newPatient.status === "desistente" ? newPatient.abandonmentReason.trim() : undefined,
-      registrationComplete: true,
+      registrationComplete: hasRequiredIdentity,
     };
 
     setSavingPatient(true);
@@ -799,21 +830,23 @@ export default function SecretariaPage() {
       const record: DemoPatientRecord = {
         ...patient,
         username: patient.username ?? patientUsername(patient.name),
-        registrationStatus: "completed",
+        registrationStatus: hasRequiredIdentity ? "completed" : "pending-secretary",
       };
       const savedPatient = await saveSecretaryPatient(context, record);
       let accessMessage = "";
-      if (!savedPatient.hasPatientAccess) {
+      if (!savedPatient.hasPatientAccess && hasRequiredIdentity) {
         const access = await createSecretaryPatientAccess(record);
         patient.username = access.username;
         accessMessage = ` Usuário: ${access.username}. Senha inicial: ${access.initialPassword}.`;
+      } else if (!hasRequiredIdentity) {
+        accessMessage = " O acesso ao portal fica pendente até completar CPF e data de nascimento em Cadastros completos.";
       }
       setPatients((current) => current.map((existing) => existing.id === editingPatientId ? patient : existing));
       setNewPatient(createEmptyPatientForm());
       setSearch("");
       setSelectedDoctor("Todos os médicos");
       setFilter("todos");
-      setSuccessMessage(`${patient.name} teve o cadastro complementado e salvo no Supabase.${accessMessage}`);
+      setSuccessMessage(`${patient.name} foi salvo no Supabase.${hasRequiredIdentity ? "" : " O cadastro permanece incompleto."}${accessMessage}`);
       closePatientForm();
     } catch (cause) {
       setFormError(cause instanceof Error ? cause.message : "Não foi possível salvar o cadastro.");
@@ -1178,9 +1211,7 @@ export default function SecretariaPage() {
           <section className="mt-6 overflow-x-auto pb-6">
             <div className="flex min-w-max gap-4">
               {columns.map((column) => {
-                const columnPatients = filteredPatients.filter(
-                  (patient) => patient.status === column.id,
-                );
+                const columnPatients = patientsByStatus.get(column.id) ?? [];
                 const visibleCount = visibleCardsByStatus[column.id] ?? 40;
 
                 return (
@@ -1226,14 +1257,17 @@ export default function SecretariaPage() {
                       {columnPatients.slice(0, visibleCount).map((patient) => {
                         const portal = portals[patient.id] ?? createDefaultPortalState(patient.id);
                         const currentBottle = portal.bottles.find((bottle) => bottle.status === "em-uso");
-                        const nextContact = getNextContactDate(patient, portal, stockItems, prescriptions);
-                        const showAlert = hasPendingNextContact(patient, portal, stockItems, batches, prescriptions);
+                        const patientMetrics = metricsByPatient.get(patient.id);
+                        const patientStock = patientMetrics?.stock ?? [];
+                        const patientBatches = patientMetrics?.batches ?? [];
+                        const nextContact = patientMetrics?.nextContact ?? null;
+                        const showAlert = patientMetrics?.hasPendingNextContact ?? false;
                         const missingIdentity = missingPatientIdentity(patient);
-                        const patientPrescriptions = prescriptions.filter((item) => item.patientId === patient.id);
+                        const patientPrescriptions = patientMetrics?.prescriptions ?? [];
                         const billingTreatments = patientPrescriptions.length
                           ? Array.from(new Set(patientPrescriptions.map((item) => item.treatment)))
                           : [patient.treatment];
-                        const billingStates = billingTreatments.map((treatment) => getBottleBillingState(patient, treatment, stockItems, batches));
+                        const billingStates = billingTreatments.map((treatment) => getBottleBillingState(patient, treatment, patientStock, patientBatches));
                         const configuredBillingStates = billingStates.filter((state) => state.coveredBottles > 0);
                         const newChargeNeeded = configuredBillingStates.some((state) => state.deliveredBottles >= state.coveredBottles);
                         const billingLabel = configuredBillingStates.length === 0
@@ -1241,11 +1275,9 @@ export default function SecretariaPage() {
                           : newChargeNeeded
                             ? "Nova cobrança necessária"
                             : "Cobrança em dia";
-                        const deliveredBottleCount = stockItems
-                          .filter((item) => item.patientId === patient.id && item.status === "entregue")
-                          .reduce((total, item) => total + Math.max(0, Math.trunc(item.bottles)), 0);
+                        const deliveredBottleCount = patientMetrics?.deliveredBottleCount ?? 0;
                         const bottlesReceived = Math.max(patient.bottlesReceived, deliveredBottleCount);
-                        const orderInProgress = hasAnyOrderInProgress(patient.id, stockItems, batches);
+                        const orderInProgress = patientMetrics?.orderInProgress ?? false;
 
                         return (
                           <article
@@ -1287,7 +1319,7 @@ export default function SecretariaPage() {
                                 </h4>
 
                                 <p className="mt-1 text-xs text-[#85797c]">
-                                  {patient.cpf}
+                                  {patient.cpf || "CPF pendente"}
                                 </p>
                                 <div className="mt-2 flex flex-wrap gap-1.5">
                                   {[...(indicationsByPatient.get(patient.id) ?? new Set<"Rinite" | "Bacteriana">())].map((indication) => <span key={indication} className={`rounded-full px-2 py-1 text-[10px] font-bold ${indication === "Rinite" ? "bg-[#fff0f3] text-[#a3113a]" : "bg-[#eaf6f9] text-[#28728a]"}`}>{indication}</span>)}
@@ -1307,9 +1339,11 @@ export default function SecretariaPage() {
                             </div>
 
                             <div className="mt-4 space-y-2 text-xs text-[#706467]">
-                              {patient.registrationComplete === false && (
+                              {(patient.registrationComplete === false || missingIdentity.length > 0) && (
                                 <div className="rounded-xl bg-[#fff5df] px-3 py-2 text-xs font-semibold text-[#98671a]">
-                                  Cadastro iniciado pelo médico. Complete os dados.
+                                  {missingIdentity.length > 0
+                                    ? `Cadastro incompleto. Dados pendentes: ${missingIdentity.join(", ")}. Clique para completar em Cadastros completos.`
+                                    : "Cadastro pendente da Secretaria. Clique para completar em Cadastros completos."}
                                 </div>
                               )}
                               <p>
@@ -1376,9 +1410,9 @@ export default function SecretariaPage() {
                             ...current,
                             [column.id]: (current[column.id] ?? 40) + 40,
                           }))}
-                          className="w-full rounded-xl border border-[#d9b4bf] bg-white px-4 py-3 text-xs font-bold text-[#a3113a] hover:bg-[#fff0f3]"
+                          className="w-full rounded-xl border border-[#e5d9d4] bg-white px-3 py-3 text-xs font-semibold text-[#a3113a] hover:bg-[#fff7f8]"
                         >
-                          Mostrar mais ({columnPatients.length - visibleCount} restantes)
+                          Carregar mais {Math.min(40, columnPatients.length - visibleCount)} pacientes ({visibleCount} de {columnPatients.length})
                         </button>
                       )}
                     </div>
@@ -1449,9 +1483,8 @@ export default function SecretariaPage() {
                     />
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
-                    CPF *
+                    CPF
                     <input
-                      required
                       readOnly
                       inputMode="numeric"
                       value={newPatient.cpf}
@@ -1463,9 +1496,8 @@ export default function SecretariaPage() {
                     />
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
-                    Data de nascimento *
+                    Data de nascimento
                     <input
-                      required
                       type="date"
                       value={newPatient.birthDate}
                       onChange={(event) =>
@@ -1482,9 +1514,8 @@ export default function SecretariaPage() {
                     <span className="mt-1 block text-xs text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span>
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
-                    Telefone / WhatsApp *
+                    Telefone / WhatsApp
                     <input
-                      required
                       inputMode="tel"
                       value={newPatient.phone}
                       onChange={(event) =>

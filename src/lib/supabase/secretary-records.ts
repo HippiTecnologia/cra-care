@@ -249,12 +249,21 @@ const SECRETARY_BOTTLE_COLUMNS = "id, clinic_id, patient_id, prescription_id, ba
 
 export async function loadSecretaryBottleRows(context: SecretaryContext) {
   const supabase = getSupabaseClient();
-  return loadAllPages<Record<string, unknown>>((from, to) => supabase.from("bottles")
+  const rows = await loadAllPages<Record<string, unknown>>((from, to) => supabase.from("bottles")
     .select(SECRETARY_BOTTLE_COLUMNS)
     .eq("clinic_id", context.clinicId)
-    .order("received_at", { ascending: false })
     .order("id", { ascending: true })
     .range(from, to));
+  return rows.sort((first, second) => {
+    const firstDate = text(first.received_at);
+    const secondDate = text(second.received_at);
+    if (firstDate !== secondDate) {
+      if (!firstDate) return 1;
+      if (!secondDate) return -1;
+      return secondDate.localeCompare(firstDate);
+    }
+    return text(first.id).localeCompare(text(second.id));
+  });
 }
 
 export async function loadSecretaryPatients(
@@ -301,14 +310,14 @@ function patientPayload(patient: DemoPatientRecord, existing: MedicalPatientRow)
   const existingFinancial = objectValue(existing.financial);
   return {
     full_name: patient.name.trim(),
-    cpf: patient.cpf,
-    birth_date: patient.birthDate,
+    cpf: patient.cpf.trim() || existing.cpf || null,
+    birth_date: patient.birthDate || existing.birth_date || null,
     phone: patient.phone || null,
     email: patient.email || null,
     status: patient.status ?? "em-conversa",
     address: {
       ...existingAddress,
-      registrationStatus: "completed",
+      registrationStatus: patient.cpf.trim() && patient.birthDate ? patient.registrationStatus : "pending-secretary",
       address: patient.address ?? "",
       zipCode: patient.zipCode ?? "",
       street: patient.street ?? "",
@@ -374,7 +383,12 @@ export async function saveSecretaryPatient(
     .update(patientPayload(patient, existing as unknown as MedicalPatientRow))
     .eq("id", patient.id)
     .eq("clinic_id", context.clinicId);
-  if (error) throw error;
+  if (error) {
+    if (error.code === "23505" && /CPF_DUPLICADO|patients_clinic_id_cpf_key|patients_clinic_normalized_cpf_key/i.test(error.message)) {
+      throw new Error("Já existe outro paciente cadastrado com esse CPF nesta clínica.");
+    }
+    throw error;
+  }
 
   const previousPlans = Array.isArray(objectValue((existing as unknown as MedicalPatientRow).treatment).treatmentBottles)
     ? objectValue((existing as unknown as MedicalPatientRow).treatment).treatmentBottles
@@ -576,11 +590,19 @@ export async function loadSecretaryPortals(
   const current = context ?? await loadSecretaryContext();
   const supabase = getSupabaseClient();
   const [assessmentRows, bottleRows, contractRows, settingsRows, useRows] = await Promise.all([
-    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_assessments").select("id, patient_id, bottle_reference, bottle_number, feeling, frequency, severity, medication_frequency, comment, created_at, viewed_at, viewed_by, response, responded_at, responded_by").eq("clinic_id", current.clinicId).order("created_at", { ascending: false }).order("id").range(from, to)),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_assessments")
+      .select("id, patient_id, bottle_reference, bottle_number, feeling, frequency, severity, medication_frequency, comment, created_at, viewed_at, viewed_by, response, responded_at, responded_by")
+      .eq("clinic_id", current.clinicId).order("created_at", { ascending: false }).order("id", { ascending: true }).range(from, to)),
     sharedBottleRows ? Promise.resolve(sharedBottleRows) : loadSecretaryBottleRows(current),
-    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_contracts").select("patient_id, signed_at, signed_name, signed_cpf").eq("clinic_id", current.clinicId).order("patient_id").range(from, to)),
-    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_portal_settings").select("patient_id, reminders, day_overrides, read_notification_ids, manual_notifications").eq("clinic_id", current.clinicId).order("patient_id").range(from, to)),
-    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_use_records").select("id, patient_id, bottle_id, use_date, registered_at, drops").eq("clinic_id", current.clinicId).order("use_date", { ascending: false }).order("id").range(from, to)),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_contracts")
+      .select("patient_id, signed_at, signed_name, signed_cpf")
+      .eq("clinic_id", current.clinicId).order("patient_id", { ascending: true }).range(from, to)),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_portal_settings")
+      .select("patient_id, reminders, day_overrides, read_notification_ids, manual_notifications")
+      .eq("clinic_id", current.clinicId).order("patient_id", { ascending: true }).range(from, to)),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("patient_use_records")
+      .select("id, patient_id, bottle_id, use_date, registered_at, drops")
+      .eq("clinic_id", current.clinicId).order("use_date", { ascending: false }).order("id", { ascending: true }).range(from, to)),
   ]);
   const result = Object.fromEntries(patientIds.map((id) => [id, createDefaultPortalState(id)])) as Record<string, PatientPortalState>;
   for (const row of assessmentRows as unknown as Record<string, unknown>[]) {
@@ -890,12 +912,7 @@ function stockFromRow(row: Record<string, unknown>): DemoStockItem {
 
 export async function loadSecretaryStock(context?: SecretaryContext, sharedBottleRows?: Record<string, unknown>[]) {
   const current = context ?? await loadSecretaryContext();
-  const rows = sharedBottleRows ?? await loadAllPages<Record<string, unknown>>((from, to) => getSupabaseClient().from("bottles")
-    .select(SECRETARY_BOTTLE_COLUMNS)
-    .eq("clinic_id", current.clinicId)
-    .order("received_at", { ascending: false })
-    .order("id", { ascending: true })
-    .range(from, to));
+  const rows = sharedBottleRows ?? await loadSecretaryBottleRows(current);
   return rows
     .filter((row) => objectValue(row.metadata).manuallyDeleted !== true && !objectValue(row.metadata).historicalImportSource)
     .map(stockFromRow);

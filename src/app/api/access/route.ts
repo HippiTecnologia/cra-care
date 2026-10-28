@@ -89,13 +89,16 @@ export async function PUT(request: NextRequest) {
     const account = await findAccount(currentActor.clinic_id, String(body.userId ?? ""));
     if (!allowed(currentActor, account)) return unauthorized("Você não pode redefinir este acesso.");
     if (!account) return NextResponse.json({ error: "Acesso não encontrado nesta clínica." }, { status: 404 });
+    if (account.kind === "patient" && (!account.cpf || !account.birth_date)) {
+      return NextResponse.json({ error: "Complete o CPF e a data de nascimento antes de redefinir o acesso do paciente." }, { status: 400 });
+    }
     const admin = getSupabaseAdminClient();
     const role = account.kind === "profile" ? account.role as StaffRole : "paciente";
     // A senha anterior nunca é recuperada. Para pacientes, a redefinição volta
     // ao padrão automático da clínica: data de nascimento (ddmmaaaa). Para a
     // equipe, é gerada uma senha temporária forte.
     const temporaryPassword = account.kind === "patient"
-      ? patientInitialPassword(account.birth_date)
+      ? patientInitialPassword(account.birth_date!)
       : createTemporaryPassword();
     const update = account.kind === "patient"
       ? { email: authEmailForPatientCpf(String(account.cpf).replace(/\D/g, "")), password: temporaryPassword, user_metadata: { username: String(account.cpf).replace(/\D/g, ""), role: "paciente" }, ban_duration: "none" as const }

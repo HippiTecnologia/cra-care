@@ -177,6 +177,7 @@ async function loadPatientIdentity(): Promise<{ context: PatientContext; row: Me
   if (error) throw error;
   if (!data) throw new Error("Este acesso ainda não está vinculado a um paciente.");
   const row = data as unknown as MedicalPatientRow;
+  if (!row.cpf) throw new Error("Complete o CPF do paciente antes de acessar o portal.");
   return {
     row,
     context: {
