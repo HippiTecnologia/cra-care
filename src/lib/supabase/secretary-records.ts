@@ -203,16 +203,22 @@ function paymentFromRow(row: Record<string, unknown>): PatientPaymentRecord {
     id: text(row.id),
     historicalImport: row.historical_import === true,
     status: text(row.status),
+    acquisitionMethodId: text(row.acquisition_method_id) || undefined,
+    acquisitionMethod: text(row.acquisition_method) || undefined,
+    acquisitionMethodVersion: number(row.acquisition_method_version) || undefined,
+    paymentCondition: text(row.payment_condition) === "À vista" ? "À vista" : text(row.payment_condition) === "Parcelado" ? "Parcelado" : undefined,
     treatment: /bacteriana|imunobacteriana/i.test(text(row.treatment))
       ? "Imunobacteriana"
       : text(row.treatment) ? "Rinite" : undefined,
     bottlePlanId: text(row.bottle_reference) || undefined,
     additionalBottles: number(row.additional_bottles),
     amount: number(row.amount),
-    paidAt: text(row.paid_at) || text(row.due_at),
+    paidAt: text(row.paid_at),
+    registeredAt: text(row.registered_at) || text(row.created_at) || undefined,
     method: text(row.payment_method, "A definir"),
     installments: number(row.installment_count, 1),
     installmentNumber: number(row.installment_number, 1),
+    installmentValue: number(row.installment_value) || undefined,
     dueAt: text(row.due_at) || undefined,
     asaasReference: text(row.asaas_reference) || undefined,
     notes: text(row.notes) || undefined,
@@ -421,15 +427,21 @@ export async function saveSecretaryPatient(
       historical_import: payment.historicalImport ?? false,
       installment_number: payment.installmentNumber ?? 1,
       installment_count: payment.installments ?? patient.paymentInstallments ?? 1,
+      installment_value: payment.installmentValue ?? null,
       amount: payment.amount,
       due_at: payment.dueAt ?? null,
-      paid_at: payment.paidAt || null,
+      paid_at: payment.status === "recebido" || (!payment.status && payment.paidAt) ? payment.paidAt || null : null,
+      registered_at: payment.registeredAt ?? payment.paidAt ?? null,
       payment_method: payment.method,
       status: payment.status ?? (payment.paidAt ? "recebido" : "pendente"),
       asaas_reference: payment.asaasReference ?? null,
       notes: payment.notes ?? null,
       treatment: payment.treatment ?? null,
       bottle_reference: payment.bottlePlanId ?? null,
+      acquisition_method_id: payment.acquisitionMethodId ?? null,
+      acquisition_method: payment.acquisitionMethod ?? null,
+      acquisition_method_version: payment.acquisitionMethodVersion ?? null,
+      payment_condition: payment.paymentCondition ?? null,
       additional_bottles: Math.max(0, Math.trunc(payment.additionalBottles ?? 0)),
     };
     if (isUuid(payment.id)) {
@@ -1058,6 +1070,7 @@ export async function loadSecretaryInvoices(context?: SecretaryContext) {
     fileSize: number(row.file_size),
     uploadedAt: text(row.created_at),
     uploadedBy: text(row.uploaded_by),
+    paymentId: text(row.payment_id) || undefined,
     assignmentStatus: text(row.assignment_status) === "em_analise" ? "em_analise" : text(row.assignment_status) === "pendente" ? "pendente" : "vinculada",
   }));
 }
@@ -1073,6 +1086,7 @@ export async function saveSecretaryInvoice(context: SecretaryContext, invoice: D
     file_data: invoice.fileData,
     file_size: invoice.fileSize,
     uploaded_by: invoice.uploadedBy,
+    payment_id: isUuid(invoice.paymentId ?? "") ? invoice.paymentId : null,
     assignment_status: invoice.assignmentStatus ?? "vinculada",
   });
   if (error) throw error;
@@ -1094,6 +1108,7 @@ export async function assignSecretaryInvoice(context: SecretaryContext, invoiceI
     patient_id: patient.id,
     patient_name: patient.name,
     patient_cpf: patient.cpf,
+    payment_id: null,
     assignment_status: "vinculada",
   }).eq("id", invoiceId).eq("clinic_id", context.clinicId);
   if (error) throw error;

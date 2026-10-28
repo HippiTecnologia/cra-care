@@ -127,14 +127,20 @@ export type PatientPaymentRecord = {
   historicalImport?: boolean;
   /** Situação persistida no financeiro; preserva pagamentos recebidos sem data original. */
   status?: string;
+  acquisitionMethodId?: string;
+  acquisitionMethod?: string;
+  acquisitionMethodVersion?: number;
+  paymentCondition?: "À vista" | "Parcelado";
   bottlePlanId?: string;
   /** Quantidade extra de frascos liberada por este pagamento, além da cobertura inicial. */
   additionalBottles?: number;
   amount: number;
   paidAt: string;
+  registeredAt?: string;
   method: string;
   installments?: number;
   installmentNumber?: number;
+  installmentValue?: number;
   dueAt?: string;
   asaasReference?: string;
   notes?: string;
@@ -150,6 +156,7 @@ export type DemoInvoice = {
   fileSize: number;
   uploadedAt: string;
   uploadedBy: string;
+  paymentId?: string;
   assignmentStatus?: "vinculada" | "em_analise" | "pendente";
 };
 
