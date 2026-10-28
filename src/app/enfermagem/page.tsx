@@ -19,6 +19,7 @@ import {
 } from "../../lib/supabase/nursing-records";
 import { patchSubstanceCode, patchSubstanceDetails } from "../../lib/patch-substances";
 import { formatBirthDate, normalizeBirthDate } from "../../lib/birth-date";
+import { getPrickGroupsForDoctor, isAlessandraPrickDoctor, prickResultKey } from "../../lib/prick-batteries";
 
 type Section = "patients" | "reports" | "in-progress";
 type ReportType = "prick_test" | "patch_test";
@@ -67,16 +68,6 @@ function createInitialPatchResults(): Record<string, PatchResult> {
   );
 }
 
-const prickGroups = [
-  { battery: "BATERIA A", category: "Controles", items: ["Controle Positivo", "Controle Negativo"] },
-  { battery: "BATERIA A", category: "Ácaros", items: ["Blomia tropicalis", "Dermatophagoides farinae", "Dermatophagoides pteronyssinus"] },
-  { battery: "BATERIA A", category: "Fungos", items: ["Fungos II: Alternaria, Cladosporium, Aspergillus, Penicillium"] },
-  { battery: "BATERIA A", category: "Pólens", items: ["Gramíneas mix: Dactylis glomerata, Festuca pratensis, Lolium multiflorum, Phleum pratense, Poa pratensis"] },
-  { battery: "BATERIA A", category: "Outros", items: ["Látex"] },
-  { battery: "BATERIA A", category: "Epitélios", items: ["Epitélio de cão", "Epitélio de gato"] },
-  { battery: "BATERIA B", category: "Insetos", items: ["Barata Mix", "Mosquito Mix"] },
-  { battery: "BATERIA B", category: "Alimentos", items: ["Leite de vaca", "Ovo de galinha", "Trigo", "Crustáceos (mix): lagosta, ostra, siri, marisco", "Amendoim"] },
-];
 const patchBatteries = [
   { name: "Bateria Padrão 1", items: ["P-01 · Antraquinona · 2,0%", "P-02 · Bálsamo do Peru · 25,0%", "P-03 · PPD Mix · 0,4%", "P-04 · Hidroquinona · 1,0%", "P-05 · Bicromato de Potássio · 0,5%", "P-06 · Propilenoglicol · 10,0%", "P-07 · Butilfenol-para-terciário · 1,0%", "P-08 · Neomicina, Sulfato · 20,0%", "P-09 · Irgasan · 1,0%", "P-10 · Kathon CG · 0,5%"] },
   { name: "Bateria Padrão 2", items: ["P-11 · Cloreto de Cobalto · 1,0%", "P-12 · Lanolina · 30,0%", "P-13 · Tiuram Mix · 1,0%", "P-14 · Etilenodiamina · 1,0%", "P-15 · Perfume Mix · 7,0%", "P-16 · Mercapto Mix · 2,0%", "P-17 · Benzocaína · 5,0%", "P-18 · Metacrilato de 2-hidroxietila (2-HEMA)", "P-19 · Quinolina Mix · 6,0%", "P-20 · Nitrofurazona · 1,0%"] },
@@ -84,6 +75,7 @@ const patchBatteries = [
   { name: "Bateria Cosméticos 1", items: ["C-01 · Germall 115 · 2,0%", "C-02 · BHT · 2,0%", "C-03 · Resina Tosilamida/Formaldeído · 10,0%", "C-04 · Trietanolamina · 2,5%", "C-05 · Bronopol · 0,5%", "C-06 · Cloracetamida · 0,2%", "C-07 · Ácido Sórbico · 2,0%", "C-08 · Tioglicolato de Amônio · 2,5%", "C-09 · Amerchol L 101 · 100,0%", "C-10 · Clorexidina · 0,5%", "C-11 · Dietanolamida de Ácido Graxo de Coco · 0,5%"] },
 ];
 const emptyPrick = (): PrickResult => ({ mm: 0, reaction: "-", pseudopod: false, dermatographism: false });
+const createInitialPrickResults = (groups: { items: string[]; resultKeys?: string[] }[]) => Object.fromEntries(groups.flatMap((group) => group.items.map((item, index) => [group.resultKeys?.[index] ?? item, emptyPrick()])));
 const reactionForMm = (mm: number): PrickResult["reaction"] => mm === 0 ? "-" : mm <= 3 ? "+" : mm <= 6 ? "++" : mm <= 9 ? "+++" : "++++";
 
 function escapeHtml(value: string | number) {
@@ -125,6 +117,7 @@ export default function NursingPage() {
   const [duplicatePatient, setDuplicatePatient] = useState<NursingPatient | null>(null);
   const [reportType, setReportType] = useState<ReportType>("prick_test");
   const [reportDoctorId, setReportDoctorId] = useState("");
+  const [includeImmunotechBattery, setIncludeImmunotechBattery] = useState(false);
   const [prickResults, setPrickResults] = useState<Record<string, PrickResult>>({});
   const [patchResults, setPatchResults] = useState<Record<string, PatchResult>>({});
   const [editingReportId, setEditingReportId] = useState<string | null>(null);
@@ -166,6 +159,10 @@ export default function NursingPage() {
     [doctors, reportType],
   );
   const selectedReportDoctor = allowedReportDoctors.find((doctor) => doctor.id === reportDoctorId) ?? allowedReportDoctors[0];
+  const activePrickGroups = useMemo(
+    () => getPrickGroupsForDoctor(selectedReportDoctor?.fullName ?? "", selectedReportDoctor?.crm, includeImmunotechBattery),
+    [includeImmunotechBattery, selectedReportDoctor?.crm, selectedReportDoctor?.fullName],
+  );
   const canCreatePatients = profile?.role === "enfermagem";
   const canEditPatients = profile?.role === "enfermagem";
   const canEditReports = profile?.role === "enfermagem" || profile?.role === "medico";
@@ -250,32 +247,54 @@ export default function NursingPage() {
   function updatePrick(item: string, change: Partial<PrickResult>) {
     setPrickResults((current) => {
       const updated = { ...current, [item]: { ...(current[item] ?? emptyPrick()), ...change } };
-      const negativeMm = item === "Controle Negativo"
-        ? Number(updated[item].mm || 0)
-        : Number(updated["Controle Negativo"]?.mm || 0);
-      const dermatographismActive = negativeMm > 0;
-
-      return Object.fromEntries(prickGroups.flatMap((group) => group.items).map((name) => {
-        const result = { ...(updated[name] ?? emptyPrick()), dermatographism: dermatographismActive };
-        const isControl = name === "Controle Positivo" || name === "Controle Negativo";
-        if (!isControl && negativeMm > 0 && result.mm > 0 && result.mm <= negativeMm) {
-          result.mm = 0;
-          result.pseudopod = false;
-        }
-        result.reaction = result.pseudopod ? "++++" : reactionForMm(result.mm);
-        return [name, result];
+      return Object.fromEntries(activePrickGroups.flatMap((group) => {
+        const negativeControlIndex = group.items.indexOf("Controle Negativo");
+        const negativeControlKey = negativeControlIndex >= 0 ? prickResultKey(group, negativeControlIndex) : "Controle Negativo";
+        const negativeMm = Number(updated[negativeControlKey]?.mm || 0);
+        const dermatographismActive = negativeMm > 0;
+        return group.items.map((name, index) => {
+          const key = prickResultKey(group, index);
+          const result = { ...(updated[key] ?? emptyPrick()), dermatographism: dermatographismActive };
+          const isControl = name === "Controle Positivo" || name === "Controle Negativo";
+          if (!isControl && negativeMm > 0 && result.mm > 0 && result.mm <= negativeMm) {
+            result.mm = 0;
+            result.pseudopod = false;
+          }
+          result.reaction = result.pseudopod ? "++++" : reactionForMm(result.mm);
+          return [key, result];
+        });
       }));
     });
   }
 
   function openReport() {
     const nextType: ReportType = "prick_test";
-    setReportType(nextType); setReportDoctorId(defaultReportDoctorId(nextType)); setPrickResults({}); setPatchResults(createInitialPatchResults()); setEditingReportId(null); setNotes(""); setReportDate(new Date().toISOString().slice(0, 10)); setModal("report");
+    const nextDoctorId = defaultReportDoctorId(nextType);
+    const nextDoctor = doctors.find((doctor) => doctor.id === nextDoctorId);
+    const includeBattery = Boolean(nextDoctor && isAlessandraPrickDoctor(nextDoctor.fullName, nextDoctor.crm));
+    setReportType(nextType); setReportDoctorId(nextDoctorId); setIncludeImmunotechBattery(includeBattery);
+    setPrickResults(createInitialPrickResults(getPrickGroupsForDoctor(nextDoctor?.fullName ?? "", nextDoctor?.crm, includeBattery)));
+    setPatchResults(createInitialPatchResults()); setEditingReportId(null); setNotes(""); setReportDate(new Date().toISOString().slice(0, 10)); setModal("report");
   }
 
   function changeReportType(nextType: ReportType) {
+    const nextDoctorId = defaultReportDoctorId(nextType);
+    const nextDoctor = doctors.find((doctor) => doctor.id === nextDoctorId);
+    const includeBattery = nextType === "prick_test" && Boolean(nextDoctor && isAlessandraPrickDoctor(nextDoctor.fullName, nextDoctor.crm));
     setReportType(nextType);
-    setReportDoctorId(defaultReportDoctorId(nextType));
+    setReportDoctorId(nextDoctorId);
+    setIncludeImmunotechBattery(includeBattery);
+  }
+
+  function changeReportDoctor(nextDoctorId: string) {
+    const nextDoctor = doctors.find((doctor) => doctor.id === nextDoctorId);
+    const includeBattery = reportType === "prick_test" && Boolean(nextDoctor && isAlessandraPrickDoctor(nextDoctor.fullName, nextDoctor.crm));
+    setReportDoctorId(nextDoctorId);
+    setIncludeImmunotechBattery(includeBattery);
+    if (includeBattery) {
+      const groups = getPrickGroupsForDoctor(nextDoctor?.fullName ?? "", nextDoctor?.crm, true);
+      setPrickResults((current) => ({ ...createInitialPrickResults(groups), ...current }));
+    }
   }
 
   async function saveReport() {
@@ -288,7 +307,8 @@ export default function NursingPage() {
     const content = {
       status: isPatchInProgress ? "em_andamento" : "concluido",
       patientId: selected.id,
-      prickResults: reportType === "prick_test" ? prickResults : undefined,
+      prickResults: reportType === "prick_test" ? Object.fromEntries(activePrickGroups.flatMap((group) => group.items.map((_, index) => prickResultKey(group, index))).filter((item) => item in prickResults).map((item) => [item, prickResults[item]])) : undefined,
+      prickBattery: reportType === "prick_test" && includeImmunotechBattery ? "immunotech-v1" : undefined,
       results: reportType === "patch_test" ? patchResults : undefined,
       notes,
       nurseName: profile.fullName,
@@ -332,6 +352,7 @@ export default function NursingPage() {
     const savedDoctor = doctors.find((doctor) => normalizePersonName(doctor.fullName) === normalizePersonName(savedResponsible))
       ?? doctors.find((doctor) => doctorAllowedForReport(doctor, report.report_type));
     setReportDoctorId(savedDoctor?.id ?? "");
+    setIncludeImmunotechBattery(report.content.prickBattery === "immunotech-v1");
     setPrickResults({ ...((report.content.prickResults ?? {}) as Record<string, PrickResult>) });
     setPatchResults({ ...createInitialPatchResults(), ...((report.content.results ?? {}) as Record<string, PatchResult>) });
     setNotes(String(report.content.notes ?? ""));
@@ -379,17 +400,18 @@ export default function NursingPage() {
     const patientName = reportPatient?.name ?? String(report.content.patientName ?? "Paciente");
     const patientBirthDate = formatBirthDate(reportPatient?.birthDate ?? String(report.content.patientBirthDate ?? ""));
     const savedResults = (report.content.prickResults ?? {}) as Record<string, Partial<PrickResult>>;
+    const prickGroups = getPrickGroupsForDoctor(String(report.content.examResponsible ?? ""), String(report.content.examResponsibleCrm ?? ""), report.content.prickBattery === "immunotech-v1");
     const rows = prickGroups.map((group) => {
       const items = group.items.map((item, itemIndex) => {
         const number = prickGroups.slice(0, prickGroups.indexOf(group)).reduce((total, current) => total + current.items.length, 0) + itemIndex + 1;
-        const result = savedResults[item] ?? {};
+        const result = savedResults[prickResultKey(group, itemIndex)] ?? {};
         const mm = Number(result.mm ?? 0);
         const reaction = result.pseudopod ? "++++" : result.reaction ?? reactionForMm(mm);
         return `<tr><td class="number">${number}</td><td>${escapeHtml(item)}</td><td>${mm} mm</td><td>${result.pseudopod ? "sim" : "não"}</td><td class="reaction ${reaction === "-" ? "no-reaction" : "positive-reaction"}">${reaction === "-" ? "Sem Reação" : reaction}</td><td>${result.dermatographism ? "sim" : "não"}</td></tr>`;
       }).join("");
       return `<tr class="category"><td colspan="6">${escapeHtml(group.category)}</td></tr>${items}`;
     });
-    const batteries = ["BATERIA A", "BATERIA B"].map((battery) => `<section class="battery"><h2>${battery}</h2><table><thead><tr><th></th><th>Extrato</th><th>MM</th><th>Pseudópode</th><th>Resposta Alérgica</th><th>Dermatografismo</th></tr></thead><tbody>${rows.filter((_, index) => prickGroups[index].battery === battery).join("")}</tbody></table></section>`).join("");
+    const batteries = [...new Set(prickGroups.map((group) => group.battery))].map((battery) => `<section class="battery"><h2>${escapeHtml(battery)}</h2><table><thead><tr><th></th><th>Extrato</th><th>MM</th><th>Pseudópode</th><th>Resposta Alérgica</th><th>Dermatografismo</th></tr></thead><tbody>${rows.filter((_, index) => prickGroups[index].battery === battery).join("")}</tbody></table></section>`).join("");
     const date = typeof report.content.examDate === "string" ? report.content.examDate : report.created_at;
     const formattedDate = new Date(`${date.slice(0, 10)}T12:00:00`).toLocaleDateString("pt-BR");
     const nurse = escapeHtml(String(report.content.nurseName ?? profile?.fullName ?? "Enfermagem"));
@@ -508,26 +530,27 @@ export default function NursingPage() {
   </div>
   {canCreatePatients && modal === "patient" && <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4"><form onSubmit={savePatient} className="w-full max-w-lg rounded-3xl bg-white p-6"><div className="flex justify-between"><h2 className="text-xl font-bold">Cadastrar paciente</h2><button type="button" onClick={() => setModal(null)}>Fechar</button></div><div className="mt-5 grid gap-3"><input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo" className="rounded-xl border p-3"/><input required inputMode="numeric" maxLength={14} value={cpf} onChange={(e) => { setCpf(formatCpf(e.target.value)); setDuplicatePatient(null); }} placeholder="000.000.000-00" className="rounded-xl border p-3"/><label className="text-sm font-medium text-[#544449]">Data de nascimento<input required type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} onPaste={pasteBirthDate} className="mt-1 w-full rounded-xl border p-3"/><span className="mt-1 block text-xs text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span></label><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Telefone" className="rounded-xl border p-3"/></div>{duplicatePatient && <div className="mt-4 rounded-xl border border-[#f0c5ce] bg-[#fff1f3] p-4 text-sm text-[#8f1235]"><strong>CPF já cadastrado.</strong><p className="mt-1">Encontramos {duplicatePatient.name} · CPF {duplicatePatient.cpf}. Não criamos outro registro.</p><button type="button" onClick={() => { const existing = duplicatePatient; setDuplicatePatient(null); setModal(null); void openPatient(existing); }} className="mt-3 rounded-lg bg-[#a3113a] px-3 py-2 font-semibold text-white">Abrir paciente existente</button></div>}<p className="mt-4 rounded-xl bg-[#fbf5f2] p-3 text-sm text-[#66595d]">A paciente ficará disponível para consulta por toda a equipe médica. O médico que assumir o acompanhamento será vinculado ao tratamento.</p><button className="mt-5 w-full rounded-xl bg-[#a3113a] p-3 font-bold text-white">Salvar paciente</button></form></div>}
   {canEditPatients && modal === "patient-edit" && <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4"><form onSubmit={savePatientEdit} className="w-full max-w-lg rounded-3xl bg-white p-6"><div className="flex justify-between"><h2 className="text-xl font-bold">Editar dados da paciente</h2><button type="button" onClick={() => setModal(null)}>Fechar</button></div><div className="mt-5 grid gap-3"><input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo" className="rounded-xl border p-3"/><input required inputMode="numeric" maxLength={14} value={cpf} onChange={(e) => setCpf(formatCpf(e.target.value))} placeholder="CPF" className="rounded-xl border p-3"/><label className="text-sm font-medium text-[#544449]">Data de nascimento<input required type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} onPaste={pasteBirthDate} className="mt-1 w-full rounded-xl border p-3"/><span className="mt-1 block text-xs text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span></label><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Telefone" className="rounded-xl border p-3"/></div><button className="mt-5 w-full rounded-xl bg-[#a3113a] p-3 font-bold text-white">Salvar alterações</button></form></div>}
-  {canEditReports && modal === "report" && <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4"><section className="mx-auto my-5 max-w-6xl rounded-3xl bg-white p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-2xl font-bold">Preencher laudo</h2><p className="mt-1 text-sm text-[#817578]">Paciente: {selected?.name ?? "Selecione uma paciente antes de criar o laudo"}</p></div><button onClick={() => setModal(null)} className="rounded-xl border px-4 py-2 font-semibold">Fechar laudo</button></div><div className="mt-5 grid gap-3 md:grid-cols-[1fr_210px]"><label className="text-sm font-semibold text-[#544449]">Paciente<input readOnly value={selected?.name ?? ""} className="mt-1 w-full rounded-xl border border-[#ddd5d0] bg-[#faf8f6] p-3 font-normal"/></label><label className="text-sm font-semibold text-[#544449]">Data<input type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} className="mt-1 w-full rounded-xl border border-[#ddd5d0] p-3 font-normal"/></label></div><div className="mt-4 grid gap-3 md:grid-cols-2"><label className="text-sm font-semibold text-[#544449]">Tipo de laudo<select value={reportType} onChange={(event) => changeReportType(event.target.value as ReportType)} className="mt-1 w-full rounded-xl border p-3 font-normal"><option value="prick_test">Laudo Prick</option><option value="patch_test">Laudo Patch</option></select></label><label className="text-sm font-semibold text-[#544449]">Médico responsável<select value={selectedReportDoctor?.id ?? ""} onChange={(event) => setReportDoctorId(event.target.value)} disabled={profile?.role === "medico" || allowedReportDoctors.length <= 1} className="mt-1 w-full rounded-xl border p-3 font-normal disabled:bg-[#f7f4f2]"><option value="">Selecione o médico</option>{allowedReportDoctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.fullName}{doctor.crm ? ` · CRM ${doctor.crm}` : ""}</option>)}</select><span className="mt-1 block text-xs font-normal text-[#817578]">{profile?.role === "medico" ? "O laudo será registrado no seu perfil médico." : reportType === "prick_test" ? "Prick: Dr. Sérgio, Dra. Alessandra ou Dra. Patrícia Martinski." : "Patch: Dra. Alessandra ou Dra. Patrícia Martinski."}</span></label></div>
-    {reportType === "prick_test" ? <div className="mt-6 overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="sr-only"><tr><th>Item</th><th>Medida</th><th>Observações</th><th>Resultado</th></tr></thead><tbody>{prickGroups.map((group, groupIndex) => <MemoGroup key={`${group.battery}-${group.category}`} group={group} showBattery={groupIndex === 0 || prickGroups[groupIndex - 1].battery !== group.battery} values={prickResults} update={updatePrick}/>)}</tbody></table></div> : <div className="mt-6 space-y-5">{patchBatteries.map((battery) => <section key={battery.name} className="overflow-hidden rounded-xl border"><h3 className="bg-[#d4d8dd] px-4 py-2 text-sm font-bold">{battery.name}</h3>{battery.items.map((item) => { const result = patchResults[item] ?? { firstReading: "", secondReading: "" }; return <div key={item} className="grid gap-3 border-t p-3 text-sm sm:grid-cols-[1fr_180px_180px]"><span>{item}</span><label>1ª leitura · 48h<select value={result.firstReading} onChange={(event) => setPatchResults((current) => ({ ...current, [item]: { ...result, firstReading: event.target.value as PatchResult["firstReading"] } }))} className="mt-1 w-full rounded-lg border p-2"><option value="">Não informado</option><option>-</option><option>?</option><option>+</option><option>++</option><option>+++</option></select></label><label>2ª leitura · 48h<select value={result.secondReading} onChange={(event) => setPatchResults((current) => ({ ...current, [item]: { ...result, secondReading: event.target.value as PatchResult["secondReading"] } }))} className="mt-1 w-full rounded-lg border p-2"><option value="">Não informado</option><option>-</option><option>?</option><option>+</option><option>++</option><option>+++</option></select></label></div>; })}</section>)}</div>}
+  {canEditReports && modal === "report" && <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4"><section className="mx-auto my-5 max-w-6xl rounded-3xl bg-white p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-2xl font-bold">Preencher laudo</h2><p className="mt-1 text-sm text-[#817578]">Paciente: {selected?.name ?? "Selecione uma paciente antes de criar o laudo"}</p></div><button onClick={() => setModal(null)} className="rounded-xl border px-4 py-2 font-semibold">Fechar laudo</button></div><div className="mt-5 grid gap-3 md:grid-cols-[1fr_210px]"><label className="text-sm font-semibold text-[#544449]">Paciente<input readOnly value={selected?.name ?? ""} className="mt-1 w-full rounded-xl border border-[#ddd5d0] bg-[#faf8f6] p-3 font-normal"/></label><label className="text-sm font-semibold text-[#544449]">Data<input type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} className="mt-1 w-full rounded-xl border border-[#ddd5d0] p-3 font-normal"/></label></div><div className="mt-4 grid gap-3 md:grid-cols-2"><label className="text-sm font-semibold text-[#544449]">Tipo de laudo<select value={reportType} onChange={(event) => changeReportType(event.target.value as ReportType)} className="mt-1 w-full rounded-xl border p-3 font-normal"><option value="prick_test">Laudo Prick</option><option value="patch_test">Laudo Patch</option></select></label><label className="text-sm font-semibold text-[#544449]">Médico responsável<select value={selectedReportDoctor?.id ?? ""} onChange={(event) => changeReportDoctor(event.target.value)} disabled={profile?.role === "medico" || allowedReportDoctors.length <= 1} className="mt-1 w-full rounded-xl border p-3 font-normal disabled:bg-[#f7f4f2]"><option value="">Selecione o médico</option>{allowedReportDoctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.fullName}{doctor.crm ? ` · CRM ${doctor.crm}` : ""}</option>)}</select><span className="mt-1 block text-xs font-normal text-[#817578]">{profile?.role === "medico" ? "O laudo será registrado no seu perfil médico." : reportType === "prick_test" ? "Prick: Dr. Sérgio, Dra. Alessandra ou Dra. Patrícia Martinski." : "Patch: Dra. Alessandra ou Dra. Patrícia Martinski."}</span>{reportType === "prick_test" && includeImmunotechBattery && <span className="mt-1 block text-xs font-semibold text-[#187157]">Bateria Immunotech incluída para a Dra. Alessandra.</span>}</label></div>
+    {reportType === "prick_test" ? <div className="mt-6 overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="sr-only"><tr><th>Item</th><th>Medida</th><th>Observações</th><th>Resultado</th></tr></thead><tbody>{activePrickGroups.map((group, groupIndex) => <MemoGroup key={`${group.battery}-${group.category}`} group={group} allGroups={activePrickGroups} showBattery={groupIndex === 0 || activePrickGroups[groupIndex - 1].battery !== group.battery} values={prickResults} update={updatePrick}/>)}</tbody></table></div> : <div className="mt-6 space-y-5">{patchBatteries.map((battery) => <section key={battery.name} className="overflow-hidden rounded-xl border"><h3 className="bg-[#d4d8dd] px-4 py-2 text-sm font-bold">{battery.name}</h3>{battery.items.map((item) => { const result = patchResults[item] ?? { firstReading: "", secondReading: "" }; return <div key={item} className="grid gap-3 border-t p-3 text-sm sm:grid-cols-[1fr_180px_180px]"><span>{item}</span><label>1ª leitura · 48h<select value={result.firstReading} onChange={(event) => setPatchResults((current) => ({ ...current, [item]: { ...result, firstReading: event.target.value as PatchResult["firstReading"] } }))} className="mt-1 w-full rounded-lg border p-2"><option value="">Não informado</option><option>-</option><option>?</option><option>+</option><option>++</option><option>+++</option></select></label><label>2ª leitura · 48h<select value={result.secondReading} onChange={(event) => setPatchResults((current) => ({ ...current, [item]: { ...result, secondReading: event.target.value as PatchResult["secondReading"] } }))} className="mt-1 w-full rounded-lg border p-2"><option value="">Não informado</option><option>-</option><option>?</option><option>+</option><option>++</option><option>+++</option></select></label></div>; })}</section>)}</div>}
     <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Observações clínicas" className="mt-6 min-h-24 w-full rounded-xl border p-3"/><button disabled={!selected} onClick={() => void saveReport()} className="mt-5 w-full rounded-xl bg-[#a3113a] p-3 font-bold text-white disabled:opacity-50">Salvar laudo</button></section></div>}
   </main>;
 }
 
-function MemoGroup({ group, showBattery, values, update }: { group: { battery: string; category: string; items: string[] }; showBattery: boolean; values: Record<string, PrickResult>; update: (item: string, change: Partial<PrickResult>) => void }) {
-  const groupIndex = prickGroups.indexOf(group);
-  const firstNumber = prickGroups.slice(0, groupIndex).reduce((total, current) => total + current.items.length, 0) + 1;
+function MemoGroup({ group, allGroups, showBattery, values, update }: { group: { battery: string; category: string; items: string[]; resultKeys?: string[] }; allGroups: { battery: string; category: string; items: string[]; resultKeys?: string[] }[]; showBattery: boolean; values: Record<string, PrickResult>; update: (item: string, change: Partial<PrickResult>) => void }) {
+  const groupIndex = allGroups.indexOf(group);
+  const firstNumber = allGroups.slice(0, groupIndex).reduce((total, current) => total + current.items.length, 0) + 1;
 
   return <>
     {showBattery && <tr><td colSpan={5} className="border-t-4 border-[#596573] bg-[#d4d8dd] px-4 py-1.5 text-xs font-bold text-[#29323b]">{group.battery}</td></tr>}
     <tr><td colSpan={5} className="bg-[#aeb5bd] px-4 py-1 text-xs font-semibold text-[#26303a]">{group.category}</td></tr>
     {group.items.map((item, itemIndex) => {
-      const value = values[item] ?? emptyPrick();
+      const key = prickResultKey(group, itemIndex);
+      const value = values[key] ?? emptyPrick();
       const reaction = value.pseudopod ? "++++" : value.reaction ?? reactionForMm(value.mm);
       return <tr key={item} className="border-b border-[#d9dde0] bg-white text-xs text-[#2f3840]">
         <td className="w-[48%] px-3 py-2"><div className="grid grid-cols-[36px_1fr] items-center gap-3"><span className="text-center font-medium">{firstNumber + itemIndex}</span><span className="text-center">{item}</span></div></td>
-        <td className="w-[20%] px-3 py-2"><div className="flex items-center justify-center gap-2"><button aria-label={`Aumentar medida de ${item}`} type="button" onClick={() => update(item, { mm: value.mm + 1 })} className="grid h-9 w-9 place-items-center rounded-lg text-xl font-bold leading-none text-[#159568]">⊕</button><span className="min-w-12 text-center font-medium">{value.mm} mm</span><button aria-label={`Diminuir medida de ${item}`} type="button" onClick={() => update(item, { mm: Math.max(0, value.mm - 1) })} className="grid h-9 w-9 place-items-center rounded-lg text-xl font-bold leading-none text-[#4d5965]">⊖</button><button aria-label={`Zerar medida de ${item}`} type="button" onClick={() => update(item, { mm: 0 })} className="grid h-9 w-9 place-items-center rounded-lg text-xl font-bold leading-none text-[#c52743]">⊗</button></div></td>
-        <td className="w-[18%] px-3 py-2"><label className="flex items-center gap-1.5"><input type="checkbox" checked={value.pseudopod} onChange={(event) => update(item, { pseudopod: event.target.checked })}/><span>Pseudópode</span></label><label className="mt-1 flex items-center gap-1.5"><input type="checkbox" checked={value.dermatographism} onChange={(event) => update(item, { dermatographism: event.target.checked })}/><span>Dermatografismo</span></label></td>
+        <td className="w-[20%] px-3 py-2"><div className="flex items-center justify-center gap-2"><button aria-label={`Aumentar medida de ${item}`} type="button" onClick={() => update(key, { mm: value.mm + 1 })} className="grid h-9 w-9 place-items-center rounded-lg text-xl font-bold leading-none text-[#159568]">⊕</button><span className="min-w-12 text-center font-medium">{value.mm} mm</span><button aria-label={`Diminuir medida de ${item}`} type="button" onClick={() => update(key, { mm: Math.max(0, value.mm - 1) })} className="grid h-9 w-9 place-items-center rounded-lg text-xl font-bold leading-none text-[#4d5965]">⊖</button><button aria-label={`Zerar medida de ${item}`} type="button" onClick={() => update(key, { mm: 0 })} className="grid h-9 w-9 place-items-center rounded-lg text-xl font-bold leading-none text-[#c52743]">⊗</button></div></td>
+        <td className="w-[18%] px-3 py-2"><label className="flex items-center gap-1.5"><input type="checkbox" checked={value.pseudopod} onChange={(event) => update(key, { pseudopod: event.target.checked })}/><span>Pseudópode</span></label><label className="mt-1 flex items-center gap-1.5"><input type="checkbox" checked={value.dermatographism} onChange={(event) => update(key, { dermatographism: event.target.checked })}/><span>Dermatografismo</span></label></td>
         <td colSpan={2} className={`w-[14%] px-3 py-2 text-center font-bold ${reaction === "-" ? "text-sm tracking-normal text-[#4e5961]" : "text-base tracking-[.12em] text-[#a3113a]"}`}>{reaction === "-" ? "Sem Reação" : reaction}</td>
       </tr>;
     })}
