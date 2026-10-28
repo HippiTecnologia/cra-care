@@ -33,11 +33,24 @@ export function getBottleBillingState(
 ): BottleBillingState {
   const track = indicationKey(treatment);
   const treatmentName = track === "bacteriana" ? "Imunobacteriana" : "Rinite";
-  const contractedBottles = positiveInteger(
-    patient.treatmentPayments?.find((payment) => payment.treatment === treatmentName)?.bottlesIncluded,
-  );
-  const additionalPaymentBottles = (patient.payments ?? []).reduce((total, payment) => {
-    if (payment.treatment !== treatmentName) return total;
+  const contract = patient.treatmentPayments?.find((payment) => payment.treatment === treatmentName);
+  const contractedBottles = positiveInteger(contract?.bottlesIncluded);
+  const treatmentPayments = (patient.payments ?? []).filter((payment) => payment.treatment === treatmentName);
+  // A paid row matching the current contract is already represented by the contract's bottle quota.
+  const duplicateContractPaymentIndex = contract?.contractValue && contract.dueDate && contractedBottles
+    ? treatmentPayments.findIndex((payment) => {
+      const isPaid = payment.status ? payment.status === "recebido" : Boolean(payment.paidAt);
+      return isPaid
+        && Math.round(payment.amount * 100) === Math.round(contract.contractValue! * 100)
+        && positiveInteger(payment.additionalBottles) === contractedBottles
+        && payment.installments === contract.installments
+        && payment.method.trim().toLowerCase() === contract.paymentMethod?.trim().toLowerCase()
+        && payment.dueAt?.slice(0, 10) === contract.dueDate?.slice(0, 10);
+    })
+    : -1;
+  const additionalPaymentBottles = treatmentPayments.reduce((total, payment, index) => {
+    const isPaid = payment.status ? payment.status === "recebido" : Boolean(payment.paidAt);
+    if (!isPaid || index === duplicateContractPaymentIndex) return total;
     return total + positiveInteger(payment.additionalBottles);
   }, 0);
 
@@ -68,7 +81,10 @@ export function getBottleBillingState(
   const stockBottles = patientStock.reduce((total, item) => total + Math.max(0, Math.trunc(item.bottles)), 0);
   const deliveredBottles = patientStock.reduce((total, item) => {
     const manuallyEntered = item.batchCode === "ADICIONADO MANUALMENTE";
-    return total + (manuallyEntered || item.status === "entregue" ? Math.max(0, Math.trunc(item.bottles)) : 0);
+    const status = String(item.status).toLowerCase();
+    const hasBeenReceived = ["recebido", "entregue", "em-uso", "finalizado"].includes(status)
+      || Boolean(item.deliveredAt);
+    return total + (manuallyEntered || hasBeenReceived ? Math.max(0, Math.trunc(item.bottles)) : 0);
   }, 0);
   const stockAdditionalBottles = Array.from(stockAdditionalByKey.values()).reduce((total, value) => total + value, 0);
   const additionalPaidBottles = additionalPaymentBottles + stockAdditionalBottles + legacyBatchAdditionalBottles;
