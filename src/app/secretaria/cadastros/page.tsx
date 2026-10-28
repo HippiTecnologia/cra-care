@@ -539,39 +539,38 @@ export default function PatientRecordsPage() {
 
   async function addPayment() {
     if (!patient || !draft) return;
-    if (activeFinancialNoCharge || isNoChargeMethod(selectedPaymentAcquisitionMethod)) {
-      setMessage("Este tratamento está no método N/C – Não cobrar. Nenhuma nova cobrança pode ser registrada.");
-      return;
-    }
     if (!paidAt) {
       setMessage("Informe a data do pagamento ou do registro.");
       return;
     }
-    const parsed = parseMoney(amount);
-    const noChargePayment = normalizePaymentMethod(paymentMethod) === NO_CHARGE_METHOD_NAME;
+    const noChargePayment = activeFinancialNoCharge
+      || isNoChargeMethod(selectedPaymentAcquisitionMethod)
+      || normalizePaymentMethod(paymentMethod) === NO_CHARGE_METHOD_NAME;
+    const parsed = noChargePayment ? 0 : parseMoney(amount);
     if (!Number.isFinite(parsed) || parsed < 0 || (parsed === 0 && !noChargePayment) || (noChargePayment && parsed !== 0)) {
       setMessage(noChargePayment ? "A forma N/C – Não cobrar deve ser registrada com valor R$ 0,00." : "Informe um valor de pagamento válido.");
       return;
     }
+    const configuredTreatmentPayment = activeDraftPayment ?? activeTreatmentPayment;
     const payment: PatientPaymentRecord = {
       id: crypto.randomUUID(),
       treatment: activeFinancialTrack,
-      acquisitionMethodId: paymentAcquisitionMethodId || undefined,
-      acquisitionMethod: selectedPaymentAcquisitionMethod?.name ?? activeDraftPayment?.acquisitionMethod,
-      acquisitionMethodVersion: selectedPaymentAcquisitionMethod?.version ?? activeDraftPayment?.methodSnapshotVersion,
-      paymentCondition,
-      bottlePlanId: paymentBottlePlanId || undefined,
-      additionalBottles: Math.max(0, Math.trunc(paymentAdditionalBottles)),
+      acquisitionMethodId: (configuredTreatmentPayment?.methodSnapshotId ?? paymentAcquisitionMethodId) || undefined,
+      acquisitionMethod: configuredTreatmentPayment?.acquisitionMethod ?? selectedPaymentAcquisitionMethod?.name ?? (noChargePayment ? NO_CHARGE_METHOD_NAME : undefined),
+      acquisitionMethodVersion: configuredTreatmentPayment?.methodSnapshotVersion ?? selectedPaymentAcquisitionMethod?.version,
+      paymentCondition: noChargePayment ? "À vista" : paymentCondition,
+      bottlePlanId: noChargePayment ? undefined : paymentBottlePlanId || undefined,
+      additionalBottles: noChargePayment ? 0 : Math.max(0, Math.trunc(paymentAdditionalBottles)),
       amount: parsed,
-      paidAt: paymentStatus === "recebido" ? paidAt : "",
+      paidAt: noChargePayment || paymentStatus === "recebido" ? paidAt : "",
       registeredAt: paidAt,
-      method: paymentMethod.trim() || "A definir",
-      status: paymentStatus,
-      installments: Math.max(1, paymentInstallments),
-      installmentNumber: paymentInstallments > 1 ? Math.min(installmentNumber, paymentInstallments) : undefined,
+      method: noChargePayment ? NO_CHARGE_METHOD_NAME : paymentMethod.trim() || "A definir",
+      status: noChargePayment ? "recebido" : paymentStatus,
+      installments: noChargePayment ? 1 : Math.max(1, paymentInstallments),
+      installmentNumber: !noChargePayment && paymentInstallments > 1 ? Math.min(installmentNumber, paymentInstallments) : undefined,
       installmentValue: noChargePayment ? 0 : parseMoney(paymentInstallmentValue) || undefined,
-      dueAt: paymentDueDate || undefined,
-      asaasReference: paymentReference.trim() || undefined,
+      dueAt: noChargePayment ? undefined : paymentDueDate || undefined,
+      asaasReference: noChargePayment ? undefined : paymentReference.trim() || undefined,
       notes: paymentNotes.trim() || undefined,
     };
     const updated = {
@@ -592,7 +591,9 @@ export default function PatientRecordsPage() {
       setInstallmentNumber(1);
       setPaidAt(localDateInputValue());
       setPaymentDueDate(sixMonthDueDate());
-      setMessage(`Pagamento de ${activeFinancialTrack} registrado no Supabase pela Secretaria.`);
+      setMessage(noChargePayment
+        ? `Registro N/C de ${activeFinancialTrack} salvo no histórico, sem gerar cobrança.`
+        : `Pagamento de ${activeFinancialTrack} registrado no Supabase pela Secretaria.`);
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "Não foi possível registrar o pagamento.");
     }
@@ -1065,7 +1066,7 @@ export default function PatientRecordsPage() {
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><Metric label="Valor pago" value={money(totalPaid)} /><Metric label="Frascos contratados" value={String(activeBottleBilling?.coveredBottles ?? 0)} /><Metric label="Frascos recebidos" value={String(activeBottleBilling?.deliveredBottles ?? 0)} /><Metric label="Último registro de pagamento" value={latestPaymentRegistration ? formatDate(latestPaymentRegistration) : "Nenhum"} /></div>
               <p className="text-xs text-[#817578]">Os totais são calculados a partir do histórico de pagamentos e das entregas registradas.</p>
               {editing && <div className="rounded-2xl border border-[#eee5e0] p-5"><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} methods={adminMethods} paymentMethodOptions={availablePaymentMethods} onSelectMethod={(method, condition) => chooseMethod(method, condition, activeFinancialTrack)} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" disabled={savingFinancial} onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={`${primaryButtonClass} disabled:opacity-60`}>{savingFinancial ? "Salvando…" : `Salvar financeiro de ${activeFinancialTrack}`}</button></div></div>}
-              {activeFinancialNoCharge ? <div className="rounded-2xl border border-[#d7e9df] bg-[#edf8f3] p-4 text-sm text-[#187157]">N/C – Não cobrar · R$ 0,00. Este tratamento não aceita novos lançamentos de cobrança. O histórico de pagamentos já existente permanece abaixo.</div> : <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">Os campos de valor e forma são sugeridos pela configuração de aquisição e continuam editáveis.</p></div></div><div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {activeFinancialNoCharge ? <div className="rounded-2xl border border-[#d7e9df] bg-[#edf8f3] p-4"><p className="text-sm text-[#187157]">N/C – Não cobrar · R$ 0,00. O registro será incluído no histórico sem gerar cobrança.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label="Data do registro"><input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} className={inputClass} /></Field><Field label="Observações"><textarea rows={2} value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Registro N/C, contrato ou atendimento" className={textareaClass} /></Field></div><button type="button" onClick={addPayment} className="mt-3 rounded-xl bg-[#187157] px-4 py-2.5 text-sm font-semibold text-white">Registrar N/C no histórico</button></div> : <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">Os campos de valor e forma são sugeridos pela configuração de aquisição e continuam editáveis.</p></div></div><div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <Field label="Método de aquisição"><select value={paymentAcquisitionMethodId} onChange={(event) => { const method = adminMethods.find((item) => item.id === event.target.value); if (method) applyPaymentAcquisitionMethod(method, paymentCondition); else setPaymentAcquisitionMethodId(""); }} className={inputClass}><option value="">Sem método configurado</option>{paymentAcquisitionMethodId && !adminMethods.some((item) => item.id === paymentAcquisitionMethodId) && <option value={paymentAcquisitionMethodId}>{activeDraftPayment?.acquisitionMethod ?? "Configuração anterior"} · anterior</option>}{adminMethods.map((method) => <option key={method.id} value={method.id}>{method.name} · {method.category}</option>)}</select></Field>
                 <Field label="Forma de pagamento"><PaymentMethodSelect key={`new-payment-${selectedId}-${activeFinancialTrack}`} value={paymentMethod} options={availablePaymentMethods} onChange={(value) => { const wasNoCharge = normalizePaymentMethod(paymentMethod) === NO_CHARGE_METHOD_NAME; setPaymentMethod(value); if (normalizePaymentMethod(value) === NO_CHARGE_METHOD_NAME) { setAmount("0"); setPaymentInstallmentValue("0"); } else if (wasNoCharge && amount === "0") { setAmount(""); setPaymentInstallmentValue(""); } }} /></Field>
                 <Field label="Situação do pagamento"><select value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)} className={inputClass}>{paymentEntryStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
@@ -1089,7 +1090,9 @@ export default function PatientRecordsPage() {
                     const linkedInvoices = invoiceRecords.filter((invoice) => invoice.paymentId === item.id);
                     const isEditingPayment = editingPaymentId === item.id;
                     const paymentStatus = item.status ?? (item.paidAt ? "recebido" : "pendente");
-                    const paymentStatusLabel = paymentEntryStatusLabel(paymentStatus);
+                    const paymentStatusLabel = isNoChargeMethod(item.method) || isNoChargeMethod(item.acquisitionMethod)
+                      ? "Não cobrado"
+                      : paymentEntryStatusLabel(paymentStatus);
                     const isReceived = paymentStatus === "recebido";
                     return <article key={item.id} className="rounded-xl border border-[#eadfd9] bg-white p-3">
                       {isEditingPayment ? <div>
