@@ -16,6 +16,7 @@ import {
   treatmentPhases,
 } from "../../medico/patient-store";
 import type { BottleVolumeMl } from "../../medico/patient-store";
+import { isNoChargeMethod } from "../../adm/admin-store";
 import { bottlesBeyondCoverage, getBottleBillingState } from "../bottle-billing";
 import {
   confirmSecretaryBatch,
@@ -209,12 +210,16 @@ export default function SecretariaLotesPage() {
     const bottlesIncluded = trackFinancial?.bottlesIncluded;
     const acquisitionMethod = trackFinancial?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido";
     const paymentMethod = trackFinancial?.paymentMethod ?? (legacyFinancialAllowed ? patient.paymentMethod : undefined) ?? "A definir";
+    const trackIsNoCharge = isNoChargeMethod(trackFinancial?.methodSnapshotId)
+      || isNoChargeMethod(trackFinancial?.acquisitionMethod)
+      || isNoChargeMethod(trackFinancial?.paymentMethod);
+    const noCharge = trackFinancial ? trackIsNoCharge : isNoChargeMethod(patient.acquisitionMethod) || isNoChargeMethod(patient.paymentMethod);
     const quota = getBottleBillingState(patient, prescription.treatment, stockRecords, batches);
     const previouslyReceivedManualBottles = stockRecords
       .filter((item) => item.patientId === patient.id && item.batchCode === "ADICIONADO MANUALMENTE" && indicationForTreatment(item.treatment) === indicationForTreatment(prescription.treatment))
       .reduce((total, item) => total + Math.max(0, Math.trunc(item.bottles)), 0);
-    const financialConfigured = Boolean(trackFinancial?.acquisitionMethod || (legacyFinancialAllowed && patient.acquisitionMethod))
-      && quota.coveredBottles > 0;
+    const financialConfigured = noCharge || (Boolean(trackFinancial?.acquisitionMethod || (legacyFinancialAllowed && patient.acquisitionMethod))
+      && quota.coveredBottles > 0);
     const nextBottleNumber = quota.committedBottles + additionalBottles + 1;
     const lastBottleNumber = nextBottleNumber + Math.max(1, Math.trunc(prescription.bottles)) - 1;
     const totalCoveredBottles = quota.coveredBottles;
@@ -222,13 +227,15 @@ export default function SecretariaLotesPage() {
       - bottlesBeyondCoverage(quota, additionalBottles);
     const recurringAsaas = (trackFinancial?.methodCategory === "Recorrente" && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas"))
       || acquisitionMethod === "Recorrente — ASAAS";
-    const paymentRequired = bottlesBeyondAllowance > 0;
-    const asaasRequired = recurringAsaas || (paymentRequired && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas"));
-    const paymentStatus = trackFinancial?.paymentStatus ?? (legacyFinancialAllowed ? patient.paymentStatus : undefined);
+    const paymentRequired = !noCharge && bottlesBeyondAllowance > 0;
+    const asaasRequired = !noCharge && (recurringAsaas || (paymentRequired && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas")));
+    const paymentStatus = noCharge ? "Em dia" : trackFinancial?.paymentStatus ?? (legacyFinancialAllowed ? patient.paymentStatus : undefined);
     const manualBottleNote = previouslyReceivedManualBottles > 0
       ? ` ${previouslyReceivedManualBottles} frasco(s) antigo(s) cadastrado(s) manualmente já entram nessa contagem.`
       : "";
-    const explanation = !financialConfigured
+    const explanation = noCharge
+      ? "N/C – Não cobrar: este tratamento não gera cobrança, e os frascos continuam sujeitos à disponibilidade de estoque."
+      : !financialConfigured
       ? "Selecione uma modalidade e informe quantos frascos o valor cobre no Financeiro do paciente."
       : paymentRequired
         ? `Cobrança adicional necessária: ${bottlesBeyondAllowance} frasco(s) ultrapassam os ${totalCoveredBottles} cobertos pelos pagamentos registrados.${manualBottleNote}`

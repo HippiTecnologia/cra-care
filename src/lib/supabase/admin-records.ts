@@ -7,6 +7,10 @@ import {
   AdminSaleSnapshot,
   AdminTreatmentMethod,
   COMMISSION_PER_BOTTLE,
+  NO_CHARGE_METHOD_ID,
+  NO_CHARGE_METHOD_NAME,
+  NO_CHARGE_TREATMENT_METHOD,
+  isNoChargeMethod,
   treatmentMethodTotal,
 } from "../../app/adm/admin-store";
 import { getSupabaseClient } from "./client";
@@ -130,7 +134,8 @@ export async function loadAdminMethods(context: Pick<AdminContext, "clinicId">) 
     const key = text(raw.method_key, text(raw.id));
     if (!latest.has(key)) latest.set(key, methodFromRow(raw));
   }
-  return Array.from(latest.values()).sort((first, second) => first.name.localeCompare(second.name, "pt-BR"));
+  const configured = Array.from(latest.values()).filter((method) => !isNoChargeMethod(method));
+  return [...configured, NO_CHARGE_TREATMENT_METHOD].sort((first, second) => first.name.localeCompare(second.name, "pt-BR"));
 }
 
 export async function loadActiveAdminMethods(context: Pick<AdminContext, "clinicId">) {
@@ -339,7 +344,21 @@ function addMonthsToDate(value: string, months: number) {
   return date.toISOString().slice(0, 10);
 }
 
-function methodForPatient(patient: DemoPatientRecord, methods: AdminTreatmentMethod[]) {
+function methodForPatient(patient: DemoPatientRecord, methods: AdminTreatmentMethod[], summaryTreatment?: string) {
+  const noCharge = methods.find((method) => method.id === NO_CHARGE_METHOD_ID) ?? NO_CHARGE_TREATMENT_METHOD;
+  const summary = summaryTreatment ?? treatmentLabel(patient);
+  const summaryTracks = [
+    ...(summary.toLocaleLowerCase("pt-BR").includes("rinite") ? ["Rinite" as const] : []),
+    ...(summary.toLocaleLowerCase("pt-BR").includes("bacteriana") ? ["Imunobacteriana" as const] : []),
+  ];
+  const freePayments = patient.treatmentPayments ?? [];
+  const allSummaryTreatmentsAreFree = summaryTracks.length > 0 && summaryTracks.every((track) => {
+    const payment = freePayments.find((item) => item.treatment === track);
+    return Boolean(payment && (isNoChargeMethod(payment.methodSnapshotId) || isNoChargeMethod(payment.acquisitionMethod) || isNoChargeMethod(payment.paymentMethod)));
+  });
+  const hasSummaryTreatmentFinance = summaryTracks.some((track) => freePayments.some((payment) => payment.treatment === track));
+  const legacyNoCharge = !hasSummaryTreatmentFinance && (isNoChargeMethod(patient.acquisitionMethod) || isNoChargeMethod(patient.paymentMethod));
+  if (legacyNoCharge || allSummaryTreatmentsAreFree) return noCharge;
   if (patient.methodSnapshotId) {
     const exact = methods.find((method) => method.id === patient.methodSnapshotId);
     if (exact) return exact;
@@ -414,22 +433,29 @@ export async function synchronizeAdminSales(
     const patient = patients.find((item) => item.id === sale.patientId);
     if (!patient) continue;
     const status = saleStatus(patient);
-    const selectedMethod = methodForPatient(patient, methods);
-    const condition = patient.agreedCondition ?? sale.condition;
-    const installments = condition === "À vista"
+    const prescribed = prescriptionSummaries.get(patient.id);
+    const selectedMethod = methodForPatient(patient, methods, prescribed?.treatment);
+    const noCharge = isNoChargeMethod(selectedMethod);
+    const preserveHistoricalTerms = noCharge && !isNoChargeMethod(sale.methodId) && !isNoChargeMethod(sale.methodName);
+    const condition = preserveHistoricalTerms ? sale.condition : patient.agreedCondition ?? sale.condition;
+    const installments = preserveHistoricalTerms ? sale.installments : noCharge || condition === "À vista"
       ? 1
       : Math.max(1, patient.paymentInstallments ?? 0, installmentsFromPayments(patient), selectedMethod?.maxInstallments ?? 0, sale.installments);
-    const contractedValue = patient.contractValue && patient.contractValue > 0 ? patient.contractValue : sale.contractedValue;
-    const paymentMethod = patient.paymentMethod ?? sale.paymentMethod;
-    const firstPaymentDueAt = patient.paymentDueDate ?? sale.firstPaymentDueAt;
-    const prescribed = prescriptionSummaries.get(patient.id);
+    const contractedValue = preserveHistoricalTerms ? sale.contractedValue : noCharge ? 0 : patient.contractValue && patient.contractValue > 0 ? patient.contractValue : sale.contractedValue;
+    const paymentMethod = preserveHistoricalTerms ? sale.paymentMethod : noCharge ? NO_CHARGE_METHOD_NAME : patient.paymentMethod ?? sale.paymentMethod;
+    const methodName = preserveHistoricalTerms ? sale.methodName : noCharge ? NO_CHARGE_METHOD_NAME : patient.acquisitionMethod ?? sale.methodName;
+    const methodId = preserveHistoricalTerms ? sale.methodId : noCharge ? NO_CHARGE_METHOD_ID : selectedMethod?.id ?? sale.methodId;
+    const methodVersion = preserveHistoricalTerms ? sale.methodVersion : noCharge ? NO_CHARGE_TREATMENT_METHOD.version : selectedMethod?.version ?? sale.methodVersion;
+    const listValue = preserveHistoricalTerms ? sale.listValue : noCharge ? 0 : selectedMethod ? treatmentMethodTotal(selectedMethod) : sale.listValue;
+    const discountAmount = preserveHistoricalTerms ? sale.discountAmount : noCharge ? 0 : Math.max(0, patient.discountAmount ?? listValue - contractedValue);
+    const firstPaymentDueAt = preserveHistoricalTerms ? sale.firstPaymentDueAt : noCharge ? undefined : patient.paymentDueDate ?? sale.firstPaymentDueAt;
     const bottleCount = prescribed?.bottleCount ?? sale.bottleCount ?? bottlesForMethod(patient.acquisitionMethod ?? selectedMethod?.name ?? "");
     const commissionPerBottleSnapshot = sale.commissionPerBottleSnapshot === 64
       ? COMMISSION_PER_BOTTLE
       : sale.commissionPerBottleSnapshot;
     const treatment = prescribed?.treatment || treatmentLabel(patient);
-    if (status !== sale.status || treatment !== sale.treatment || installments !== sale.installments || contractedValue !== sale.contractedValue || condition !== sale.condition || paymentMethod !== sale.paymentMethod || firstPaymentDueAt !== sale.firstPaymentDueAt || bottleCount !== sale.bottleCount || commissionPerBottleSnapshot !== sale.commissionPerBottleSnapshot) {
-      const updated = { ...sale, status, treatment, condition, installments, contractedValue, paymentMethod, firstPaymentDueAt, bottleCount, commissionPerBottleSnapshot };
+    if (status !== sale.status || treatment !== sale.treatment || installments !== sale.installments || contractedValue !== sale.contractedValue || condition !== sale.condition || paymentMethod !== sale.paymentMethod || methodName !== sale.methodName || methodId !== sale.methodId || methodVersion !== sale.methodVersion || listValue !== sale.listValue || discountAmount !== sale.discountAmount || firstPaymentDueAt !== sale.firstPaymentDueAt || bottleCount !== sale.bottleCount || commissionPerBottleSnapshot !== sale.commissionPerBottleSnapshot) {
+      const updated = { ...sale, status, treatment, condition, installments, contractedValue, paymentMethod, methodName, methodId, methodVersion, listValue, discountAmount, firstPaymentDueAt, bottleCount, commissionPerBottleSnapshot };
       const { error } = await supabase.from("admin_sales").update({
         status,
         snapshot: updated,
@@ -445,15 +471,16 @@ export async function synchronizeAdminSales(
     const hasFinancialHistory = Boolean(patient.contractValue || patient.payments?.length);
     const soldStatus = ["com-pedido", "ativo", "bacteriana", "em-alta", "concluido", "desistente"].includes(patient.status ?? "em-conversa");
     if (patient.registrationStatus !== "completed" || (!soldStatus && !hasFinancialHistory)) continue;
-    const selectedMethod = methodForPatient(patient, methods);
+    const prescribed = prescriptionSummaries.get(patient.id);
+    const selectedMethod = methodForPatient(patient, methods, prescribed?.treatment);
     if (!selectedMethod) continue;
-    const listValue = treatmentMethodTotal(selectedMethod);
+    const noCharge = isNoChargeMethod(selectedMethod);
+    const listValue = noCharge ? 0 : treatmentMethodTotal(selectedMethod);
     const condition = patient.agreedCondition ?? "Parcelado";
     const defaultValue = condition === "À vista" && selectedMethod.cashValue ? selectedMethod.cashValue : listValue;
-    const contractedValue = patient.contractValue && patient.contractValue > 0 ? patient.contractValue : defaultValue;
+    const contractedValue = noCharge ? 0 : patient.contractValue && patient.contractValue > 0 ? patient.contractValue : defaultValue;
     const doctor = doctors.find((item) => item.name === patient.doctor);
-    const prescribed = prescriptionSummaries.get(patient.id);
-    const installments = condition === "À vista" ? 1 : Math.max(1, patient.paymentInstallments ?? 0, installmentsFromPayments(patient), selectedMethod.maxInstallments);
+    const installments = noCharge || condition === "À vista" ? 1 : Math.max(1, patient.paymentInstallments ?? 0, installmentsFromPayments(patient), selectedMethod.maxInstallments);
     const id = crypto.randomUUID();
     const sale: AdminSaleSnapshot = {
       id,
@@ -463,16 +490,16 @@ export async function synchronizeAdminSales(
       doctor: patient.doctor,
       treatment: prescribed?.treatment || treatmentLabel(patient),
       contractedAt: patient.startDate ?? patient.createdAt,
-      methodId: selectedMethod.id,
-      methodName: patient.acquisitionMethod ?? selectedMethod.name,
-      methodVersion: patient.methodSnapshotVersion ?? selectedMethod.version,
+      methodId: noCharge ? NO_CHARGE_METHOD_ID : selectedMethod.id,
+      methodName: noCharge ? NO_CHARGE_METHOD_NAME : patient.acquisitionMethod ?? selectedMethod.name,
+      methodVersion: noCharge ? NO_CHARGE_TREATMENT_METHOD.version : patient.methodSnapshotVersion ?? selectedMethod.version,
       listValue,
-      discountAmount: Math.max(0, patient.discountAmount ?? listValue - contractedValue),
+      discountAmount: noCharge ? 0 : Math.max(0, patient.discountAmount ?? listValue - contractedValue),
       contractedValue,
       condition,
       installments,
-      paymentMethod: patient.paymentMethod ?? selectedMethod.paymentMethod,
-      firstPaymentDueAt: patient.paymentDueDate ?? addMonthsToDate(patient.startDate ?? patient.createdAt, 1),
+      paymentMethod: noCharge ? NO_CHARGE_METHOD_NAME : patient.paymentMethod ?? selectedMethod.paymentMethod,
+      firstPaymentDueAt: noCharge ? undefined : patient.paymentDueDate ?? addMonthsToDate(patient.startDate ?? patient.createdAt, 1),
       commissionRateSnapshot: doctor?.commissionRate ?? 0,
       bottleCount: prescribed?.bottleCount ?? bottlesForMethod(patient.acquisitionMethod ?? selectedMethod.name),
       bottleVolumeMl: prescribed?.bottleVolumeMl,

@@ -14,6 +14,36 @@ export type AdminTreatmentMethod = {
   updatedAt: string;
 };
 
+export const NO_CHARGE_METHOD_ID = "system-no-charge";
+export const NO_CHARGE_METHOD_NAME = "N/C – Não cobrar";
+
+export const NO_CHARGE_TREATMENT_METHOD: AdminTreatmentMethod = {
+  id: NO_CHARGE_METHOD_ID,
+  name: NO_CHARGE_METHOD_NAME,
+  category: "Método",
+  value: 0,
+  paymentMethod: NO_CHARGE_METHOD_NAME,
+  maxInstallments: 1,
+  billingPeriodMonths: 1,
+  discountType: "valor",
+  discountValue: 0,
+  active: true,
+  version: 1,
+  updatedAt: "",
+};
+
+export function isNoChargeMethod(value: unknown): boolean {
+  if (typeof value === "object" && value !== null) {
+    const candidate = value as { id?: unknown; name?: unknown; paymentMethod?: unknown };
+    if (candidate.id === NO_CHARGE_METHOD_ID) return true;
+    return isNoChargeMethod(candidate.name) || isNoChargeMethod(candidate.paymentMethod);
+  }
+
+  if (typeof value !== "string") return false;
+  const normalized = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR").replace(/[^a-z0-9]/g, "");
+  return normalized === "nc" || normalized === "ncnaocobrar" || normalized === "naocobrar" || normalized === "systemnocharge";
+}
+
 export type AdminFixedCost = {
   id: string;
   description: string;

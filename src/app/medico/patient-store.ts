@@ -1,3 +1,5 @@
+import { isNoChargeMethod } from "../adm/admin-store";
+
 export type DemoPatientRecord = {
   id: string;
   username?: string;
@@ -655,9 +657,26 @@ export function saveDemoStockItem(item: DemoStockItem) {
 export function getPatientBillingRequirement(
   patient: DemoPatientRecord,
   requestedBottles = 1,
+  requestedTreatment?: string,
 ): PatientBillingRequirement {
-  const acquisitionMethod = patient.acquisitionMethod ?? "Por frasco";
-  const paymentMethod = patient.paymentMethod ?? "A definir";
+  const patientAcquisitionMethod = patient.acquisitionMethod ?? "Por frasco";
+  const patientPaymentMethod = patient.paymentMethod ?? "A definir";
+  const requestedTrack = requestedTreatment
+    ? /bacteriana/i.test(requestedTreatment) ? "Imunobacteriana" : "Rinite"
+    : undefined;
+  const treatmentPayment = requestedTrack
+    ? patient.treatmentPayments?.find((payment) => payment.treatment === requestedTrack)
+    : undefined;
+  const acquisitionMethod = treatmentPayment?.acquisitionMethod ?? patientAcquisitionMethod;
+  const paymentMethod = treatmentPayment?.paymentMethod ?? patientPaymentMethod;
+  const trackIsNoCharge = Boolean(treatmentPayment && (
+    isNoChargeMethod(treatmentPayment.acquisitionMethod)
+    || isNoChargeMethod(treatmentPayment.paymentMethod)
+    || isNoChargeMethod(treatmentPayment.methodSnapshotId)
+  ));
+  const noCharge = requestedTrack && treatmentPayment
+    ? trackIsNoCharge
+    : isNoChargeMethod(patientAcquisitionMethod) || isNoChargeMethod(patientPaymentMethod);
   const pendingBatchBottles = readDemoBatches().reduce(
     (total, batch) =>
       total +
@@ -682,9 +701,8 @@ export function getPatientBillingRequirement(
     (number) => number > 2 && (number - 1) % 2 === 0,
   );
   const recurringAsaas = acquisitionMethod === "Recorrente — ASAAS";
-  const paymentRequired =
-    !recurringAsaas && (acquisitionMethod === "Por frasco" || Boolean(renewalBottle));
-  const asaasRequired = recurringAsaas || (paymentRequired && paymentMethod === "Asaas");
+  const paymentRequired = !noCharge && !recurringAsaas && (acquisitionMethod === "Por frasco" || Boolean(renewalBottle));
+  const asaasRequired = !noCharge && (recurringAsaas || (paymentRequired && paymentMethod === "Asaas"));
 
   return {
     acquisitionMethod,
@@ -693,7 +711,9 @@ export function getPatientBillingRequirement(
     paymentRequired,
     asaasRequired,
     explanation:
-      recurringAsaas
+      noCharge
+        ? "N/C – Não cobrar: nenhuma cobrança será gerada para este tratamento."
+        : recurringAsaas
         ? "Pagamento recorrente: confirme no ASAAS se a cobrança está em dia."
         : acquisitionMethod === "Por frasco"
         ? "Cada novo frasco precisa de pagamento confirmado."
@@ -725,7 +745,7 @@ export function assignReadyStockToPatient(
     throw new Error("O paciente precisa de uma receita médica antes da vinculação.");
   }
 
-  const billing = getPatientBillingRequirement(patient);
+  const billing = getPatientBillingRequirement(patient, 1, prescription.treatment);
 
   if (billing.paymentRequired && !paymentConfirmed) {
     throw new Error("Confirme o pagamento antes de vincular o frasco ao paciente.");

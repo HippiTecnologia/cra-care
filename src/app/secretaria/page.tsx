@@ -15,6 +15,7 @@ import { getBottleBillingState } from "./bottle-billing";
 import { getNextOrderDate, getNextOrderReminders, hasNextOrderDue, hasNextOrderInProgress } from "./next-order";
 import { patientUsername } from "../../lib/auth/credentials";
 import { normalizeBirthDate } from "../../lib/birth-date";
+import { NO_CHARGE_METHOD_NAME, isNoChargeMethod } from "../adm/admin-store";
 import {
   createSecretaryPatientAccess,
   loadSecretaryBottleRows,
@@ -598,7 +599,27 @@ export default function SecretariaPage() {
     field: Field,
     value: NewPatientForm[Field],
   ) {
-    setNewPatient((current) => ({ ...current, [field]: value }));
+    setNewPatient((current) => {
+      if (field === "acquisitionMethod") {
+        const acquisitionMethod = String(value);
+        const noCharge = isNoChargeMethod(acquisitionMethod);
+        return {
+          ...current,
+          acquisitionMethod,
+          paymentMethod: noCharge
+            ? NO_CHARGE_METHOD_NAME
+            : current.paymentMethod === NO_CHARGE_METHOD_NAME
+              ? acquisitionMethod === "Recorrente — ASAAS" ? "Asaas" : "A definir"
+              : acquisitionMethod === "Recorrente — ASAAS" ? "Asaas" : current.paymentMethod,
+          contractValue: noCharge ? 0 : current.contractValue,
+          paymentInstallments: noCharge ? 1 : current.paymentInstallments,
+        };
+      }
+      if (field === "contractValue" && isNoChargeMethod(current.acquisitionMethod)) {
+        return { ...current, contractValue: 0 };
+      }
+      return { ...current, [field]: value };
+    });
     setFormError("");
   }
 
@@ -692,6 +713,10 @@ export default function SecretariaPage() {
   }
 
   function addPayment() {
+    if (isNoChargeMethod(newPatient.acquisitionMethod)) {
+      setFormError("Este paciente está no método N/C – Não cobrar. Não é possível registrar uma nova cobrança neste cadastro.");
+      return;
+    }
     const amount = Number(paymentAmount.replace(",", "."));
 
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -815,9 +840,10 @@ export default function SecretariaPage() {
       billingCpf,
       billingDocumentType,
       acquisitionMethod: newPatient.acquisitionMethod,
-      paymentMethod: newPatient.paymentMethod,
-      paymentInstallments: newPatient.paymentMethod === "Cartão de crédito" ? Math.max(1, newPatient.paymentInstallments) : undefined,
-      contractValue: Math.max(0, newPatient.contractValue),
+      paymentMethod: isNoChargeMethod(newPatient.acquisitionMethod) ? NO_CHARGE_METHOD_NAME : newPatient.paymentMethod,
+      paymentStatus: isNoChargeMethod(newPatient.acquisitionMethod) ? "Em dia" : previous?.paymentStatus,
+      paymentInstallments: isNoChargeMethod(newPatient.acquisitionMethod) ? 1 : newPatient.paymentMethod === "Cartão de crédito" ? Math.max(1, newPatient.paymentInstallments) : undefined,
+      contractValue: isNoChargeMethod(newPatient.acquisitionMethod) ? 0 : Math.max(0, newPatient.contractValue),
       payments: newPatient.payments,
       notes: newPatient.notes.trim(),
       abandonmentReason: newPatient.status === "desistente" ? newPatient.abandonmentReason.trim() : undefined,
@@ -1742,12 +1768,7 @@ export default function SecretariaPage() {
                       value={newPatient.acquisitionMethod}
                       onChange={(event) => {
                         const acquisitionMethod = event.target.value as AcquisitionMethod;
-                        setNewPatient((current) => ({
-                          ...current,
-                          acquisitionMethod,
-                          paymentMethod: acquisitionMethod === "Recorrente — ASAAS" ? "Asaas" : current.paymentMethod,
-                        }));
-                        setFormError("");
+                        updateNewPatient("acquisitionMethod", acquisitionMethod);
                       }}
                       className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]"
                     >
@@ -1755,12 +1776,14 @@ export default function SecretariaPage() {
                       <option>Tratamento de 6 meses</option>
                       <option>Recorrente — ASAAS</option>
                       <option>Método 1.0</option>
+                      <option>{NO_CHARGE_METHOD_NAME}</option>
                     </select>
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
                     Forma de pagamento
                     <select
-                      value={newPatient.paymentMethod}
+                      disabled={isNoChargeMethod(newPatient.acquisitionMethod)}
+                      value={isNoChargeMethod(newPatient.acquisitionMethod) ? NO_CHARGE_METHOD_NAME : newPatient.paymentMethod}
                       onChange={(event) =>
                         updateNewPatient(
                           "paymentMethod",
@@ -1769,6 +1792,7 @@ export default function SecretariaPage() {
                       }
                       className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 outline-none focus:border-[#b91142]"
                     >
+                      {isNoChargeMethod(newPatient.acquisitionMethod) && <option>{NO_CHARGE_METHOD_NAME}</option>}
                       <option>A definir</option>
                       <option>Dinheiro</option>
                       <option>PIX</option>
@@ -1777,6 +1801,7 @@ export default function SecretariaPage() {
                       <option>Cartão de débito</option>
                     </select>
                   </label>
+                  {isNoChargeMethod(newPatient.acquisitionMethod) && <p className="sm:col-span-2 rounded-xl bg-[#edf8f3] px-4 py-3 text-sm font-semibold text-[#187157]">N/C – Não cobrar · valor contratado R$ 0,00. Nenhuma cobrança será gerada. Pagamentos já registrados continuam preservados no histórico.</p>}
                   {newPatient.paymentMethod === "Cartão de crédito" && (
                     <label className="text-sm font-medium text-[#544449]">
                       Número de parcelas *
@@ -1851,28 +1876,28 @@ export default function SecretariaPage() {
                 <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <label className="text-xs font-semibold text-[#544449]">
                     Valor total contratado (R$)
-                    <input type="number" min="0" step="0.01" value={newPatient.contractValue || ""} onChange={(event) => updateNewPatient("contractValue", Number(event.target.value))} placeholder="0,00" className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm font-normal outline-none focus:border-[#b91142]" />
+                    <input disabled={isNoChargeMethod(newPatient.acquisitionMethod)} type="number" min="0" step="0.01" value={isNoChargeMethod(newPatient.acquisitionMethod) ? "0" : newPatient.contractValue || ""} onChange={(event) => updateNewPatient("contractValue", Number(event.target.value))} placeholder="0,00" className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm font-normal outline-none focus:border-[#b91142] disabled:bg-[#f4f1ef]" />
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
                     Valor pago (R$)
-                    <input type="number" min="0.01" step="0.01" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} placeholder="0,00" className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142]" />
+                    <input disabled={isNoChargeMethod(newPatient.acquisitionMethod)} type="number" min="0.01" step="0.01" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} placeholder="0,00" className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142] disabled:bg-[#f4f1ef]" />
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
                     Data do pagamento
-                    <input type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142]" />
+                    <input disabled={isNoChargeMethod(newPatient.acquisitionMethod)} type="date" value={paymentDate} onChange={(event) => setPaymentDate(event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142] disabled:bg-[#f4f1ef]" />
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
                     Frascos adicionais liberados
-                    <input type="number" min="0" step="1" value={paymentAdditionalBottles} onChange={(event) => setPaymentAdditionalBottles(Math.max(0, Math.trunc(Number(event.target.value))))} className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142]" />
+                    <input disabled={isNoChargeMethod(newPatient.acquisitionMethod)} type="number" min="0" step="1" value={paymentAdditionalBottles} onChange={(event) => setPaymentAdditionalBottles(Math.max(0, Math.trunc(Number(event.target.value))))} className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142] disabled:bg-[#f4f1ef]" />
                     <span className="mt-1 block text-[11px] font-normal text-[#817578]">0 para parcela sem nova cota.</span>
                   </label>
                   <label className="text-sm font-medium text-[#544449]">
                     Observação
-                    <input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: 2º frasco" className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142]" />
+                    <input disabled={isNoChargeMethod(newPatient.acquisitionMethod)} value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: 2º frasco" className="mt-1 h-10 w-full rounded-lg border border-[#e9dfda] px-3 text-sm outline-none focus:border-[#b91142] disabled:bg-[#f4f1ef]" />
                   </label>
                 </div>
-                <button type="button" onClick={addPayment} className="mt-3 rounded-lg bg-[#187157] px-4 py-2.5 text-xs font-semibold text-white">
-                  Adicionar pagamento
+                <button type="button" disabled={isNoChargeMethod(newPatient.acquisitionMethod)} onClick={addPayment} className="mt-3 rounded-lg bg-[#187157] px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                  {isNoChargeMethod(newPatient.acquisitionMethod) ? "Sem cobrança para registrar" : "Adicionar pagamento"}
                 </button>
 
                 <div className="mt-4 space-y-2">

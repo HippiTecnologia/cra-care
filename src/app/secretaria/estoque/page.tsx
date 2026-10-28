@@ -11,6 +11,7 @@ import {
   DemoStockStatus,
 } from "../../medico/patient-store";
 import { bottlesBeyondCoverage, getBottleBillingState } from "../bottle-billing";
+import { isNoChargeMethod } from "../../adm/admin-store";
 import {
   loadSecretaryPatients,
   loadSecretaryBatches,
@@ -144,16 +145,22 @@ export default function SecretariaEstoquePage() {
     const legacyFinancialAllowed = patientTracks.size <= 1;
     const acquisitionMethod = trackFinancial?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido";
     const paymentMethod = trackFinancial?.paymentMethod ?? (legacyFinancialAllowed ? patient.paymentMethod : undefined) ?? "A definir";
+    const trackIsNoCharge = isNoChargeMethod(trackFinancial?.methodSnapshotId)
+      || isNoChargeMethod(trackFinancial?.acquisitionMethod)
+      || isNoChargeMethod(trackFinancial?.paymentMethod);
+    const noCharge = trackFinancial ? trackIsNoCharge : isNoChargeMethod(patient.acquisitionMethod) || isNoChargeMethod(patient.paymentMethod);
     const quota = getBottleBillingState(patient, prescription.treatment, stock, batches);
-    const financialConfigured = Boolean(trackFinancial?.acquisitionMethod || (legacyFinancialAllowed && patient.acquisitionMethod))
-      && quota.coveredBottles > 0;
+    const financialConfigured = noCharge || (Boolean(trackFinancial?.acquisitionMethod || (legacyFinancialAllowed && patient.acquisitionMethod))
+      && quota.coveredBottles > 0);
     const nextBottleNumber = quota.committedBottles + 1;
     const bottlesBeyondAllowance = bottlesBeyondCoverage(quota, additionalBottles);
     const recurringAsaas = (trackFinancial?.methodCategory === "Recorrente" && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas"))
       || acquisitionMethod === "Recorrente — ASAAS";
-    const paymentRequired = bottlesBeyondAllowance > 0;
-    const asaasRequired = recurringAsaas || (paymentRequired && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas"));
-    const explanation = recurringAsaas
+    const paymentRequired = !noCharge && bottlesBeyondAllowance > 0;
+    const asaasRequired = !noCharge && (recurringAsaas || (paymentRequired && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas")));
+    const explanation = noCharge
+      ? "N/C – Não cobrar: este tratamento não gera cobrança, e os frascos continuam sujeitos à disponibilidade de estoque."
+      : recurringAsaas
       ? "Pagamento recorrente: confirme no ASAAS se a cobrança está em dia."
       : paymentRequired
         ? `Limite de ${quota.coveredBottles} frasco(s) atingido. Registre uma nova cobrança com a quantidade de frascos liberada antes de continuar.`

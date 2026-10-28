@@ -20,6 +20,8 @@ import {
   createDefaultPortalState,
 } from "../../paciente/patient-portal-store";
 import {
+  NO_CHARGE_METHOD_NAME,
+  isNoChargeMethod,
   treatmentMethodTotal,
 } from "../../adm/admin-store";
 import type { AdminTreatmentMethod } from "../../adm/admin-store";
@@ -241,6 +243,12 @@ export default function PatientRecordsPage() {
     : visibleTreatmentTracks[0] ?? "Rinite";
   const activeTreatmentPayment = patient?.treatmentPayments?.find((item) => item.treatment === activeFinancialTrack);
   const activeDraftPayment = draft?.treatmentPayments?.find((item) => item.treatment === activeFinancialTrack);
+  const activeFinancialNoCharge = isNoChargeMethod(activeDraftPayment?.methodSnapshotId)
+    || isNoChargeMethod(activeDraftPayment?.acquisitionMethod)
+    || isNoChargeMethod(activeDraftPayment?.paymentMethod)
+    || isNoChargeMethod(activeTreatmentPayment?.methodSnapshotId)
+    || isNoChargeMethod(activeTreatmentPayment?.acquisitionMethod)
+    || isNoChargeMethod(activeTreatmentPayment?.paymentMethod);
   const legacyFinancialAllowed = visibleTreatmentTracks.length <= 1;
   const activeContractValue = activeTreatmentPayment?.contractValue ?? (legacyFinancialAllowed ? patient?.contractValue : 0) ?? 0;
   const unassignedPayments = (patient?.payments ?? []).filter((item) => !item.treatment);
@@ -343,14 +351,17 @@ export default function PatientRecordsPage() {
       setFinancialFeedback({ kind: "error", text: "Selecione o método de aquisição antes de salvar." });
       return;
     }
-    const payment = { ...currentPayment, dueDate: currentPayment.dueDate || sixMonthDueDate() };
+    const noCharge = isNoChargeMethod(currentPayment.methodSnapshotId) || isNoChargeMethod(currentPayment.acquisitionMethod) || isNoChargeMethod(currentPayment.paymentMethod);
+    const payment = noCharge
+      ? { ...currentPayment, contractValue: 0, installments: 1, installmentValue: 0, paymentMethod: NO_CHARGE_METHOD_NAME, paymentStatus: "Em dia" as const, dueDate: undefined, asaasReference: undefined }
+      : { ...currentPayment, dueDate: currentPayment.dueDate || sixMonthDueDate() };
     const updated: DemoPatientRecord = {
       ...draft,
       treatmentPayments: (draft.treatmentPayments ?? []).map((item) => item.treatment === activeFinancialTrack ? payment : item),
     };
     const previousQuota = getBottleBillingState(patient, activeFinancialTrack, stockRecords, batchRecords);
     const nextQuota = getBottleBillingState(updated, activeFinancialTrack, stockRecords, batchRecords);
-    if (nextQuota.coveredBottles < previousQuota.coveredBottles && nextQuota.coveredBottles < nextQuota.committedBottles) {
+    if (!noCharge && nextQuota.coveredBottles < previousQuota.coveredBottles && nextQuota.coveredBottles < nextQuota.committedBottles) {
       setFinancialFeedback({ kind: "error", text: `A cobertura não pode cair para ${nextQuota.coveredBottles} frasco(s): ${nextQuota.committedBottles} já estão registrados ou em andamento.` });
       return;
     }
@@ -372,6 +383,10 @@ export default function PatientRecordsPage() {
 
   async function addPayment() {
     if (!patient || !draft) return;
+    if (activeFinancialNoCharge) {
+      setMessage("Este tratamento está no método N/C – Não cobrar. Nenhuma nova cobrança pode ser registrada.");
+      return;
+    }
     const parsed = parseMoney(amount);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       setMessage("Informe um valor de pagamento válido.");
@@ -520,37 +535,38 @@ export default function PatientRecordsPage() {
   function chooseMethod(method: AdminTreatmentMethod, condition: "À vista" | "Parcelado", track: TreatmentTrack) {
     setFinancialFeedback(null);
     const total = treatmentMethodTotal(method);
-    const agreedValue = condition === "À vista" && method.cashValue ? method.cashValue : total;
+    const noCharge = isNoChargeMethod(method);
+    const agreedValue = noCharge ? 0 : condition === "À vista" && method.cashValue ? method.cashValue : total;
     setDraft((current) => {
       if (!current) return current;
       const payments = [...(current.treatmentPayments ?? [])];
       const index = payments.findIndex((item) => item.treatment === track);
       const previous: NonNullable<DemoPatientRecord["treatmentPayments"]>[number] = index >= 0 ? payments[index] : { treatment: track };
       const sameMethod = previous.methodSnapshotId === method.id;
-      const installmentCount = condition === "À vista" ? 1 : method.category === "Recorrente" ? method.billingPeriodMonths : method.maxInstallments;
+      const installmentCount = noCharge || condition === "À vista" ? 1 : method.category === "Recorrente" ? method.billingPeriodMonths : method.maxInstallments;
       const next = {
         ...previous,
         treatment: track,
         acquisitionMethod: method.name,
         methodCategory: method.category,
-        bottlesIncluded: sameMethod ? previous.bottlesIncluded : undefined,
+        bottlesIncluded: noCharge || sameMethod ? previous.bottlesIncluded : undefined,
         agreedCondition: condition,
         methodSnapshotId: method.id,
         methodSnapshotVersion: method.version,
         contractValue: agreedValue,
-        dueDate: previous.dueDate ?? sixMonthDueDate(),
+        dueDate: noCharge ? undefined : previous.dueDate ?? sixMonthDueDate(),
         installmentValue: agreedValue / Math.max(1, installmentCount),
         discountAmount: Math.max(0, total - agreedValue),
         paymentMethod: method.paymentMethod,
         installments: installmentCount,
-        paymentStatus: sameMethod ? previous.paymentStatus ?? "Pendente" : "Pendente" as const,
+        paymentStatus: noCharge ? "Em dia" as const : sameMethod ? previous.paymentStatus ?? "Pendente" : "Pendente" as const,
       };
       if (index >= 0) payments[index] = next; else payments.push(next);
       return { ...current, treatmentPayments: payments };
     });
     setEditing(true);
     setFinancialTrack(track);
-    setMessage(`${method.name} selecionado para ${track}: ${condition.toLowerCase()} por ${money(agreedValue)}.`);
+    setMessage(noCharge ? `N/C selecionado para ${track}. O valor ficou em R$ 0,00 e nenhuma cobrança será gerada.` : `${method.name} selecionado para ${track}: ${condition.toLowerCase()} por ${money(agreedValue)}.`);
   }
 
   function openBottleEditor(number: number) {
@@ -815,7 +831,7 @@ export default function PatientRecordsPage() {
               <div className="rounded-2xl border border-[#eee5e0] p-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold">Condições financeiras de {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">Estes dados pertencem exclusivamente a este tratamento.</p></div>{!editing && <button type="button" onClick={() => setEditing(true)} className="rounded-xl border border-[#e5d9d4] px-4 py-2 text-xs font-bold text-[#a3113a]">Editar financeiro</button>}</div>
                 {editing ? <><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} methods={adminMethods} onSelectMethod={(method, condition) => chooseMethod(method, condition, activeFinancialTrack)} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" disabled={savingFinancial} onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={`${primaryButtonClass} disabled:opacity-60`}>{savingFinancial ? "Salvando…" : `Salvar financeiro de ${activeFinancialTrack}`}</button></div></> : <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3"><DataCard label="Método de aquisição" value={`${activeTreatmentPayment?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido"}${activeTreatmentPayment?.methodSnapshotVersion ? ` · versão ${activeTreatmentPayment.methodSnapshotVersion}` : ""}`} /><DataCard label="Condição escolhida" value={activeTreatmentPayment?.agreedCondition ?? (legacyFinancialAllowed ? patient.agreedCondition : undefined) ?? "Não definida"} /><DataCard label="Forma de pagamento" value={activeTreatmentPayment?.paymentMethod ?? (legacyFinancialAllowed ? patient.paymentMethod : undefined) ?? "Não definida"} /><DataCard label="Parcelas" value={(activeTreatmentPayment?.installments ?? (legacyFinancialAllowed ? patient.paymentInstallments : undefined)) ? `${activeTreatmentPayment?.installments ?? patient.paymentInstallments}x` : "Não informado"} /><DataCard label="Desconto registrado" value={money(activeTreatmentPayment?.discountAmount ?? (legacyFinancialAllowed ? patient.discountAmount : undefined) ?? 0)} /><DataCard label="Vencimento" value={formatDate(activeTreatmentPayment?.dueDate ?? (legacyFinancialAllowed ? patient.paymentDueDate : undefined))} /><DataCard label="Frascos cobertos por este valor" value={activeTreatmentPayment?.bottlesIncluded ? String(activeTreatmentPayment.bottlesIncluded) : "Não informado"} /><DataCard label="Referência ASAAS" value={activeTreatmentPayment?.asaasReference ?? (legacyFinancialAllowed ? patient.asaasReference : undefined) ?? "Não informada"} /><DataCard label="Observações" value={activeTreatmentPayment?.notes ?? (legacyFinancialAllowed ? patient.financialNotes : undefined) ?? "Nenhuma"} /></div>}
               </div>
-              <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><span className="text-xs text-[#817578]">A cobertura inicial fica nas condições financeiras.</span></div><div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5"><Field label="Valor pago (R$)"><input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" className={inputClass} /></Field><Field label="Data"><input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} className={inputClass} /></Field><Field label="Parcela"><input type="number" min={1} value={installmentNumber} onChange={(event) => setInstallmentNumber(Math.max(1, Number(event.target.value)))} className={inputClass} /></Field><Field label="Frasco"><select value={paymentBottlePlanId} onChange={(event) => setPaymentBottlePlanId(event.target.value)} className={inputClass}><option value="">Não vincular</option>{activeBottlePlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.quantity}x {plan.volumeMl} mL</option>)}</select></Field><Field label="Frascos adicionais liberados"><input type="number" min={0} step={1} value={paymentAdditionalBottles} onChange={(event) => setPaymentAdditionalBottles(Math.max(0, Math.trunc(Number(event.target.value))))} className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Use 0 para parcela sem nova cota; informe a quantidade liberada por uma nova cobrança.</span></Field><Field label="Referência ASAAS"><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} className={inputClass} /></Field><Field label="Observação" wide><input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: pagamento de frascos adicionais" className={inputClass} /></Field></div><button type="button" onClick={addPayment} className="mt-3 rounded-xl bg-[#187157] px-4 py-2.5 text-sm font-semibold text-white">Registrar pagamento</button></div>
+              {activeFinancialNoCharge ? <div className="rounded-2xl border border-[#d7e9df] bg-[#edf8f3] p-4 text-sm text-[#187157]">N/C – Não cobrar · R$ 0,00. Este tratamento não aceita novos lançamentos de cobrança. O histórico de pagamentos já existente permanece abaixo.</div> : <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><span className="text-xs text-[#817578]">A cobertura inicial fica nas condições financeiras.</span></div><div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5"><Field label="Valor pago (R$)"><input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0,00" className={inputClass} /></Field><Field label="Data"><input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} className={inputClass} /></Field><Field label="Parcela"><input type="number" min={1} value={installmentNumber} onChange={(event) => setInstallmentNumber(Math.max(1, Number(event.target.value)))} className={inputClass} /></Field><Field label="Frasco"><select value={paymentBottlePlanId} onChange={(event) => setPaymentBottlePlanId(event.target.value)} className={inputClass}><option value="">Não vincular</option>{activeBottlePlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.quantity}x {plan.volumeMl} mL</option>)}</select></Field><Field label="Frascos adicionais liberados"><input type="number" min={0} step={1} value={paymentAdditionalBottles} onChange={(event) => setPaymentAdditionalBottles(Math.max(0, Math.trunc(Number(event.target.value))))} className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Use 0 para parcela sem nova cota; informe a quantidade liberada por uma nova cobrança.</span></Field><Field label="Referência ASAAS"><input value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} className={inputClass} /></Field><Field label="Observação" wide><input value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Ex.: pagamento de frascos adicionais" className={inputClass} /></Field></div><button type="button" onClick={addPayment} className="mt-3 rounded-xl bg-[#187157] px-4 py-2.5 text-sm font-semibold text-white">Registrar pagamento</button></div>}
               <div className="rounded-2xl bg-[#fbf7f5] p-4">
                 <h3 className="font-bold">Histórico de pagamentos de {activeFinancialTrack} ({activePayments.length})</h3>
                 <div className="mt-3 space-y-2">
@@ -926,7 +942,10 @@ function TreatmentPaymentEditor({ patient, track, methods, onSelectMethod, onCha
   const payment = patient.treatmentPayments?.find((item) => item.treatment === track);
   const selectedMethod = methods.find((method) => method.id === payment?.methodSnapshotId)
     ?? methods.find((method) => method.name === payment?.acquisitionMethod);
-  const usesAsaas = (payment?.paymentMethod ?? "").toLocaleLowerCase("pt-BR").includes("asaas");
+  const noCharge = isNoChargeMethod(selectedMethod)
+    || isNoChargeMethod(payment?.acquisitionMethod)
+    || isNoChargeMethod(payment?.paymentMethod);
+  const usesAsaas = !noCharge && (payment?.paymentMethod ?? "").toLocaleLowerCase("pt-BR").includes("asaas");
   const installmentLimit = selectedMethod?.category === "Recorrente"
     ? 36
     : selectedMethod
@@ -946,10 +965,11 @@ function TreatmentPaymentEditor({ patient, track, methods, onSelectMethod, onCha
         {methods.map((method) => <option key={method.id} value={method.id}>{method.name} · {method.category}</option>)}
       </select>
       {selectedMethod && <span className="mt-1 block text-xs text-[#817578]">Modalidade {selectedMethod.version} · {selectedMethod.paymentMethod} · {selectedMethod.category === "Recorrente" ? `padrão de ${selectedMethod.billingPeriodMonths} mês(es), ajustável até 36` : `até ${installmentLimit} parcela(s)`}</span>}
+      {noCharge && <span className="mt-1 block rounded-lg bg-[#edf8f3] px-3 py-2 text-xs font-semibold text-[#187157]">N/C – Não cobrar · R$ 0,00. Nenhuma cobrança será gerada para o paciente.</span>}
       {!methods.length && <span className="mt-1 block text-xs text-[#a3113a]">Nenhuma modalidade ativa cadastrada.</span>}
     </Field>
     <Field label="Condição">
-      <select value={payment?.agreedCondition ?? "Parcelado"} onChange={(event) => {
+      <select disabled={noCharge} value={noCharge ? "Parcelado" : payment?.agreedCondition ?? "Parcelado"} onChange={(event) => {
         const condition = event.target.value as "À vista" | "Parcelado";
         if (selectedMethod) onSelectMethod(selectedMethod, condition);
         else updatePayment("agreedCondition", condition);
@@ -958,15 +978,16 @@ function TreatmentPaymentEditor({ patient, track, methods, onSelectMethod, onCha
         {selectedMethod?.cashValue && <option value="À vista">À vista</option>}
       </select>
     </Field>
-    <Field label="Forma de pagamento"><select value={payment?.paymentMethod ?? "A definir"} onChange={(event) => updatePayment("paymentMethod", event.target.value)} className={inputClass}>
+    <Field label="Forma de pagamento"><select disabled={noCharge} value={noCharge ? NO_CHARGE_METHOD_NAME : payment?.paymentMethod ?? "A definir"} onChange={(event) => updatePayment("paymentMethod", event.target.value)} className={inputClass}>
+      {noCharge && <option>{NO_CHARGE_METHOD_NAME}</option>}
       {Array.from(new Set([payment?.paymentMethod ?? "A definir", ...paymentOptions])).map((value) => <option key={value}>{value}</option>)}
     </select></Field>
-    <Field label="Situação do pagamento"><select value={payment?.paymentStatus ?? "A definir"} onChange={(event) => updatePayment("paymentStatus", event.target.value)} className={inputClass}>{paymentStatusOptions.map((value) => <option key={value}>{value}</option>)}</select></Field>
-    <Field label={selectedMethod?.category === "Recorrente" ? "Valor do período (R$)" : "Valor total (R$)"}><input type="number" min={0} step="0.01" value={payment?.contractValue ?? ""} onChange={(event) => updatePayment("contractValue", Number(event.target.value))} className={inputClass} /></Field>
-    <Field label={installmentsLabel}><input type="number" min={1} max={installmentLimit} step={1} value={payment?.installments ?? 1} onChange={(event) => updatePayment("installments", Math.min(installmentLimit, Math.max(1, Math.trunc(Number(event.target.value)))))} className={inputClass} /></Field>
-    <Field label="Valor por parcela (R$)"><input type="number" min={0} step="0.01" value={payment?.installmentValue ?? ""} onChange={(event) => updatePayment("installmentValue", Number(event.target.value))} className={inputClass} /></Field>
-    <Field label="Vencimento"><input type="date" value={payment?.dueDate ?? sixMonthDueDate()} onChange={(event) => updatePayment("dueDate", event.target.value)} className={inputClass} /></Field>
-    <div className="sm:col-start-2"><Field label="Quantidade de frascos cobertos por este valor"><input type="number" min={1} step={1} value={payment?.bottlesIncluded ?? ""} onChange={(event) => updatePayment("bottlesIncluded", event.target.value === "" ? undefined : Math.max(1, Math.trunc(Number(event.target.value))))} placeholder="Preencha a quantidade" className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Deixe vazio até confirmar quantos frascos esse valor cobre.</span></Field></div>
+    <Field label="Situação do pagamento"><select disabled={noCharge} value={noCharge ? "Em dia" : payment?.paymentStatus ?? "A definir"} onChange={(event) => updatePayment("paymentStatus", event.target.value)} className={inputClass}>{paymentStatusOptions.map((value) => <option key={value}>{value}</option>)}</select></Field>
+    <Field label={selectedMethod?.category === "Recorrente" ? "Valor do período (R$)" : "Valor total (R$)"}><input disabled={noCharge} type="number" min={0} step="0.01" value={noCharge ? 0 : payment?.contractValue ?? ""} onChange={(event) => updatePayment("contractValue", Number(event.target.value))} className={inputClass} /></Field>
+    <Field label={installmentsLabel}><input disabled={noCharge} type="number" min={1} max={installmentLimit} step={1} value={noCharge ? 1 : payment?.installments ?? 1} onChange={(event) => updatePayment("installments", Math.min(installmentLimit, Math.max(1, Math.trunc(Number(event.target.value)))))} className={inputClass} /></Field>
+    <Field label="Valor por parcela (R$)"><input disabled={noCharge} type="number" min={0} step="0.01" value={noCharge ? 0 : payment?.installmentValue ?? ""} onChange={(event) => updatePayment("installmentValue", Number(event.target.value))} className={inputClass} /></Field>
+    <Field label="Vencimento"><input disabled={noCharge} type="date" value={noCharge ? "" : payment?.dueDate ?? sixMonthDueDate()} onChange={(event) => updatePayment("dueDate", event.target.value)} className={inputClass} /></Field>
+    <div className="sm:col-start-2"><Field label="Quantidade de frascos cobertos por este valor"><input disabled={noCharge} type="number" min={1} step={1} value={noCharge ? "" : payment?.bottlesIncluded ?? ""} onChange={(event) => updatePayment("bottlesIncluded", event.target.value === "" ? undefined : Math.max(1, Math.trunc(Number(event.target.value))))} placeholder={noCharge ? "Não se aplica" : "Preencha a quantidade"} className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">{noCharge ? "O método N/C não exige pagamento nem cota financeira de frascos." : "Deixe vazio até confirmar quantos frascos esse valor cobre."}</span></Field></div>
     {usesAsaas && <Field label="Referência ASAAS"><input value={payment?.asaasReference ?? ""} onChange={(event) => updatePayment("asaasReference", event.target.value)} className={inputClass} /></Field>}
     <Field label="Observações" wide><textarea rows={3} value={payment?.notes ?? ""} onChange={(event) => updatePayment("notes", event.target.value)} className={textareaClass} /></Field>
   </div>;
