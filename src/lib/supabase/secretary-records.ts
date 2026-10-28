@@ -457,6 +457,52 @@ export async function saveSecretaryPatient(
   return { patient, hasPatientAccess: Boolean((existing as unknown as MedicalPatientRow).auth_user_id) };
 }
 
+export async function saveSecretaryPayment(
+  context: SecretaryContext,
+  patientId: string,
+  payment: PatientPaymentRecord,
+) {
+  const payload = {
+    id: payment.id,
+    clinic_id: context.clinicId,
+    patient_id: patientId,
+    historical_import: payment.historicalImport ?? false,
+    installment_number: payment.installmentNumber ?? 1,
+    installment_count: payment.installments ?? 1,
+    installment_value: payment.installmentValue ?? null,
+    amount: payment.amount,
+    due_at: payment.dueAt ?? null,
+    paid_at: payment.status === "recebido" || (!payment.status && payment.paidAt) ? payment.paidAt || null : null,
+    registered_at: payment.registeredAt ?? payment.paidAt ?? null,
+    payment_method: payment.method,
+    status: payment.status ?? (payment.paidAt ? "recebido" : "pendente"),
+    asaas_reference: payment.asaasReference ?? null,
+    notes: payment.notes ?? null,
+    treatment: payment.treatment ?? null,
+    bottle_reference: payment.bottlePlanId ?? null,
+    acquisition_method_id: payment.acquisitionMethodId ?? null,
+    acquisition_method: payment.acquisitionMethod ?? null,
+    acquisition_method_version: payment.acquisitionMethodVersion ?? null,
+    payment_condition: payment.paymentCondition ?? null,
+    additional_bottles: Math.max(0, Math.trunc(payment.additionalBottles ?? 0)),
+  };
+  const { data, error } = await getSupabaseClient()
+    .from("payments")
+    .insert(payload)
+    .select("*")
+    .single();
+  if (error || !data) throw error ?? new Error("O registro não foi retornado pelo banco.");
+
+  const savedPayment = paymentFromRow(data as unknown as Record<string, unknown>);
+  void audit(context, "create", "payment", savedPayment.id, {
+    patientId,
+    treatment: savedPayment.treatment,
+    method: savedPayment.method,
+    amount: savedPayment.amount,
+  });
+  return savedPayment;
+}
+
 export async function saveSecretaryTreatmentFinance(
   context: SecretaryContext,
   patientId: string,

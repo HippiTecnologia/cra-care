@@ -43,6 +43,7 @@ import {
   saveSecretaryStockItem,
   deleteSecretaryManualBottle,
   saveSecretaryPatient,
+  saveSecretaryPayment,
   saveSecretaryTreatmentFinance,
   type SecretaryContext,
 } from "../../../lib/supabase/secretary-records";
@@ -540,6 +541,10 @@ export default function PatientRecordsPage() {
 
   async function addPayment() {
     if (!patient || !draft || savingPayment) return;
+    if (!context) {
+      setMessage("Sessão da Secretaria não encontrada. Atualize a página e tente novamente.");
+      return;
+    }
     if (!paidAt) {
       setMessage("Informe a data do pagamento ou do registro.");
       return;
@@ -574,16 +579,12 @@ export default function PatientRecordsPage() {
       asaasReference: noChargePayment ? undefined : paymentReference.trim() || undefined,
       notes: paymentNotes.trim() || undefined,
     };
-    const updated = {
-      ...draft,
-      payments: [payment, ...(patient.payments ?? [])],
-    };
-    if (!context) return;
     setSavingPayment(true);
     try {
-      await saveSecretaryPatient(context, updated);
-      setDraft(updated);
-      setPatients((current) => current.map((item) => item.id === updated.id ? updated : item));
+      const savedPayment = await saveSecretaryPayment(context, patient.id, payment);
+      const nextPayments = [savedPayment, ...(patient.payments ?? []).filter((item) => item.id !== savedPayment.id)];
+      setDraft((current) => current?.id === patient.id ? { ...current, payments: nextPayments } : current);
+      setPatients((current) => current.map((item) => item.id === patient.id ? { ...item, payments: nextPayments } : item));
       setAmount("");
       setPaymentStatus("recebido");
       setPaymentNotes("");
