@@ -126,7 +126,7 @@ export default function MedicoPage() {
     { id: "com-pedido" as const, label: "Com pedido", color: "#a3113a" },
     { id: "em-alta" as const, label: "Em alta", color: "#6c61a8" },
     { id: "concluido" as const, label: "Concluídos", color: "#3d76a5" },
-    { id: "perdido" as const, label: "Perdidos", color: "#8b7d80" },
+    { id: "perdido" as const, label: "Tratamento não contratado", color: "#8b7d80" },
     { id: "desistente" as const, label: "Desistentes", color: "#a86a32" },
   ].map((item) => ({ ...item, value: countByStatus(item.id), percentage: percentage(countByStatus(item.id)) }));
   const recentPatients = [...allDoctorPatients].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
