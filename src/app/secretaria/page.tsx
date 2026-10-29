@@ -476,7 +476,8 @@ export default function SecretariaPage() {
         ),
         deliveredBottleCount: patientStock
           .filter((item) => item.status === "entregue")
-          .reduce((total, item) => total + Math.max(0, Math.trunc(item.bottles)), 0),
+          .reduce((total, item) => total + Math.max(0, Math.trunc(item.bottles)), 0)
+          + history.filter((item) => item.historicalImport).length,
         orderInProgress: hasAnyOrderInProgress(patient.id, patientStock, patientBatches),
       });
     }
@@ -1293,7 +1294,20 @@ export default function SecretariaPage() {
                         const billingTreatments = patientPrescriptions.length
                           ? Array.from(new Set(patientPrescriptions.map((item) => item.treatment)))
                           : [patient.treatment];
-                        const billingStates = billingTreatments.map((treatment) => getBottleBillingState(patient, treatment, patientStock, patientBatches));
+                        const historicalBottlesForTreatment = (treatment: string) => portal.bottles.filter((bottle) => {
+                          if (!bottle.historicalImport) return false;
+                          const bottleTreatment = bottle.treatment
+                            ?? patientPrescriptions.find((prescription) => prescription.id === bottle.prescriptionId)?.treatment
+                            ?? patient.treatment;
+                          return /bacteriana|imunobacteriana/i.test(bottleTreatment ?? "") === /bacteriana|imunobacteriana/i.test(treatment);
+                        }).length;
+                        const billingStates = billingTreatments.map((treatment) => getBottleBillingState(
+                          patient,
+                          treatment,
+                          patientStock,
+                          patientBatches,
+                          historicalBottlesForTreatment(treatment),
+                        ));
                         const configuredBillingStates = billingStates.filter((state) => state.coveredBottles > 0);
                         const newChargeNeeded = configuredBillingStates.some((state) => state.deliveredBottles >= state.coveredBottles);
                         const billingLabel = configuredBillingStates.length === 0

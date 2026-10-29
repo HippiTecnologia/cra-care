@@ -10,6 +10,8 @@ export type BottleBillingState = {
   pendingBottles: number;
 };
 
+export type HistoricalBottleCounts = Record<string, Partial<Record<"rinite" | "bacteriana", number>>>;
+
 function indicationKey(treatment: string) {
   return /bacteriana|imunobacteriana/i.test(treatment) ? "bacteriana" : "rinite";
 }
@@ -26,11 +28,37 @@ function positiveInteger(value?: number) {
   return Number.isInteger(value) && (value ?? 0) > 0 ? value ?? 0 : 0;
 }
 
+export function historicalBottleCountsFromRows(rows: Record<string, unknown>[]): HistoricalBottleCounts {
+  const counts: HistoricalBottleCounts = {};
+  for (const row of rows) {
+    const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? row.metadata as Record<string, unknown>
+      : {};
+    if (!metadata.historicalImportSource || metadata.manuallyDeleted === true) continue;
+    const patientId = typeof row.patient_id === "string" ? row.patient_id : "";
+    if (!patientId) continue;
+    const track = indicationKey(typeof metadata.treatment === "string" ? metadata.treatment : "");
+    const patientCounts = counts[patientId] ?? { rinite: 0, bacteriana: 0 };
+    patientCounts[track] = (patientCounts[track] ?? 0) + 1;
+    counts[patientId] = patientCounts;
+  }
+  return counts;
+}
+
+export function historicalBottleCountForPatient(
+  counts: HistoricalBottleCounts,
+  patientId: string,
+  treatment: string,
+) {
+  return positiveInteger(counts[patientId]?.[indicationKey(treatment)]);
+}
+
 export function getBottleBillingState(
   patient: Pick<DemoPatientRecord, "id" | "treatmentPayments" | "payments">,
   treatment: string,
   stockItems: DemoStockItem[],
   batches: DemoBatch[],
+  historicalDeliveredBottles = 0,
 ): BottleBillingState {
   const track = indicationKey(treatment);
   const treatmentName = track === "bacteriana" ? "Imunobacteriana" : "Rinite";
@@ -88,10 +116,10 @@ export function getBottleBillingState(
     const hasBeenReceived = ["recebido", "entregue", "em-uso", "finalizado"].includes(status)
       || Boolean(item.deliveredAt);
     return total + (manuallyEntered || hasBeenReceived ? Math.max(0, Math.trunc(item.bottles)) : 0);
-  }, 0);
+  }, 0) + positiveInteger(historicalDeliveredBottles);
   const stockAdditionalBottles = Array.from(stockAdditionalByKey.values()).reduce((total, value) => total + value, 0);
   const additionalPaidBottles = additionalPaymentBottles + stockAdditionalBottles + legacyBatchAdditionalBottles;
-  const committedBottles = stockBottles + pendingBatchBottles;
+  const committedBottles = stockBottles + pendingBatchBottles + positiveInteger(historicalDeliveredBottles);
   const coveredBottles = contractedBottles + additionalPaidBottles;
 
   return {

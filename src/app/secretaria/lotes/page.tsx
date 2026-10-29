@@ -17,11 +17,13 @@ import {
 } from "../../medico/patient-store";
 import type { BottleVolumeMl } from "../../medico/patient-store";
 import { isNoChargeMethod } from "../../adm/admin-store";
-import { bottlesBeyondCoverage, getBottleBillingState } from "../bottle-billing";
+import { bottlesBeyondCoverage, getBottleBillingState, historicalBottleCountForPatient, historicalBottleCountsFromRows } from "../bottle-billing";
+import type { HistoricalBottleCounts } from "../bottle-billing";
 import {
   confirmSecretaryBatch,
   loadSecretaryBatches,
   loadSecretaryPatients,
+  loadSecretaryBottleRows,
   loadSecretaryPrescriptions,
   loadSecretaryStock,
   saveSecretaryBatch,
@@ -125,6 +127,7 @@ export default function SecretariaLotesPage() {
   const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
   const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
   const [stockRecords, setStockRecords] = useState<DemoStockItem[]>([]);
+  const [historicalBottleCounts, setHistoricalBottleCounts] = useState<HistoricalBottleCounts>({});
   const [batches, setBatches] = useState<DemoBatch[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
@@ -167,17 +170,19 @@ export default function SecretariaLotesPage() {
     void (async () => {
       try {
         const workspace = await loadSecretaryPatients();
-        const [loadedPrescriptions, loadedBatches, loadedStock] = await Promise.all([
+        const [bottleRows, loadedPrescriptions, loadedBatches] = await Promise.all([
+          loadSecretaryBottleRows(workspace.context),
           loadSecretaryPrescriptions(workspace.context),
           loadSecretaryBatches(workspace.context),
-          loadSecretaryStock(workspace.context),
         ]);
+        const loadedStock = await loadSecretaryStock(workspace.context, bottleRows);
         if (!active) return;
         setContext(workspace.context);
         setPatients(workspace.patients);
         setPrescriptions(loadedPrescriptions);
         setBatches(loadedBatches);
         setStockRecords(loadedStock);
+        setHistoricalBottleCounts(historicalBottleCountsFromRows(bottleRows));
       } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : "Não foi possível carregar os lotes reais.");
       }
@@ -214,12 +219,17 @@ export default function SecretariaLotesPage() {
       || isNoChargeMethod(trackFinancial?.acquisitionMethod)
       || isNoChargeMethod(trackFinancial?.paymentMethod);
     const noCharge = trackFinancial ? trackIsNoCharge : isNoChargeMethod(patient.acquisitionMethod) || isNoChargeMethod(patient.paymentMethod);
-    const quota = getBottleBillingState(patient, prescription.treatment, stockRecords, batches);
+    const quota = getBottleBillingState(
+      patient,
+      prescription.treatment,
+      stockRecords,
+      batches,
+      historicalBottleCountForPatient(historicalBottleCounts, patient.id, prescription.treatment),
+    );
     const previouslyReceivedManualBottles = stockRecords
       .filter((item) => item.patientId === patient.id && item.batchCode === "ADICIONADO MANUALMENTE" && indicationForTreatment(item.treatment) === indicationForTreatment(prescription.treatment))
       .reduce((total, item) => total + Math.max(0, Math.trunc(item.bottles)), 0);
-    const financialConfigured = noCharge || (Boolean(trackFinancial?.acquisitionMethod || (legacyFinancialAllowed && patient.acquisitionMethod))
-      && quota.coveredBottles > 0);
+    const financialConfigured = noCharge || quota.coveredBottles > 0;
     const nextBottleNumber = quota.committedBottles + additionalBottles + 1;
     const lastBottleNumber = nextBottleNumber + Math.max(1, Math.trunc(prescription.bottles)) - 1;
     const totalCoveredBottles = quota.coveredBottles;

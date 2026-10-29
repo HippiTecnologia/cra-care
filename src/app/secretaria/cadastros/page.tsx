@@ -301,6 +301,13 @@ export default function PatientRecordsPage() {
     const track = treatmentTrack(item.treatment);
     receivedBottlesByTrack.set(track, (receivedBottlesByTrack.get(track) ?? 0) + 1);
   }
+  const historicalBottlesByTrack = new Map<TreatmentTrack, number>();
+  for (const item of portal?.bottles ?? []) {
+    if (!item.historicalImport) continue;
+    const track = treatmentTrack(item.treatment ?? prescriptions.find((prescription) => prescription.id === item.prescriptionId)?.treatment);
+    historicalBottlesByTrack.set(track, (historicalBottlesByTrack.get(track) ?? 0) + 1);
+  }
+  const historicalDeliveredForTrack = (track: TreatmentTrack) => historicalBottlesByTrack.get(track) ?? 0;
   const dueOrderReminders = patient && portal
     ? getNextOrderReminders(patient, bottleHistory, prescriptions, referenceNow).filter((reminder) =>
       hasNextOrderDue(reminder.date, referenceNow)
@@ -339,7 +346,7 @@ export default function PatientRecordsPage() {
     : Boolean(item.paidAt);
   const totalPaid = activePayments.filter(isPaymentReceived).reduce((sum, item) => sum + item.amount, 0);
   const activeBottleBilling = patient
-    ? getBottleBillingState(patient, activeFinancialTrack, stockRecords, batchRecords)
+    ? getBottleBillingState(patient, activeFinancialTrack, stockRecords, batchRecords, historicalDeliveredForTrack(activeFinancialTrack))
     : undefined;
   const activePortalReceivedBottles = receivedBottlesByTrack.get(activeFinancialTrack) ?? 0;
   const displayedReceivedBottles = Math.max(activeBottleBilling?.deliveredBottles ?? 0, activePortalReceivedBottles);
@@ -352,7 +359,7 @@ export default function PatientRecordsPage() {
     .filter(Boolean)
     .sort((first, second) => second.localeCompare(first))[0];
   const newBottleBilling = patient
-    ? getBottleBillingState(patient, newBottleTreatment, stockRecords, batchRecords)
+    ? getBottleBillingState(patient, newBottleTreatment, stockRecords, batchRecords, historicalDeliveredForTrack(newBottleTreatment))
     : undefined;
   const activeBottlePlans = (draft?.treatmentBottles ?? patient?.treatmentBottles ?? []).filter((item) => item.treatment === activeFinancialTrack);
   const selectedPaymentAcquisitionMethod = adminMethods.find((item) => item.id === paymentAcquisitionMethodId);
@@ -483,8 +490,8 @@ export default function PatientRecordsPage() {
       ...draft,
       treatmentPayments: (draft.treatmentPayments ?? []).map((item) => item.treatment === activeFinancialTrack ? payment : item),
     };
-    const previousQuota = getBottleBillingState(patient, activeFinancialTrack, stockRecords, batchRecords);
-    const nextQuota = getBottleBillingState(updated, activeFinancialTrack, stockRecords, batchRecords);
+    const previousQuota = getBottleBillingState(patient, activeFinancialTrack, stockRecords, batchRecords, historicalDeliveredForTrack(activeFinancialTrack));
+    const nextQuota = getBottleBillingState(updated, activeFinancialTrack, stockRecords, batchRecords, historicalDeliveredForTrack(activeFinancialTrack));
     if (nextQuota.coveredBottles < previousQuota.coveredBottles && nextQuota.coveredBottles < nextQuota.committedBottles) {
       setFinancialFeedback({ kind: "error", text: `A cobertura não pode cair para ${nextQuota.coveredBottles} frasco(s): ${nextQuota.committedBottles} já estão registrados ou em andamento.` });
       return;
@@ -756,7 +763,7 @@ export default function PatientRecordsPage() {
         notes: editingPaymentNotes.trim() || undefined,
       } : payment),
     };
-    const quota = getBottleBillingState(updated, activeFinancialTrack, stockRecords, batchRecords);
+    const quota = getBottleBillingState(updated, activeFinancialTrack, stockRecords, batchRecords, historicalDeliveredForTrack(activeFinancialTrack));
     if (quota.committedBottles > quota.coveredBottles) {
       setMessage(`Não é possível reduzir/remover essa quantidade: ${quota.committedBottles} frasco(s) já foram registrados ou estão em andamento e a cobertura ficaria em ${quota.coveredBottles}.`);
       return;
@@ -781,7 +788,7 @@ export default function PatientRecordsPage() {
       : "";
     if (!window.confirm(`Remover este lançamento do histórico?${invoiceNote}`)) return;
     const updated = { ...draft, payments: (draft.payments ?? []).filter((item) => item.id !== paymentId) };
-    const quota = getBottleBillingState(updated, activeFinancialTrack, stockRecords, batchRecords);
+    const quota = getBottleBillingState(updated, activeFinancialTrack, stockRecords, batchRecords, historicalDeliveredForTrack(activeFinancialTrack));
     if (quota.committedBottles > quota.coveredBottles) {
       setMessage(`Não é possível remover este pagamento: ${quota.committedBottles} frasco(s) já foram registrados ou estão em andamento e a cobertura ficaria em ${quota.coveredBottles}.`);
       return;
@@ -932,7 +939,7 @@ export default function PatientRecordsPage() {
       setMessage("Informe ao menos uma fórmula com nome e concentração maior que zero.");
       return;
     }
-    const quota = getBottleBillingState(patient, newBottleTreatment, stockRecords, batchRecords);
+    const quota = getBottleBillingState(patient, newBottleTreatment, stockRecords, batchRecords, historicalDeliveredForTrack(newBottleTreatment));
     if (quota.coveredBottles < 1) {
       setMessage(`Informe quantos frascos o pagamento cobre em Condições financeiras de ${newBottleTreatment} antes de registrar a entrega.`);
       return;

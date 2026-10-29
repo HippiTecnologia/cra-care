@@ -10,10 +10,12 @@ import {
   DemoStockItem,
   DemoStockStatus,
 } from "../../medico/patient-store";
-import { bottlesBeyondCoverage, getBottleBillingState } from "../bottle-billing";
+import { bottlesBeyondCoverage, getBottleBillingState, historicalBottleCountForPatient, historicalBottleCountsFromRows } from "../bottle-billing";
+import type { HistoricalBottleCounts } from "../bottle-billing";
 import { isNoChargeMethod } from "../../adm/admin-store";
 import {
   loadSecretaryPatients,
+  loadSecretaryBottleRows,
   loadSecretaryBatches,
   loadSecretaryPrescriptions,
   loadSecretaryStock,
@@ -77,6 +79,7 @@ export default function SecretariaEstoquePage() {
   const [stock, setStock] = useState<DemoStockItem[]>([]);
   const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
   const [batches, setBatches] = useState<DemoBatch[]>([]);
+  const [historicalBottleCounts, setHistoricalBottleCounts] = useState<HistoricalBottleCounts>({});
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [filter, setFilter] = useState<StockFilter>("todos");
   const [search, setSearch] = useState("");
@@ -100,11 +103,12 @@ export default function SecretariaEstoquePage() {
     void (async () => {
       try {
         const workspace = await loadSecretaryPatients();
-        const [loadedStock, loadedPrescriptions, loadedBatches] = await Promise.all([
-          loadSecretaryStock(workspace.context),
+        const [bottleRows, loadedPrescriptions, loadedBatches] = await Promise.all([
+          loadSecretaryBottleRows(workspace.context),
           loadSecretaryPrescriptions(workspace.context),
           loadSecretaryBatches(workspace.context),
         ]);
+        const loadedStock = await loadSecretaryStock(workspace.context, bottleRows);
         if (!active) return;
         setContext(workspace.context);
         // Cada pedido de paciente precisa respeitar a quantidade da receita.
@@ -119,6 +123,7 @@ export default function SecretariaEstoquePage() {
         }));
         setPrescriptions(loadedPrescriptions);
         setBatches(loadedBatches);
+        setHistoricalBottleCounts(historicalBottleCountsFromRows(bottleRows));
         setBatchNames(Object.fromEntries(loadedBatches.map((batch) => [batch.id, batch.name ?? batch.code])));
         setPatients(workspace.patients);
         setDeliveredRetentionCutoff(new Date().getTime() - 30 * 86_400_000);
@@ -149,9 +154,14 @@ export default function SecretariaEstoquePage() {
       || isNoChargeMethod(trackFinancial?.acquisitionMethod)
       || isNoChargeMethod(trackFinancial?.paymentMethod);
     const noCharge = trackFinancial ? trackIsNoCharge : isNoChargeMethod(patient.acquisitionMethod) || isNoChargeMethod(patient.paymentMethod);
-    const quota = getBottleBillingState(patient, prescription.treatment, stock, batches);
-    const financialConfigured = noCharge || (Boolean(trackFinancial?.acquisitionMethod || (legacyFinancialAllowed && patient.acquisitionMethod))
-      && quota.coveredBottles > 0);
+    const quota = getBottleBillingState(
+      patient,
+      prescription.treatment,
+      stock,
+      batches,
+      historicalBottleCountForPatient(historicalBottleCounts, patient.id, prescription.treatment),
+    );
+    const financialConfigured = noCharge || quota.coveredBottles > 0;
     const nextBottleNumber = quota.committedBottles + 1;
     const bottlesBeyondAllowance = bottlesBeyondCoverage(quota, additionalBottles);
     const recurringAsaas = (trackFinancial?.methodCategory === "Recorrente" && paymentMethod.toLocaleLowerCase("pt-BR").includes("asaas"))
@@ -283,9 +293,16 @@ export default function SecretariaEstoquePage() {
     const deliveredAt = new Date().toISOString();
     const patient = patients.find((record) => record.id === item.patientId);
     if (patient) {
-      const quota = getBottleBillingState(patient, item.treatment, stock, batches);
-      if (quota.deliveredBottles + item.bottles > quota.coveredBottles) {
-        setMessage(`Entrega bloqueada: ${patient.name} já recebeu ${quota.deliveredBottles} frasco(s) de ${quota.coveredBottles} cobertos. Registre uma nova cobrança e informe quantos frascos ela libera antes de entregar.`);
+      const quota = getBottleBillingState(
+        patient,
+        item.treatment,
+        stock,
+        batches,
+        historicalBottleCountForPatient(historicalBottleCounts, patient.id, item.treatment),
+      );
+      const committedWithoutThisItem = Math.max(0, quota.committedBottles - Math.max(0, Math.trunc(item.bottles)));
+      if (committedWithoutThisItem + item.bottles > quota.coveredBottles) {
+        setMessage(`Entrega bloqueada: ${patient.name} tem ${quota.coveredBottles} frasco(s) cobertos e ${committedWithoutThisItem} já foram recebidos ou estão reservados/em andamento. Registre um novo pagamento com a quantidade liberada antes de entregar.`);
         return;
       }
     }
