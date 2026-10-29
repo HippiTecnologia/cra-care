@@ -477,7 +477,7 @@ export default function PatientRecordsPage() {
     };
     const previousQuota = getBottleBillingState(patient, activeFinancialTrack, stockRecords, batchRecords);
     const nextQuota = getBottleBillingState(updated, activeFinancialTrack, stockRecords, batchRecords);
-    if (!noCharge && nextQuota.coveredBottles < previousQuota.coveredBottles && nextQuota.coveredBottles < nextQuota.committedBottles) {
+    if (nextQuota.coveredBottles < previousQuota.coveredBottles && nextQuota.coveredBottles < nextQuota.committedBottles) {
       setFinancialFeedback({ kind: "error", text: `A cobertura não pode cair para ${nextQuota.coveredBottles} frasco(s): ${nextQuota.committedBottles} já estão registrados ou em andamento.` });
       return;
     }
@@ -1373,7 +1373,7 @@ function TreatmentPaymentEditor({ patient, track, methods, paymentMethodOptions,
     <Field label={installmentsLabel}><input disabled={noCharge} type="number" min={1} max={installmentLimit} step={1} value={noCharge ? 1 : payment?.installments ?? 1} onChange={(event) => updatePayment("installments", Math.min(installmentLimit, Math.max(1, Math.trunc(Number(event.target.value)))))} className={inputClass} /></Field>
     <Field label="Valor por parcela (R$)"><input disabled={noCharge} type="number" min={0} step="0.01" value={noCharge ? 0 : payment?.installmentValue ?? ""} onChange={(event) => updatePayment("installmentValue", Number(event.target.value))} className={inputClass} /></Field>
     <Field label="Vencimento"><input disabled={noCharge} type="date" value={noCharge ? "" : payment?.dueDate ?? sixMonthDueDate()} onChange={(event) => updatePayment("dueDate", event.target.value)} className={inputClass} /></Field>
-    <div className="sm:col-start-2"><Field label="Quantidade de frascos cobertos por este valor"><input disabled={noCharge} type="number" min={1} step={1} value={noCharge ? "" : payment?.bottlesIncluded ?? ""} onChange={(event) => updatePayment("bottlesIncluded", event.target.value === "" ? undefined : Math.max(1, Math.trunc(Number(event.target.value))))} placeholder={noCharge ? "Não se aplica" : "Preencha a quantidade"} className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">{noCharge ? "O método N/C não exige pagamento nem cota financeira de frascos." : "Deixe vazio até confirmar quantos frascos esse valor cobre."}</span></Field></div>
+    <div className="sm:col-start-2"><Field label={noCharge ? "Quantidade de frascos incluídos" : "Quantidade de frascos cobertos por este valor"}><input type="number" min={1} step={1} value={payment?.bottlesIncluded ?? ""} onChange={(event) => updatePayment("bottlesIncluded", event.target.value === "" ? undefined : Math.max(1, Math.trunc(Number(event.target.value))))} placeholder="Preencha a quantidade" className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">{noCharge ? "Informe quantos frascos estão incluídos; o método N/C não gera cobrança." : "Deixe vazio até confirmar quantos frascos esse valor cobre."}</span></Field></div>
     {usesAsaas && <Field label="Referência ASAAS"><input value={payment?.asaasReference ?? ""} onChange={(event) => updatePayment("asaasReference", event.target.value)} className={inputClass} /></Field>}
     <Field label="Observações" wide><textarea rows={3} value={payment?.notes ?? ""} onChange={(event) => updatePayment("notes", event.target.value)} className={textareaClass} /></Field>
   </div>;
