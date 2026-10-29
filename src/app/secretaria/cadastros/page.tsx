@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import { bottleVolumeOptions, openDemoInvoicePdf } from "../../medico/patient-store";
 import type {
@@ -204,6 +204,7 @@ export default function PatientRecordsPage() {
   const [financialFeedback, setFinancialFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [savingFinancial, setSavingFinancial] = useState(false);
   const [savingPayment, setSavingPayment] = useState(false);
+  const noChargeSavesInFlight = useRef(new Set<string>());
   const [amount, setAmount] = useState("");
   const [paidAt, setPaidAt] = useState(localDateInputValue());
   const [paymentAcquisitionMethodId, setPaymentAcquisitionMethodId] = useState("");
@@ -600,6 +601,51 @@ export default function PatientRecordsPage() {
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "Não foi possível registrar o pagamento.");
     } finally {
+      setSavingPayment(false);
+    }
+  }
+
+  async function registerNoChargeOnSelection(method: AdminTreatmentMethod, track: TreatmentTrack) {
+    if (!patient || !draft) return;
+    if (!context) {
+      setMessage("Sessão da Secretaria não encontrada. Atualize a página e tente novamente.");
+      return;
+    }
+
+    const inFlightKey = `${patient.id}:${track}`;
+    if (noChargeSavesInFlight.current.has(inFlightKey)) return;
+    noChargeSavesInFlight.current.add(inFlightKey);
+
+    const registeredAt = localDateInputValue();
+    const payment: PatientPaymentRecord = {
+      id: crypto.randomUUID(),
+      treatment: track,
+      acquisitionMethodId: method.id,
+      acquisitionMethod: method.name,
+      acquisitionMethodVersion: method.version,
+      paymentCondition: "À vista",
+      additionalBottles: 0,
+      amount: 0,
+      paidAt: registeredAt,
+      registeredAt,
+      method: NO_CHARGE_METHOD_NAME,
+      status: "recebido",
+      installments: 1,
+      installmentValue: 0,
+    };
+
+    setSavingPayment(true);
+    setMessage("Registrando N/C no histórico…");
+    try {
+      const savedPayment = await saveSecretaryPayment(context, patient.id, payment);
+      const nextPayments = [savedPayment, ...(patient.payments ?? []).filter((item) => item.id !== savedPayment.id)];
+      setDraft((current) => current?.id === patient.id ? { ...current, payments: nextPayments } : current);
+      setPatients((current) => current.map((item) => item.id === patient.id ? { ...item, payments: nextPayments } : item));
+      setMessage(`N/C de ${track} salvo no histórico, sem gerar cobrança.`);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Não foi possível registrar o N/C no histórico.");
+    } finally {
+      noChargeSavesInFlight.current.delete(inFlightKey);
       setSavingPayment(false);
     }
   }
@@ -1074,8 +1120,8 @@ export default function PatientRecordsPage() {
               <div className="rounded-2xl border border-[#eee5e0] bg-[#fffdfc] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.14em] text-[#a3113a]">Financeiro por tratamento</p><div className="mt-3 flex flex-wrap gap-2">{visibleTreatmentTracks.map((track) => <button key={track} type="button" onClick={() => { cancelEditingPayment(); setFinancialTrack(track); setEditing(false); setDraft(patient); }} className={`rounded-xl px-4 py-3 text-sm font-semibold ${activeFinancialTrack === track ? "bg-[#a3113a] text-white" : "bg-[#f6efec] text-[#716569]"}`}>{track}</button>)}</div></div><button type="button" onClick={() => setEditing((current) => !current)} className="rounded-xl border border-[#e5d9d4] bg-white px-4 py-2 text-xs font-bold text-[#a3113a]">{editing ? "Fechar configuração" : "Editar condições"}</button></div></div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><Metric label="Valor pago" value={money(totalPaid)} /><Metric label="Frascos contratados" value={String(activeBottleBilling?.coveredBottles ?? 0)} /><Metric label="Frascos recebidos" value={String(activeBottleBilling?.deliveredBottles ?? 0)} /><Metric label="Último registro de pagamento" value={latestPaymentRegistration ? formatDate(latestPaymentRegistration) : "Nenhum"} /></div>
               <p className="text-xs text-[#817578]">Cobertura total: {activeBottleBilling?.coveredBottles ?? 0} frasco(s) ({activeBottleBilling?.contractedBottles ?? 0} contratado(s) + {activeBottleBilling?.additionalPaidBottles ?? 0} extra(s) pago(s)). Frascos recebidos incluem os entregues, em uso e concluídos.</p>
-              {editing && <div className="rounded-2xl border border-[#eee5e0] p-5"><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} methods={adminMethods} paymentMethodOptions={availablePaymentMethods} onSelectMethod={(method, condition) => chooseMethod(method, condition, activeFinancialTrack)} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" disabled={savingFinancial} onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={`${primaryButtonClass} disabled:opacity-60`}>{savingFinancial ? "Salvando…" : `Salvar financeiro de ${activeFinancialTrack}`}</button></div></div>}
-              {activeFinancialNoCharge ? <div className="rounded-2xl border border-[#d7e9df] bg-[#edf8f3] p-4"><p className="text-sm text-[#187157]">N/C – Não cobrar · R$ 0,00. Salva direto no histórico e não libera frascos.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label="Data do registro"><input type="date" value={paidAt} onChange={(event) => setPaidAt(event.target.value)} className={inputClass} /></Field><Field label="Observações"><textarea rows={2} value={paymentNotes} onChange={(event) => setPaymentNotes(event.target.value)} placeholder="Registro N/C, contrato ou atendimento" className={textareaClass} /></Field></div><button type="button" disabled={savingPayment} onClick={addPayment} className="mt-3 rounded-xl bg-[#187157] px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60">{savingPayment ? "Salvando…" : "Registrar N/C no histórico"}</button></div> : <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">Os campos de valor e forma são sugeridos pela configuração de aquisição e continuam editáveis.</p></div></div><div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {editing && <div className="rounded-2xl border border-[#eee5e0] p-5"><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} methods={adminMethods} paymentMethodOptions={availablePaymentMethods} onSelectMethod={(method, condition) => { chooseMethod(method, condition, activeFinancialTrack); if (isNoChargeMethod(method)) void registerNoChargeOnSelection(method, activeFinancialTrack); }} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" disabled={savingFinancial} onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={`${primaryButtonClass} disabled:opacity-60`}>{savingFinancial ? "Salvando…" : `Salvar financeiro de ${activeFinancialTrack}`}</button></div></div>}
+              {!activeFinancialNoCharge && <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">Os campos de valor e forma são sugeridos pela configuração de aquisição e continuam editáveis.</p></div></div><div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <Field label="Método de aquisição"><select value={paymentAcquisitionMethodId} onChange={(event) => { const method = adminMethods.find((item) => item.id === event.target.value); if (method) applyPaymentAcquisitionMethod(method, paymentCondition); else setPaymentAcquisitionMethodId(""); }} className={inputClass}><option value="">Sem método configurado</option>{paymentAcquisitionMethodId && !adminMethods.some((item) => item.id === paymentAcquisitionMethodId) && <option value={paymentAcquisitionMethodId}>{activeDraftPayment?.acquisitionMethod ?? "Configuração anterior"} · anterior</option>}{adminMethods.map((method) => <option key={method.id} value={method.id}>{method.name} · {method.category}</option>)}</select></Field>
                 <Field label="Forma de pagamento"><PaymentMethodSelect key={`new-payment-${selectedId}-${activeFinancialTrack}`} value={paymentMethod} options={availablePaymentMethods} onChange={(value) => { const wasNoCharge = normalizePaymentMethod(paymentMethod) === NO_CHARGE_METHOD_NAME; setPaymentMethod(value); if (normalizePaymentMethod(value) === NO_CHARGE_METHOD_NAME) { setAmount("0"); setPaymentInstallmentValue("0"); } else if (wasNoCharge && amount === "0") { setAmount(""); setPaymentInstallmentValue(""); } }} /></Field>
                 <Field label="Situação do pagamento"><select value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)} className={inputClass}>{paymentEntryStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
