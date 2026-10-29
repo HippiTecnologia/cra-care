@@ -22,6 +22,7 @@ import {
 } from "../../paciente/patient-portal-store";
 import {
   NO_CHARGE_METHOD_NAME,
+  NO_CHARGE_TREATMENT_METHOD,
   isNoChargeMethod,
   treatmentMethodTotal,
 } from "../../adm/admin-store";
@@ -457,7 +458,7 @@ export default function PatientRecordsPage() {
   }
 
   async function saveFinancialDraft() {
-    if (!draft || savingFinancial) return;
+    if (!draft || savingFinancial || savingPayment) return;
     if (!context || !patient) {
       setFinancialFeedback({ kind: "error", text: "Sessão da Secretaria ou paciente não identificado. Atualize a página e tente novamente." });
       return;
@@ -487,9 +488,28 @@ export default function PatientRecordsPage() {
       const savedPayments = await saveSecretaryTreatmentFinance(context, draft.id, payment);
       setDraft({ ...updated, treatmentPayments: savedPayments });
       setPatients((current) => current.map((item) => item.id === draft.id ? { ...item, treatmentPayments: savedPayments } : item));
+      let noChargeHistoryStatus = "";
+      if (noCharge) {
+        const existingNoChargeEntry = (patient.payments ?? []).some((item) =>
+          item.treatment === activeFinancialTrack
+          && (isNoChargeMethod(item.method) || isNoChargeMethod(item.acquisitionMethod)),
+        );
+        if (existingNoChargeEntry) {
+          noChargeHistoryStatus = " O registro N/C já consta no histórico.";
+        } else {
+          const selectedMethod = adminMethods.find((item) => item.id === currentPayment.methodSnapshotId)
+            ?? NO_CHARGE_TREATMENT_METHOD;
+          const savedNoChargeEntry = await registerNoChargeOnSelection(selectedMethod, activeFinancialTrack);
+          if (!savedNoChargeEntry) {
+            setFinancialFeedback({ kind: "error", text: "As condições financeiras foram salvas, mas o lançamento N/C não entrou no histórico. Tente salvar novamente." });
+            return;
+          }
+          noChargeHistoryStatus = " O lançamento N/C também foi incluído no histórico.";
+        }
+      }
       setEditing(false);
       setMessage("");
-      setFinancialFeedback({ kind: "success", text: `Financeiro de ${activeFinancialTrack} salvo com sucesso.` });
+      setFinancialFeedback({ kind: "success", text: `Financeiro de ${activeFinancialTrack} salvo com sucesso.${noChargeHistoryStatus}` });
     } catch (cause) {
       setFinancialFeedback({ kind: "error", text: cause instanceof Error ? cause.message : "Não foi possível salvar o financeiro. Tente novamente." });
     } finally {
@@ -605,15 +625,15 @@ export default function PatientRecordsPage() {
     }
   }
 
-  async function registerNoChargeOnSelection(method: AdminTreatmentMethod, track: TreatmentTrack) {
-    if (!patient || !draft) return;
+  async function registerNoChargeOnSelection(method: AdminTreatmentMethod, track: TreatmentTrack): Promise<boolean> {
+    if (!patient || !draft) return false;
     if (!context) {
       setMessage("Sessão da Secretaria não encontrada. Atualize a página e tente novamente.");
-      return;
+      return false;
     }
 
     const inFlightKey = `${patient.id}:${track}`;
-    if (noChargeSavesInFlight.current.has(inFlightKey)) return;
+    if (noChargeSavesInFlight.current.has(inFlightKey)) return false;
     noChargeSavesInFlight.current.add(inFlightKey);
 
     const registeredAt = localDateInputValue();
@@ -642,8 +662,10 @@ export default function PatientRecordsPage() {
       setDraft((current) => current?.id === patient.id ? { ...current, payments: nextPayments } : current);
       setPatients((current) => current.map((item) => item.id === patient.id ? { ...item, payments: nextPayments } : item));
       setMessage(`N/C de ${track} salvo no histórico, sem gerar cobrança.`);
+      return true;
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : "Não foi possível registrar o N/C no histórico.");
+      return false;
     } finally {
       noChargeSavesInFlight.current.delete(inFlightKey);
       setSavingPayment(false);
@@ -1120,7 +1142,7 @@ export default function PatientRecordsPage() {
               <div className="rounded-2xl border border-[#eee5e0] bg-[#fffdfc] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[.14em] text-[#a3113a]">Financeiro por tratamento</p><div className="mt-3 flex flex-wrap gap-2">{visibleTreatmentTracks.map((track) => <button key={track} type="button" onClick={() => { cancelEditingPayment(); setFinancialTrack(track); setEditing(false); setDraft(patient); }} className={`rounded-xl px-4 py-3 text-sm font-semibold ${activeFinancialTrack === track ? "bg-[#a3113a] text-white" : "bg-[#f6efec] text-[#716569]"}`}>{track}</button>)}</div></div><button type="button" onClick={() => setEditing((current) => !current)} className="rounded-xl border border-[#e5d9d4] bg-white px-4 py-2 text-xs font-bold text-[#a3113a]">{editing ? "Fechar configuração" : "Editar condições"}</button></div></div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><Metric label="Valor pago" value={money(totalPaid)} /><Metric label="Frascos contratados" value={String(activeBottleBilling?.coveredBottles ?? 0)} /><Metric label="Frascos recebidos" value={String(activeBottleBilling?.deliveredBottles ?? 0)} /><Metric label="Último registro de pagamento" value={latestPaymentRegistration ? formatDate(latestPaymentRegistration) : "Nenhum"} /></div>
               <p className="text-xs text-[#817578]">Cobertura total: {activeBottleBilling?.coveredBottles ?? 0} frasco(s) ({activeBottleBilling?.contractedBottles ?? 0} contratado(s) + {activeBottleBilling?.additionalPaidBottles ?? 0} extra(s) pago(s)). Frascos recebidos incluem os entregues, em uso e concluídos.</p>
-              {editing && <div className="rounded-2xl border border-[#eee5e0] p-5"><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} methods={adminMethods} paymentMethodOptions={availablePaymentMethods} onSelectMethod={(method, condition) => { chooseMethod(method, condition, activeFinancialTrack); if (isNoChargeMethod(method)) void registerNoChargeOnSelection(method, activeFinancialTrack); }} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" disabled={savingFinancial} onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={`${primaryButtonClass} disabled:opacity-60`}>{savingFinancial ? "Salvando…" : `Salvar financeiro de ${activeFinancialTrack}`}</button></div></div>}
+              {editing && <div className="rounded-2xl border border-[#eee5e0] p-5"><TreatmentPaymentEditor patient={draft} track={activeFinancialTrack} methods={adminMethods} paymentMethodOptions={availablePaymentMethods} onSelectMethod={(method, condition) => { chooseMethod(method, condition, activeFinancialTrack); if (isNoChargeMethod(method)) void registerNoChargeOnSelection(method, activeFinancialTrack); }} onChange={(update) => setDraft((current) => current ? update(current) : current)} /><div className="mt-5 flex justify-end"><button type="button" disabled={savingFinancial || savingPayment} onClick={() => saveDraft(`Financeiro de ${activeFinancialTrack}`)} className={`${primaryButtonClass} disabled:opacity-60`}>{savingFinancial || savingPayment ? "Salvando…" : `Salvar financeiro de ${activeFinancialTrack}`}</button></div></div>}
               {!activeFinancialNoCharge && <div className="rounded-2xl border border-[#eee5e0] p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3><p className="mt-1 text-xs text-[#817578]">Os campos de valor e forma são sugeridos pela configuração de aquisição e continuam editáveis.</p></div></div><div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <Field label="Método de aquisição"><select value={paymentAcquisitionMethodId} onChange={(event) => { const method = adminMethods.find((item) => item.id === event.target.value); if (method) applyPaymentAcquisitionMethod(method, paymentCondition); else setPaymentAcquisitionMethodId(""); }} className={inputClass}><option value="">Sem método configurado</option>{paymentAcquisitionMethodId && !adminMethods.some((item) => item.id === paymentAcquisitionMethodId) && <option value={paymentAcquisitionMethodId}>{activeDraftPayment?.acquisitionMethod ?? "Configuração anterior"} · anterior</option>}{adminMethods.map((method) => <option key={method.id} value={method.id}>{method.name} · {method.category}</option>)}</select></Field>
                 <Field label="Forma de pagamento"><PaymentMethodSelect key={`new-payment-${selectedId}-${activeFinancialTrack}`} value={paymentMethod} options={availablePaymentMethods} onChange={(value) => { const wasNoCharge = normalizePaymentMethod(paymentMethod) === NO_CHARGE_METHOD_NAME; setPaymentMethod(value); if (normalizePaymentMethod(value) === NO_CHARGE_METHOD_NAME) { setAmount("0"); setPaymentInstallmentValue("0"); } else if (wasNoCharge && amount === "0") { setAmount(""); setPaymentInstallmentValue(""); } }} /></Field>
