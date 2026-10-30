@@ -534,33 +534,12 @@ export default function NursingPage() {
     if (printedBrand) printedBrand.textContent = "Centro de Rinite e Alergia";
     const printedPatient = printable.document.querySelector(".patient");
     if (printedPatient) printedPatient.innerHTML = printedPatient.innerHTML.replace("<br>Data:", `<br>Data de nascimento: <strong>${escapeHtml(patientBirthDate)}</strong><br>Data:`);
-    const printedPatchBrand = printable.document.querySelector(".brand");
-    const patchPatientInfo = printable.document.querySelector(".patient");
-    const batterySections = Array.from(printable.document.querySelectorAll(".battery"));
-    const detailSections = Array.from(printable.document.querySelectorAll(".details"));
-    if (printedPatchBrand && patchPatientInfo && batterySections.length === patchBatteries.length) {
-      const firstPage = printable.document.createElement("section");
-      const secondPage = printable.document.createElement("section");
-      firstPage.className = "print-page";
-      secondPage.className = "print-page";
-      firstPage.append(printedPatchBrand.cloneNode(true), patchPatientInfo.cloneNode(true));
-      secondPage.append(printedPatchBrand.cloneNode(true), patchPatientInfo.cloneNode(true));
-      batterySections.slice(0, 2).forEach((battery) => firstPage.append(battery));
-      batterySections.slice(2).forEach((battery) => secondPage.append(battery));
-      detailSections.forEach((details) => secondPage.append(details));
-      for (const page of [firstPage, secondPage]) {
-        const signatures = printable.document.createElement("div");
-        const signatureLine = printable.document.createElement("div");
-        signatures.className = "signatures";
-        signatureLine.className = "line";
-        signatureLine.innerHTML = `${responsible}<br/>CRM ${responsibleCrm}`;
-        signatures.append(signatureLine);
-        page.append(signatures);
-      }
-      printable.document.body.replaceChildren(firstPage, secondPage);
-    }
+    const signatures = printable.document.createElement("div");
+    signatures.className = "signatures";
+    signatures.innerHTML = `<div class="line">${responsible}<br/>CRM ${responsibleCrm}</div>`;
+    printable.document.body.append(signatures);
     const readableStyle = printable.document.createElement("style");
-    readableStyle.textContent = "html{background:#3a3a3a}body{font-size:10.5px;width:210mm;margin:18px auto;background:#fff;box-shadow:0 4px 24px #1118}.print-page{display:flex;flex-direction:column;width:210mm;min-height:297mm;margin:0 auto 18px;padding:11mm;background:#fff;box-shadow:0 4px 24px #1118;break-after:page;page-break-after:always}.print-page:last-child{break-after:auto;page-break-after:auto}.patient{font-size:10.5px;line-height:17px}th{font-size:9px;padding:6px}td{font-size:11px;line-height:14px;padding:8px 7px}.battery h2,.details h2{font-size:10.5px;padding:7px 9px}.details h3{font-size:11px}.details p{font-size:9.5px;line-height:13px}.details article{margin:8px 0;padding:10px;border:1px solid #e2d8d5;border-radius:8px;background:#fffafa;break-inside:avoid}.details article p:first-of-type{margin-bottom:14px}.signatures{margin-top:auto;padding-top:16mm;text-align:center;font-size:9px}.line{border-top:1px solid #111;padding-top:3px;margin:auto;width:170px}@media print{html,body{background:white}body{padding:0;width:auto;min-height:0;margin:0;box-shadow:none}.print-page{width:auto;height:275mm;min-height:0;margin:0;padding:0;box-shadow:none;break-after:page;page-break-after:always}.print-page:last-child{break-after:auto;page-break-after:auto}}";
+    readableStyle.textContent = "@page{size:A4 portrait;margin:11mm}html{background:#3a3a3a}body{font-size:10.5px;width:210mm;min-height:297mm;height:auto;margin:18px auto;padding:11mm;background:#fff;box-shadow:0 4px 24px #1118}.patient{font-size:10.5px;line-height:17px}th{font-size:9px;padding:6px}td{font-size:11px;line-height:14px;padding:8px 7px}.battery h2,.details h2{font-size:10.5px;padding:7px 9px}.battery{overflow:visible;break-inside:avoid;page-break-inside:avoid}.battery h2{break-after:avoid;page-break-after:avoid}thead{display:table-header-group}tr,th,td{break-inside:avoid;page-break-inside:avoid}.details{break-inside:auto;page-break-inside:auto}.details h2{break-after:avoid;page-break-after:avoid}.details h3{font-size:11px}.details p{font-size:9.5px;line-height:13px}.details article{margin:8px 0;padding:10px;border:1px solid #e2d8d5;border-radius:8px;background:#fffafa;break-inside:avoid;page-break-inside:avoid}.details article p:first-of-type{margin-bottom:14px}.signatures{display:block;margin-top:24mm;padding-top:0;text-align:center;font-size:9px;break-inside:avoid;page-break-inside:avoid}.line{border-top:1px solid #111;padding-top:3px;margin:auto;width:170px}@media print{html,body{background:white}body{padding:0;width:auto;min-height:0;margin:0;box-shadow:none}}";
     printable.document.head.append(readableStyle);
     printable.document.close();
     if (openPrintDialog) {
