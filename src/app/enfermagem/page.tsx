@@ -568,44 +568,68 @@ export default function NursingPage() {
     const responsible = escapeHtml(responsibleName);
     const responsibleCrm = escapeHtml(responsibleCrmValue);
     const examinerIsDoctor = report.content.examinerRole === "medico";
-    const executorNameValue = String(report.content.nurseName ?? "Enfermagem");
-    const executorRegistrationValue = String(report.content.nurseCoren ?? profile?.coren ?? "Não informado");
-    const executorName = escapeHtml(executorNameValue);
-    const executorRegistration = escapeHtml(executorRegistrationValue);
+    const executorName = String(report.content.nurseName ?? "Enfermagem");
+    const executorRegistration = String(report.content.nurseCoren ?? profile?.coren ?? "Não informado");
     const executorRole = examinerIsDoctor ? "Médico executor · CRM" : "Enfermagem · COREN";
-    const executorCrmDigits = executorRegistrationValue.replace(/\D/g, "");
-    const responsibleCrmDigits = responsibleCrmValue.replace(/\D/g, "");
-    const sameDoctorSignature = examinerIsDoctor
-      && normalizePersonName(executorNameValue) === normalizePersonName(responsibleName)
-      && (!executorCrmDigits || !responsibleCrmDigits || executorCrmDigits === responsibleCrmDigits);
     const savedResults = (report.content.results ?? {}) as Record<string, unknown>;
-    const positiveItems = Object.entries(savedResults).filter(([, value]) => ["+", "++", "+++"].includes(patchResultText(value)));
-    const rows = patchBatteries.map((battery) => `<section class="battery"><h2>${escapeHtml(battery.name)}</h2><table><thead><tr><th>Substância</th><th>1ª leitura · 48h</th><th>2ª leitura · 48h</th><th>Resultado</th></tr></thead><tbody>${battery.items.map((item) => { const result = savedResults[item] as Partial<PatchResult> | undefined; return `<tr><td>${escapeHtml(item)}</td><td>${escapeHtml(result?.firstReading || "—")}</td><td>${escapeHtml(result?.secondReading || "—")}</td><td><strong>${escapeHtml(patchResultText(result))}</strong></td></tr>`; }).join("")}</tbody></table></section>`).join("");
-    const detailed = positiveItems.length ? `<section class="details"><h2>Substâncias com reação</h2>${positiveItems.map(([item, result]) => { const detail = patchSubstanceDetails[patchSubstanceCode(item)]; const fields = detail ? [["O que é", detail.what], ["Descrição", detail.description], ["Onde é encontrada", detail.where], ["Também pode ser encontrada como", detail.aliases], ["Reação cruzada", detail.crossReaction], ["Observações", detail.observations]].filter(([, value]) => value && value !== "-").map(([label, value]) => `<p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`).join("") : ""; return `<article><h3>${escapeHtml(item)} — ${escapeHtml(patchResultText(result))}</h3><p><strong>Leituras:</strong> ${escapeHtml(patchResultDetails(result))}</p>${fields}</article>`; }).join("")}</section>` : "";
+    const patientHtml = `<div class="patient"><div><span>Paciente</span><strong>${escapeHtml(patientName)}</strong></div><div class="patient-grid"><div><span>Data de nascimento</span><strong>${escapeHtml(patientBirthDate)}</strong></div><div><span>Data do exame</span><strong>${formattedDate}</strong></div><div><span>Responsabilidade médica</span><strong>${responsible} · CRM ${responsibleCrm}</strong></div><div><span>${executorRole}</span><strong>${escapeHtml(executorName)} · ${escapeHtml(executorRegistration)}</strong></div></div></div>`;
+    const brandHtml = `<header class="brand"><img src="${window.location.origin}/cra-care-icon-512.png" alt="CRA Care"/><div><strong>Centro de Rinite e Alergia</strong><small>LAUDO DE TESTE DE CONTATO · PATCH TEST</small></div></header>`;
+    const pageHead = `${brandHtml}${patientHtml}`;
+    const batteryHtml = (battery: (typeof patchBatteries)[number]) => `<section class="battery"><h2>${escapeHtml(battery.name)}</h2><table><thead><tr><th>Substância</th><th>1ª leitura · 48h</th><th>2ª leitura · 48h</th><th>Resultado</th></tr></thead><tbody>${battery.items.map((item) => { const result = savedResults[item] as Partial<PatchResult> | undefined; return `<tr><td>${escapeHtml(item)}</td><td>${escapeHtml(result?.firstReading || "—")}</td><td>${escapeHtml(result?.secondReading || "—")}</td><td><strong>${escapeHtml(patchResultText(result))}</strong></td></tr>`; }).join("")}</tbody></table></section>`;
+    const batteryPages = [patchBatteries.slice(0, 2), patchBatteries.slice(2)];
+    const positives = patchBatteries.flatMap((battery) => battery.items.flatMap((item) => {
+      const result = savedResults[item];
+      return ["+", "++", "+++"].includes(patchResultText(result)) ? [{ battery: battery.name, item, result }] : [];
+    }));
+    const detailBlocks = positives.map(({ battery, item, result }) => {
+      const detail = patchSubstanceDetails[patchSubstanceCode(item)];
+      const fields = detail
+        ? [["O que é", detail.what], ["Descrição", detail.description], ["Onde é encontrada", detail.where], ["Também pode ser encontrada como", detail.aliases], ["Reação cruzada", detail.crossReaction], ["Observações", detail.observations]]
+          .filter(([, value]) => value && value !== "-")
+          .map(([label, value]) => `<p><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`).join("")
+        : "";
+      const textLength = detail ? [detail.what, detail.description, detail.where, detail.aliases, detail.crossReaction, detail.observations].filter((value) => value && value !== "-").reduce((sum, value) => sum + value.length, 0) : 0;
+      const estimatedLines = Math.max(7, Math.ceil(textLength / 105) + 7);
+      return {
+        estimatedLines,
+        html: `<article class="positive-card"><div class="positive-card-head"><h3>${escapeHtml(item)} — ${escapeHtml(patchResultText(result))}</h3><span>${escapeHtml(battery)}</span></div><p><strong>Leituras:</strong> ${escapeHtml(patchResultDetails(result))}</p>${fields}</article>`,
+      };
+    });
+    const notes = typeof report.content.notes === "string" ? report.content.notes.trim() : "";
+    const noteBlocks = notes ? notes.match(/[\s\S]{1,1600}(?:\s|$)/g)?.map((part, index) => {
+      const text = part.trim();
+      return { estimatedLines: Math.max(5, Math.ceil(text.length / 105) + 4), html: `<article class="notes-card"><h3>${index ? "Observações do exame · continuação" : "Observações do exame"}</h3><p>${escapeHtml(text)}</p></article>` };
+    }) ?? [] : [];
+    const supplementalBlocks = [...detailBlocks, ...noteBlocks];
+    const supplementalPages: typeof supplementalBlocks[] = [];
+    let currentBlocks: typeof supplementalBlocks = [];
+    let currentLines = 4;
+    for (const block of supplementalBlocks) {
+      if (currentBlocks.length && currentLines + block.estimatedLines > 48) {
+        supplementalPages.push(currentBlocks);
+        currentBlocks = [];
+        currentLines = 4;
+      }
+      currentBlocks.push(block);
+      currentLines += block.estimatedLines;
+    }
+    if (currentBlocks.length) supplementalPages.push(currentBlocks);
+    const totalPages = 2 + supplementalPages.length;
+    const signatureHtml = `<div class="signature-block"><div class="signature-line"></div><strong>${responsible}</strong><span>Responsável médico · CRM ${responsibleCrm}</span></div>`;
+    const pageHtml = (content: string, pageNumber: number, signature = false) => `<section class="report-page"><div class="page-head">${pageHead}</div><main class="page-content">${content}${signature ? signatureHtml : ""}</main><footer class="page-footer">Laudo Patch · ${escapeHtml(patientName)}<span>Página ${pageNumber} de ${totalPages}</span></footer></section>`;
+    const pages = [
+      pageHtml(`<div class="page-title"><span>RESULTADOS</span><h1>Baterias de contato</h1><p>Baterias Padrão 1 e 2 · leituras realizadas em 48 horas.</p></div>${batteryPages[0].map(batteryHtml).join("")}`, 1),
+      pageHtml(`<div class="page-title"><span>RESULTADOS</span><h1>Baterias de contato</h1><p>Bateria Padrão 3 e Bateria Cosméticos 1 · leituras realizadas em 48 horas.</p></div>${batteryPages[1].map(batteryHtml).join("")}${positives.length || notes ? "" : `<div class="legend"><strong>Legenda:</strong> — sem reação · ? duvidoso · + fraca · ++ moderada · +++ forte.</div>`}`, 2, supplementalPages.length === 0),
+      ...supplementalPages.map((blocks, index) => pageHtml(`<div class="page-title"><span>INTERPRETAÇÃO</span><h1>${index === 0 && positives.length ? "Substâncias com reação" : "Continuação do laudo"}</h1><p>Resultado positivo e bateria correspondente para cada substância.</p></div>${blocks.map((block) => block.html).join("")}${index === supplementalPages.length - 1 ? `<div class="legend"><strong>Legenda:</strong> — sem reação · ? duvidoso · + fraca · ++ moderada · +++ forte.</div>` : ""}`, index + 3, index === supplementalPages.length - 1)),
+    ];
     const printable = window.open("", "_blank");
     if (!printable) { setMessage("Permita a abertura de janelas para gerar o PDF."); return; }
-    printable.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"/><title>Laudo Patch - ${escapeHtml(patientName)}</title><style>@page{size:A4 portrait;margin:18mm 18mm 28mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#1e1b1c;margin:0;font-size:10px}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:9px}.brand img{display:block;flex:0 0 36px;height:36px;width:36px;object-fit:contain;border-radius:7px}.brand strong{font-size:17px;letter-spacing:1px;color:#8e1535}.brand small{display:block;font-size:7px;font-weight:700;letter-spacing:1px}.patient{margin:10px 0 12px;line-height:16px}.battery{margin-top:8px;border:1px solid #bac0c7;border-radius:3px;overflow:hidden}.battery h2,.details h2{margin:0;padding:5px 9px;background:#d3d6da;border-top:2px solid #687380;font-size:10px}table{width:100%;border-collapse:collapse;table-layout:fixed}th{background:#aeb5be;border:1px solid #8e959d;padding:4px;text-align:left;font-size:8px}td{border-bottom:1px solid #e3e5e8;padding:3px 4px;font-size:8px}th:nth-child(n+2),td:nth-child(n+2){text-align:center;width:18%}.details{margin-top:14px}.details article{border-bottom:1px solid #ddd;padding:7px 2px}.details h3{margin:0 0 4px;font-size:10px;color:#8e1535}.details p{margin:0;font-size:9px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><header class="brand"><img src="${window.location.origin}/cra-care-icon-512.png" alt="CRA Care"/><div><strong>CRA CARE</strong><small>CENTRO DE RINITE E ALERGIA</small></div></header><div class="patient">Paciente: <strong>${escapeHtml(patientName)}</strong><br/>Data: <strong>${formattedDate}</strong><br/>Responsabilidade médica: <strong>${responsible} · CRM ${responsibleCrm}</strong><br/>Enfermagem: <strong>${escapeHtml(String(report.content.nurseName ?? "Enfermagem"))} · COREN ${escapeHtml(String(report.content.nurseCoren ?? profile?.coren ?? "Não informado"))}</strong></div>${rows}${detailed}${typeof report.content.notes === "string" && report.content.notes ? `<section class="details"><h2>Observações</h2><article>${escapeHtml(report.content.notes)}</article></section>` : ""}${openPrintDialog ? "<script>window.onload=()=>window.print()<\\/script>" : ""}</body></html>`);
-    if (examinerIsDoctor) {
-      const patientDetails = printable.document.querySelector(".patient");
-      if (patientDetails) patientDetails.innerHTML = patientDetails.innerHTML.replace("Enfermagem:", "Médico executor:").replace("· COREN", "· CRM");
-    }
-    const printedBrand = printable.document.querySelector(".brand div");
-    if (printedBrand) printedBrand.textContent = "Centro de Rinite e Alergia";
-    const printedPatient = printable.document.querySelector(".patient");
-    if (printedPatient) printedPatient.innerHTML = printedPatient.innerHTML.replace("<br>Data:", `<br>Data de nascimento: <strong>${escapeHtml(patientBirthDate)}</strong><br>Data:`);
-    const signatures = printable.document.createElement("div");
-    signatures.className = sameDoctorSignature ? "signatures single-signature" : "signatures";
-    signatures.innerHTML = sameDoctorSignature
-      ? `<div class="signature"><div class="line">${responsible}<br/>Responsável médico · CRM ${responsibleCrm}</div></div>`
-      : `<div class="signature"><div class="line">${executorName}<br/>${executorRole} ${executorRegistration}</div></div><div class="signature"><div class="line">${responsible}<br/>Responsável médico · CRM ${responsibleCrm}</div></div>`;
-    printable.document.body.append(signatures);
-    const readableStyle = printable.document.createElement("style");
-    readableStyle.textContent = `@page{size:A4 portrait;margin:18mm 18mm 28mm}html{background:#3a3a3a}body{font-size:10.5px;width:210mm;min-height:297mm;height:auto;margin:18px auto;padding:11mm;background:#fff;box-shadow:0 4px 24px #1118}.patient{font-size:10.5px;line-height:17px}th{font-size:9px;padding:6px}td{font-size:11px;line-height:14px;padding:8px 7px}.battery h2,.details h2{font-size:10.5px;padding:7px 9px}.battery{overflow:visible;break-inside:avoid;page-break-inside:avoid}.battery h2{break-after:avoid;page-break-after:avoid}thead{display:table-header-group}tr,th,td{break-inside:avoid;page-break-inside:avoid}.details{break-inside:auto;page-break-inside:auto}.details h2{break-after:avoid;page-break-after:avoid}.details h3{font-size:11px}.details p{font-size:9.5px;line-height:13px}.details article{margin:8px 0;padding:10px;border:1px solid #e2d8d5;border-radius:8px;background:#fffafa;break-inside:avoid;page-break-inside:avoid}.details article p:first-of-type{margin-bottom:14px}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:12mm;margin-top:24mm;padding-top:0;text-align:center;font-size:9px;break-inside:avoid;page-break-inside:avoid}.signatures.single-signature{display:flex;justify-content:center}.signatures.single-signature .signature{width:min(100%,110mm)}.signature{min-width:0;break-inside:avoid;page-break-inside:avoid}.line{border-top:1px solid #111;padding-top:3px;margin:auto;width:100%;max-width:75mm}@media print{html,body{background:white;width:100%;overflow:visible}body{padding:3mm 4mm 0;width:auto;max-width:100%;min-height:0;margin:0;box-shadow:none}.brand{break-inside:avoid;page-break-inside:avoid}.brand img{display:block;flex:0 0 36px;object-fit:contain}}`;
-    printable.document.head.append(readableStyle);
+    const readableStyle = `@page{size:A4 portrait;margin:0}*{box-sizing:border-box}html{background:#3a3a3a}body{font-family:Arial,sans-serif;color:#242124;margin:0;padding:1px 0 20px;font-size:9px}.report-page{position:relative;display:flex;flex-direction:column;width:210mm;height:297mm;min-height:297mm;margin:18px auto;padding:10mm 12mm 9mm;background:#fff;box-shadow:0 4px 24px #1118;overflow:hidden;break-after:page;page-break-after:always}.report-page:last-child{break-after:auto;page-break-after:auto}.page-head{flex:none}.brand{display:flex;align-items:center;gap:9px;border-bottom:2px solid #a3113a;padding-bottom:6px}.brand img{display:block;width:34px;height:34px;flex:none;object-fit:contain}.brand strong{font-size:15px;letter-spacing:.25px;color:#8e1535}.brand small{display:block;margin-top:2px;font-size:7px;font-weight:700;letter-spacing:.8px;color:#62585b}.patient{margin:7px 0 8px;padding:6px 8px;border:1px solid #ddd6d4;border-radius:5px;line-height:1.25}.patient span{display:block;margin-bottom:1px;color:#726a6c;font-size:7px;text-transform:uppercase;letter-spacing:.35px}.patient strong{font-size:8.5px}.patient>div:first-child{margin-bottom:5px}.patient-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px}.page-title{margin:0 0 6px}.page-title>span{font-size:7px;font-weight:700;letter-spacing:1px;color:#a3113a}.page-title h1{margin:2px 0;font-size:14px;color:#38282d}.page-title p{margin:0;color:#71676a;font-size:8px}.battery{margin-top:6px;border:1px solid #bac0c7;border-radius:3px;overflow:hidden;break-inside:avoid;page-break-inside:avoid}.battery h2{margin:0;padding:4px 7px;background:#d3d6da;border-top:2px solid #687380;font-size:9px}table{width:100%;border-collapse:collapse;table-layout:fixed}th{background:#aeb5be;border:1px solid #8e959d;padding:3px 4px;text-align:left;font-size:7.4px}td{border-bottom:1px solid #e3e5e8;padding:3.2px 4px;font-size:7.4px;line-height:1.15;vertical-align:middle}th:nth-child(n+2),td:nth-child(n+2){text-align:center;width:17%}tr{break-inside:avoid;page-break-inside:avoid}.legend{margin-top:7px;padding:5px 7px;border:1px solid #ddd6d4;border-radius:4px;color:#63595c;font-size:7.5px}.page-content{display:flex;flex:1;min-height:0;flex-direction:column}.positive-card,.notes-card{margin:0 0 6px;padding:7px 8px;border:1px solid #ded7d5;border-radius:5px;background:#fffdfc;break-inside:avoid;page-break-inside:avoid}.positive-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:3px}.positive-card h3,.notes-card h3{margin:0;color:#8e1535;font-size:9px}.positive-card-head span{flex:none;color:#62585b;font-size:7px;font-weight:700}.positive-card p,.notes-card p{margin:2px 0 0;font-size:7.5px;line-height:1.25;overflow-wrap:anywhere}.positive-card p strong{color:#40383a}.signature-block{display:flex;flex-direction:column;align-items:center;margin-top:auto;padding-top:10mm;text-align:center;font-size:8px;break-inside:avoid;page-break-inside:avoid}.signature-line{width:72mm;margin-bottom:4px;border-top:1px solid #222}.signature-block strong{font-size:8.5px}.signature-block span{margin-top:2px;font-size:7.5px}.page-footer{display:flex;flex:none;justify-content:space-between;gap:8px;margin-top:5px;padding-top:4px;border-top:1px solid #d8d1cf;color:#746b6d;font-size:7px}.page-footer span{white-space:nowrap}@media print{html,body{width:210mm;margin:0;padding:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}.report-page{width:210mm;height:297mm;min-height:297mm;margin:0;padding:10mm 12mm 9mm;box-shadow:none;overflow:hidden}.report-page:last-child{break-after:auto;page-break-after:auto}}`;
+    printable.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Laudo Patch - ${escapeHtml(patientName)}</title><style>${readableStyle}</style></head><body>${pages.join("")}</body></html>`);
     printable.document.close();
     if (openPrintDialog) {
       printable.focus();
-      window.setTimeout(() => printable.print(), 250);
+      window.setTimeout(() => printable.print(), 450);
     }
   }
 
