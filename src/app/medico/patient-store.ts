@@ -223,6 +223,7 @@ export type DemoBatch = {
   code: string;
   name?: string;
   createdAt: string;
+  archivedAt?: string;
   sentAt?: string;
   productionStartedAt?: string;
   productionFinishedAt?: string;

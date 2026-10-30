@@ -17,15 +17,11 @@ import {
 } from "../../medico/patient-store";
 import type { BottleVolumeMl } from "../../medico/patient-store";
 import { isNoChargeMethod } from "../../adm/admin-store";
-import { bottlesBeyondCoverage, getBottleBillingState, historicalBottleCountForPatient, historicalBottleCountsFromRows } from "../bottle-billing";
+import { bottlesBeyondCoverage, getBottleBillingState, historicalBottleCountForPatient } from "../bottle-billing";
 import type { HistoricalBottleCounts } from "../bottle-billing";
 import {
   confirmSecretaryBatch,
-  loadSecretaryBatches,
-  loadSecretaryPatients,
-  loadSecretaryBottleRows,
-  loadSecretaryPrescriptions,
-  loadSecretaryStock,
+  loadSecretaryLotWorkspace,
   saveSecretaryBatch,
   SecretaryContext,
 } from "../../../lib/supabase/secretary-records";
@@ -165,24 +161,58 @@ export default function SecretariaLotesPage() {
     [effectiveReadyFormulas],
   );
 
+  const prescriptionTracksByPatient = useMemo(() => {
+    const tracks = new Map<string, Set<BatchIndication>>();
+    for (const prescription of prescriptions) {
+      const patientTracks = tracks.get(prescription.patientId) ?? new Set<BatchIndication>();
+      patientTracks.add(indicationForTreatment(prescription.treatment));
+      tracks.set(prescription.patientId, patientTracks);
+    }
+    return tracks;
+  }, [prescriptions]);
+
+  const stockByPatient = useMemo(() => {
+    const grouped = new Map<string, DemoStockItem[]>();
+    for (const item of stockRecords) {
+      if (!item.patientId) continue;
+      const patientStock = grouped.get(item.patientId) ?? [];
+      patientStock.push(item);
+      grouped.set(item.patientId, patientStock);
+    }
+    return grouped;
+  }, [stockRecords]);
+
+  const batchesByPatient = useMemo(() => {
+    const grouped = new Map<string, DemoBatch[]>();
+    for (const batch of batches) {
+      const itemsByPatient = new Map<string, DemoBatchItem[]>();
+      for (const item of batch.items) {
+        if (!item.patientId) continue;
+        const patientItems = itemsByPatient.get(item.patientId) ?? [];
+        patientItems.push(item);
+        itemsByPatient.set(item.patientId, patientItems);
+      }
+      for (const [patientId, items] of itemsByPatient) {
+        const patientBatches = grouped.get(patientId) ?? [];
+        patientBatches.push({ ...batch, items });
+        grouped.set(patientId, patientBatches);
+      }
+    }
+    return grouped;
+  }, [batches]);
+
   useEffect(() => {
     let active = true;
     void (async () => {
       try {
-        const workspace = await loadSecretaryPatients();
-        const [bottleRows, loadedPrescriptions, loadedBatches] = await Promise.all([
-          loadSecretaryBottleRows(workspace.context),
-          loadSecretaryPrescriptions(workspace.context),
-          loadSecretaryBatches(workspace.context),
-        ]);
-        const loadedStock = await loadSecretaryStock(workspace.context, bottleRows);
+        const workspace = await loadSecretaryLotWorkspace();
         if (!active) return;
         setContext(workspace.context);
         setPatients(workspace.patients);
-        setPrescriptions(loadedPrescriptions);
-        setBatches(loadedBatches);
-        setStockRecords(loadedStock);
-        setHistoricalBottleCounts(historicalBottleCountsFromRows(bottleRows));
+        setPrescriptions(workspace.prescriptions);
+        setBatches(workspace.batches);
+        setStockRecords(workspace.stockRecords);
+        setHistoricalBottleCounts(workspace.historicalBottleCounts);
       } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : "Não foi possível carregar os lotes reais.");
       }
@@ -210,7 +240,7 @@ export default function SecretariaLotesPage() {
   function getBillingRequirement(patient: DemoPatientRecord, prescription: DemoPrescription, additionalBottles = 0) {
     const track = indicationForTreatment(prescription.treatment) === "bacteriana" ? "Imunobacteriana" : "Rinite";
     const trackFinancial = patient.treatmentPayments?.find((payment) => payment.treatment === track);
-    const patientTracks = new Set(prescriptions.filter((item) => item.patientId === patient.id).map((item) => indicationForTreatment(item.treatment)));
+    const patientTracks = prescriptionTracksByPatient.get(patient.id) ?? new Set<BatchIndication>();
     const legacyFinancialAllowed = patientTracks.size <= 1;
     const bottlesIncluded = trackFinancial?.bottlesIncluded;
     const acquisitionMethod = trackFinancial?.acquisitionMethod ?? (legacyFinancialAllowed ? patient.acquisitionMethod : undefined) ?? "Não definido";
@@ -219,15 +249,16 @@ export default function SecretariaLotesPage() {
       || isNoChargeMethod(trackFinancial?.acquisitionMethod)
       || isNoChargeMethod(trackFinancial?.paymentMethod);
     const noCharge = trackFinancial ? trackIsNoCharge : isNoChargeMethod(patient.acquisitionMethod) || isNoChargeMethod(patient.paymentMethod);
+    const patientStock = stockByPatient.get(patient.id) ?? [];
     const quota = getBottleBillingState(
       patient,
       prescription.treatment,
-      stockRecords,
-      batches,
+      patientStock,
+      batchesByPatient.get(patient.id) ?? [],
       historicalBottleCountForPatient(historicalBottleCounts, patient.id, prescription.treatment),
     );
-    const previouslyReceivedManualBottles = stockRecords
-      .filter((item) => item.patientId === patient.id && item.batchCode === "ADICIONADO MANUALMENTE" && indicationForTreatment(item.treatment) === indicationForTreatment(prescription.treatment))
+    const previouslyReceivedManualBottles = patientStock
+      .filter((item) => item.batchCode === "ADICIONADO MANUALMENTE" && indicationForTreatment(item.treatment) === indicationForTreatment(prescription.treatment))
       .reduce((total, item) => total + Math.max(0, Math.trunc(item.bottles)), 0);
     const financialConfigured = noCharge || quota.coveredBottles > 0;
     const nextBottleNumber = quota.committedBottles + additionalBottles + 1;
@@ -260,7 +291,7 @@ export default function SecretariaLotesPage() {
     [patients],
   );
 
-  const editingBatch = batches.find((batch) => batch.id === editingBatchId && batch.status === "rascunho");
+  const editingBatch = batches.find((batch) => !batch.archivedAt && batch.id === editingBatchId && batch.status === "rascunho");
   const includedPrescriptionIds = useMemo(
     () =>
       new Set(
@@ -318,9 +349,10 @@ export default function SecretariaLotesPage() {
     ? readyItems.reduce((total, item) => total + item.bottles, 0)
     : selectedPrescriptions.reduce((total, prescription) => total + prescription.bottles, 0);
   const selectedItemCount = orderType === "pronta-entrega" ? readyItems.length : selectedPrescriptions.length;
-  const openPatientBatches = batches.filter((batch) => batch.status === "rascunho" && batch.orderType !== "pronta-entrega" && batch.indication === batchIndication);
+  const visibleBatches = batches.filter((batch) => !batch.archivedAt);
+  const openPatientBatches = visibleBatches.filter((batch) => batch.status === "rascunho" && batch.orderType !== "pronta-entrega" && batch.indication === batchIndication);
 
-  const filteredBatches = batches.filter((batch) => {
+  const filteredBatches = visibleBatches.filter((batch) => {
     if (filter !== "todos" && batch.status !== filter) return false;
     if (batchHistoryIndication !== "todos" && batch.indication !== batchHistoryIndication) return false;
     if (batchHistoryMonth && !batch.createdAt.startsWith(batchHistoryMonth)) return false;
@@ -709,13 +741,13 @@ export default function SecretariaLotesPage() {
     },
     {
       label: "Lotes em rascunho",
-      value: batches.filter((batch) => batch.status === "rascunho").length,
+      value: visibleBatches.filter((batch) => batch.status === "rascunho").length,
       description: "Pendentes de envio",
       color: "text-[#966419]",
     },
     {
       label: "Com o laboratório",
-      value: batches.filter((batch) =>
+      value: visibleBatches.filter((batch) =>
         ["enviado", "em-producao"].includes(batch.status),
       ).length,
       description: "Em fila ou em produção",
@@ -723,7 +755,7 @@ export default function SecretariaLotesPage() {
     },
     {
       label: "Para conferência",
-      value: batches.filter((batch) => batch.status === "pronto").length,
+      value: visibleBatches.filter((batch) => batch.status === "pronto").length,
       description: "Produção finalizada",
       color: "text-[#187157]",
     },

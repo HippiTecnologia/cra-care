@@ -17,6 +17,7 @@ import type {
   PatientPortalState,
 } from "../../app/paciente/patient-portal-store";
 import { createDefaultPortalState } from "../../app/paciente/patient-portal-store";
+import { historicalBottleCountsFromRows } from "../../app/secretaria/bottle-billing";
 import {
   mapMedicalPatient,
   type MedicalPatientRow,
@@ -254,6 +255,19 @@ async function loadAllPages<Row>(
 
 const SECRETARY_BOTTLE_COLUMNS = "id, clinic_id, patient_id, prescription_id, batch_id, bottle_number, received_at, started_at, completed_at, status, volume_ml, reserved_at, delivered_at, checked_by, metadata";
 
+const SECRETARY_LOT_PATIENT_COLUMNS = "id, clinic_id, auth_user_id, username, full_name, cpf, birth_date, phone, email, status, doctor_profile_id, address, treatment, financial, created_at";
+const SECRETARY_LOT_PAYMENT_COLUMNS = "id, patient_id, historical_import, status, acquisition_method_id, acquisition_method, acquisition_method_version, payment_condition, treatment, bottle_reference, additional_bottles, amount, paid_at, registered_at, created_at, payment_method, installment_count, installment_number, installment_value, due_at, asaas_reference, notes";
+const SECRETARY_LOT_BATCH_COLUMNS = "id, clinic_id, code, name, status, laboratory, created_at, metadata, batch_items(id, batch_id, patient_id, prescription_id, bottles, bottle_volume_ml, metadata)";
+const SECRETARY_LOT_PATIENT_CHUNK_SIZE = 100;
+
+function splitIntoChunks<T>(items: T[], chunkSize: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
 export async function loadSecretaryBottleRows(context: SecretaryContext) {
   const supabase = getSupabaseClient();
   const rows = await loadAllPages<Record<string, unknown>>((from, to) => supabase.from("bottles")
@@ -271,6 +285,101 @@ export async function loadSecretaryBottleRows(context: SecretaryContext) {
     }
     return text(first.id).localeCompare(text(second.id));
   });
+}
+
+/** Loads only the patient, payment, and bottle data needed by the lot workspace. */
+export async function loadSecretaryLotWorkspace(context?: SecretaryContext) {
+  const current = context ?? await loadSecretaryContext();
+  const supabase = getSupabaseClient();
+  const [doctors, prescriptionRows, batchResult] = await Promise.all([
+    loadSecretaryDoctors(current),
+    loadAllPages<Record<string, unknown>>((from, to) => supabase.from("prescriptions")
+      .select("id, patient_id, doctor_profile_id, content, signature_status, created_at")
+      .eq("clinic_id", current.clinicId)
+      .order("created_at", { ascending: false })
+      .range(from, to)),
+    supabase.from("batches")
+      .select(SECRETARY_LOT_BATCH_COLUMNS)
+      .eq("clinic_id", current.clinicId)
+      .order("created_at", { ascending: false }),
+  ]);
+  if (batchResult.error) throw batchResult.error;
+
+  const doctorById = new Map(doctors.map((doctor) => [doctor.id, doctor]));
+  const prescriptions = prescriptionRows.map((row) => prescriptionFromRow(row as unknown as PrescriptionRow, doctorById));
+  const batchRows = (batchResult.data ?? []) as unknown as (Record<string, unknown> & { batch_items?: Record<string, unknown>[] })[];
+  const batches = batchRows.map((row): DemoBatch => {
+    const metadata = objectValue(row.metadata);
+    return {
+      ...(metadata as unknown as Partial<DemoBatch>),
+      id: text(row.id),
+      code: text(row.code, text(metadata.code, `CRA-${new Date(text(row.created_at)).getFullYear()}`)),
+      name: text(row.name),
+      createdAt: text(row.created_at),
+      status: text(row.status, "rascunho") as DemoBatch["status"],
+      laboratory: text(row.laboratory),
+      notes: text(metadata.notes),
+      items: Array.isArray(row.batch_items) ? row.batch_items.map(batchItemFromRow) : [],
+    };
+  });
+
+  const patientIds = Array.from(new Set(prescriptions.map((prescription) => prescription.patientId).filter(Boolean)));
+  const patientChunks = splitIntoChunks(patientIds, SECRETARY_LOT_PATIENT_CHUNK_SIZE);
+  let patientRowsByChunk: MedicalPatientRow[][] = [];
+  let paymentRowsByChunk: Record<string, unknown>[][] = [];
+  let bottleRowsByChunk: Record<string, unknown>[][] = [];
+  if (patientChunks.length) {
+    [patientRowsByChunk, paymentRowsByChunk, bottleRowsByChunk] = await Promise.all([
+      Promise.all(patientChunks.map((ids) => loadAllPages<MedicalPatientRow>((from, to) => supabase.from("patients")
+        .select(SECRETARY_LOT_PATIENT_COLUMNS)
+        .eq("clinic_id", current.clinicId)
+        .in("id", ids)
+        .is("archived_at", null)
+        .neq("status", "laudo")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to)))),
+      Promise.all(patientChunks.map((ids) => loadAllPages<Record<string, unknown>>((from, to) => supabase.from("payments")
+        .select(SECRETARY_LOT_PAYMENT_COLUMNS)
+        .eq("clinic_id", current.clinicId)
+        .in("patient_id", ids)
+        .order("paid_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to)))),
+      Promise.all(patientChunks.map((ids) => loadAllPages<Record<string, unknown>>((from, to) => supabase.from("bottles")
+        .select(SECRETARY_BOTTLE_COLUMNS)
+        .eq("clinic_id", current.clinicId)
+        .in("patient_id", ids)
+        .order("id", { ascending: true })
+        .range(from, to)))),
+    ]);
+  }
+
+  const patientRows = patientRowsByChunk.flat();
+  const paymentRows = paymentRowsByChunk.flat();
+  const bottleRows = bottleRowsByChunk.flat();
+  const paymentsByPatient = new Map<string, PatientPaymentRecord[]>();
+  for (const row of paymentRows) {
+    const patientId = text(row.patient_id);
+    paymentsByPatient.set(patientId, [...(paymentsByPatient.get(patientId) ?? []), paymentFromRow(row)]);
+  }
+
+  const patients = patientRows.map((row) => ({
+    ...mapMedicalPatient(row, row.doctor_profile_id ? doctorById.get(row.doctor_profile_id)?.fullName ?? "Médico não vinculado" : "Médico não vinculado"),
+    payments: paymentsByPatient.get(row.id) ?? [],
+  }));
+  const stockRecords = bottleRows
+    .filter((row) => objectValue(row.metadata).manuallyDeleted !== true && !objectValue(row.metadata).historicalImportSource)
+    .map(stockFromRow);
+
+  return {
+    context: current,
+    patients,
+    prescriptions,
+    batches,
+    stockRecords,
+    historicalBottleCounts: historicalBottleCountsFromRows(bottleRows),
+  };
 }
 
 export async function loadSecretaryPatients(
@@ -907,6 +1016,7 @@ export async function saveSecretaryBatch(context: SecretaryContext, batch: DemoB
     checkedPrescriptionIds: savedBatch.checkedPrescriptionIds,
     checkedAt: savedBatch.checkedAt,
     checkedBy: savedBatch.checkedBy,
+    archivedAt: savedBatch.archivedAt,
     conferenceNotes: savedBatch.conferenceNotes,
     laboratoryOkAt: savedBatch.laboratoryOkAt,
     laboratoryOkBy: savedBatch.laboratoryOkBy,
