@@ -24,6 +24,7 @@ import { getPrickGroupsForDoctor, isAlessandraPrickDoctor, prickResultKey } from
 type Section = "patients" | "reports" | "in-progress";
 type ReportType = "prick_test" | "patch_test";
 type Modal = "patient" | "patient-edit" | "report" | null;
+const REPORTS_PER_PAGE = 10;
 type PrickResult = { mm: number; reaction: "-" | "+" | "++" | "+++" | "++++"; pseudopod: boolean; dermatographism: boolean };
 type PatchResult = { firstReading: "" | "-" | "?" | "+" | "++" | "+++"; secondReading: "" | "-" | "?" | "+" | "++" | "+++" };
 type SavedReport = { id: string; patient_id: string; nurse_profile_id: string; doctor_profile_id?: string | null; report_type: ReportType; content: Record<string, unknown>; created_at: string };
@@ -116,6 +117,7 @@ export default function NursingPage() {
   const [reportPatientFilter, setReportPatientFilter] = useState("");
   const [reportSearchQuery, setReportSearchQuery] = useState("");
   const [reportDateFilter, setReportDateFilter] = useState("");
+  const [reportsPage, setReportsPage] = useState(1);
   const [modal, setModal] = useState<Modal>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const searchCpf = searchQuery;
@@ -167,6 +169,11 @@ export default function NursingPage() {
     });
   }, [patientById, rawReports, reportDateFilter, reportPatientFilter, reportSearchQuery]);
   const allReports = filteredReports;
+  const reportsPageCount = Math.max(1, Math.ceil(allReports.length / REPORTS_PER_PAGE));
+  const currentReportsPage = Math.min(reportsPage, reportsPageCount);
+  const visibleReports = allReports.slice((currentReportsPage - 1) * REPORTS_PER_PAGE, currentReportsPage * REPORTS_PER_PAGE);
+  const firstVisibleReport = allReports.length ? (currentReportsPage - 1) * REPORTS_PER_PAGE + 1 : 0;
+  const lastVisibleReport = Math.min(currentReportsPage * REPORTS_PER_PAGE, allReports.length);
   const reportPatientOptions = useMemo(() => {
     const options = new Map<string, { name: string; cpf: string }>();
     for (const report of rawReports) {
@@ -608,7 +615,7 @@ export default function NursingPage() {
     <section className="p-6 lg:p-10"><header className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-widest text-[#a3113a]">Área clínica</p><h1 className="mt-2 text-3xl font-bold">{section === "patients" ? "Pacientes" : section === "in-progress" ? "Exames em andamento" : "Exames"}</h1></div>{((section === "patients" && canCreatePatients) || (section === "reports" && canEditReports)) && <button onClick={() => section === "patients" ? setModal("patient") : openReport()} className="rounded-xl bg-[#a3113a] px-5 py-3 font-bold text-white">{section === "patients" ? "+ Cadastrar paciente" : "+ Novo exame"}</button>}</header>
       {message && <p className="mt-5 rounded-xl bg-[#edf8f3] p-4 text-sm">{message}</p>}
       {section === "patients" && <p className="mt-4 text-sm text-[#817578]">Você pode localizar a paciente pelo nome ou pelo CPF.</p>}
-      {section === "reports" && <div className="mt-6 rounded-2xl bg-white p-4"><p className="mb-3 text-sm text-[#817578]">Patch no sistema: {rawReports.filter((report) => report.report_type === "patch_test" && report.content.status !== "em_andamento" && !isDuplicateReport(report)).length} concluídos · {inProgressReports.length} aguardando 2ª leitura.</p><div className="grid gap-3 md:grid-cols-[minmax(240px,1.5fr)_minmax(200px,1fr)_190px_auto]"><input value={reportSearchQuery} onChange={(event) => setReportSearchQuery(event.target.value)} placeholder="Buscar paciente por nome ou CPF" aria-label="Buscar laudos pelo nome ou CPF do paciente" className="min-w-0 rounded-xl border p-3"/><select value={reportPatientFilter} onChange={(event) => setReportPatientFilter(event.target.value)} aria-label="Filtrar por paciente" className="min-w-0 rounded-xl border p-3"><option value="">Todos os pacientes</option>{reportPatientOptions.map(([patientId, patient]) => <option key={patientId} value={patientId}>{patient.name}{patient.cpf ? ` · CPF ${patient.cpf}` : ""}</option>)}</select><label className="flex items-center gap-2 rounded-xl border px-3 text-sm text-[#817578]">Data<input type="date" value={reportDateFilter} onChange={(event) => setReportDateFilter(event.target.value)} aria-label="Filtrar pela data do laudo" className="min-w-0 flex-1 bg-transparent p-2 text-[#34292d]"/></label><button type="button" onClick={() => { setReportSearchQuery(""); setReportPatientFilter(""); setReportDateFilter(""); }} disabled={!reportSearchQuery && !reportPatientFilter && !reportDateFilter} className="rounded-xl border px-4 py-2 text-sm font-bold text-[#a3113a] disabled:cursor-default disabled:opacity-40">Limpar filtros</button></div></div>}
+      {section === "reports" && <div className="mt-6 rounded-2xl bg-white p-4"><p className="mb-3 text-sm text-[#817578]">Patch no sistema: {rawReports.filter((report) => report.report_type === "patch_test" && report.content.status !== "em_andamento" && !isDuplicateReport(report)).length} concluídos · {inProgressReports.length} aguardando 2ª leitura.</p><div className="grid gap-3 md:grid-cols-[minmax(240px,1.5fr)_minmax(200px,1fr)_190px_auto]"><input value={reportSearchQuery} onChange={(event) => { setReportsPage(1); setReportSearchQuery(event.target.value); }} placeholder="Buscar paciente por nome ou CPF" aria-label="Buscar laudos pelo nome ou CPF do paciente" className="min-w-0 rounded-xl border p-3"/><select value={reportPatientFilter} onChange={(event) => { setReportsPage(1); setReportPatientFilter(event.target.value); }} aria-label="Filtrar por paciente" className="min-w-0 rounded-xl border p-3"><option value="">Todos os pacientes</option>{reportPatientOptions.map(([patientId, patient]) => <option key={patientId} value={patientId}>{patient.name}{patient.cpf ? ` · CPF ${patient.cpf}` : ""}</option>)}</select><label className="flex items-center gap-2 rounded-xl border px-3 text-sm text-[#817578]">Data<input type="date" value={reportDateFilter} onChange={(event) => { setReportsPage(1); setReportDateFilter(event.target.value); }} aria-label="Filtrar pela data do laudo" className="min-w-0 flex-1 bg-transparent p-2 text-[#34292d]"/></label><button type="button" onClick={() => { setReportsPage(1); setReportSearchQuery(""); setReportPatientFilter(""); setReportDateFilter(""); }} disabled={!reportSearchQuery && !reportPatientFilter && !reportDateFilter} className="rounded-xl border px-4 py-2 text-sm font-bold text-[#a3113a] disabled:cursor-default disabled:opacity-40">Limpar filtros</button></div></div>}
       {section === "in-progress" && <section className="mt-6 rounded-2xl border border-[#f1d5dc] bg-[#fff8fa] p-5"><p className="text-sm text-[#817578]">Laudos Patch aguardando a 2ª leitura.</p>{inProgressReports.length === 0 ? <p className="mt-5 rounded-xl bg-white p-4 text-sm text-[#817578]">Nenhum laudo em andamento no momento.</p> : <div className="mt-4 space-y-3">{inProgressReports.map(({ report, duplicates }) => <article key={report.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4"><div><strong>{String(report.content.patientName ?? patientById.get(report.patient_id)?.name ?? "Paciente")}</strong><p className="mt-1 text-sm text-[#817578]">1ª leitura: {new Date(String(report.content.examDate ?? report.created_at)).toLocaleDateString("pt-BR")}</p>{duplicates.length > 0 && <p className="mt-2 rounded-lg bg-[#fff4e5] px-3 py-2 text-xs font-medium text-[#805313]">{duplicates.length} cópia(s) idêntica(s) detectada(s). Nenhum registro será apagado; ao concluir a leitura, as cópias ficarão associadas a este laudo.</p>}</div>{canEditReports ? <button type="button" onClick={() => void editReport(report)} className="rounded-xl bg-[#a3113a] px-4 py-2 text-sm font-bold text-white">Continuar 2ª leitura</button> : <span className="text-xs font-semibold text-[#817578]">Aguardando a Enfermagem</span>}</article>)}</div>}</section>}
       {section === "patients" ? <>
         <div className="mt-7 flex gap-2 rounded-2xl bg-white p-4"><input value={searchCpf} onChange={(e) => setSearchCpf(e.target.value)} placeholder="Pesquisar paciente pelo nome ou CPF" className="flex-1 rounded-xl border p-3"/><button onClick={() => void searchPatient()} className="rounded-xl border px-5 font-bold text-[#a3113a]">Buscar</button></div>
@@ -621,7 +628,34 @@ export default function NursingPage() {
         <div className="mt-5 space-y-3">{patients.map((patient) => <button key={patient.id} onClick={() => void openPatient(patient)} className="block w-full rounded-2xl bg-white p-5 text-left shadow-sm"><strong>{patient.name}</strong><span className="ml-3 text-sm text-[#817578]">CPF {patient.cpf}</span></button>)}</div>
       </> : section === "reports" ? <>
         {filteredInProgressReports.length > 0 && <section className="mt-6 rounded-2xl border border-[#f1d5dc] bg-[#fff8fa] p-5"><h2 className="font-bold">Laudos Patch aguardando a 2ª leitura ({filteredInProgressReports.length})</h2><p className="mt-1 text-sm text-[#817578]">Esses laudos ainda precisam da leitura final. Eles também ficam em “Exames em andamento”.</p><div className="mt-4 space-y-3">{filteredInProgressReports.map(({ report, duplicates }) => { const patient = patientById.get(report.patient_id); return <article key={report.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4"><div><strong>{String(report.content.patientName ?? patient?.name ?? "Paciente")}</strong>{String(report.content.patientCpf ?? patient?.cpf ?? "") && <p className="mt-1 text-xs text-[#817578]">CPF {String(report.content.patientCpf ?? patient?.cpf ?? "")}</p>}<p className="mt-1 text-sm text-[#817578]">1ª leitura: {new Date(String(report.content.examDate ?? report.created_at)).toLocaleDateString("pt-BR")}</p>{duplicates.length > 0 && <p className="mt-2 text-xs text-[#805313]">{duplicates.length} cópia(s) idêntica(s) associada(s) a este laudo.</p>}</div>{canEditReports ? <button type="button" onClick={() => void editReport(report)} className="rounded-xl bg-[#a3113a] px-4 py-2 text-sm font-bold text-white">Continuar 2ª leitura</button> : <span className="text-xs font-semibold text-[#817578]">Aguardando a Enfermagem</span>}</article>; })}</div></section>}
-        <div className="mt-5"><h2 className="text-xl font-bold">Histórico de laudos ({allReports.length})</h2><p className="mt-1 text-sm text-[#817578]">Laudos concluídos, incluindo Prick e Patch.</p>{allReports.length ? <div className="mt-4 space-y-3">{allReports.map((report) => { const patient = patientById.get(report.patient_id); return <article key={report.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-5"><div><strong>{report.report_type === "prick_test" ? "Laudo Prick" : "Laudo Patch"}</strong><p className="mt-1 text-sm font-medium text-[#544449]">{String(report.content.patientName ?? patient?.name ?? "Paciente")}</p>{String(report.content.patientCpf ?? patient?.cpf ?? "") && <p className="text-xs text-[#817578]">CPF {String(report.content.patientCpf ?? patient?.cpf ?? "")}</p>}<p className="text-sm text-[#817578]">{new Date(report.created_at).toLocaleDateString("pt-BR")}</p></div>{reportActions(report)}</article>; })}</div> : <p className="mt-4 rounded-xl bg-white p-5 text-sm text-[#817578]">Nenhum laudo concluído corresponde aos filtros. Confira a data selecionada ou limpe os filtros para ver todos.</p>}</div>
+        <div className="mt-5">
+          <h2 className="text-xl font-bold">Histórico de laudos ({allReports.length})</h2>
+          <p className="mt-1 text-sm text-[#817578]">Laudos concluídos, incluindo Prick e Patch.</p>
+          {allReports.length ? <>
+            <div className="mt-4 space-y-3">
+              {visibleReports.map((report) => {
+                const patient = patientById.get(report.patient_id);
+                return <article key={report.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-5">
+                  <div>
+                    <strong>{report.report_type === "prick_test" ? "Laudo Prick" : "Laudo Patch"}</strong>
+                    <p className="mt-1 text-sm font-medium text-[#544449]">{String(report.content.patientName ?? patient?.name ?? "Paciente")}</p>
+                    {String(report.content.patientCpf ?? patient?.cpf ?? "") && <p className="text-xs text-[#817578]">CPF {String(report.content.patientCpf ?? patient?.cpf ?? "")}</p>}
+                    <p className="text-sm text-[#817578]">{new Date(report.created_at).toLocaleDateString("pt-BR")}</p>
+                  </div>
+                  {reportActions(report)}
+                </article>;
+              })}
+            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-4">
+              <p className="text-sm text-[#817578]" aria-live="polite">Mostrando {firstVisibleReport}–{lastVisibleReport} de {allReports.length} laudos</p>
+              <div className="flex items-center gap-3" role="navigation" aria-label="Paginação do histórico de laudos">
+                <button type="button" onClick={() => setReportsPage(currentReportsPage - 1)} disabled={currentReportsPage <= 1} className="rounded-lg border border-[#d8cbc7] px-4 py-2 text-sm font-bold text-[#a3113a] disabled:cursor-not-allowed disabled:opacity-40">Anterior</button>
+                <span className="text-sm text-[#544449]">Página {currentReportsPage} de {reportsPageCount}</span>
+                <button type="button" onClick={() => setReportsPage(currentReportsPage + 1)} disabled={currentReportsPage >= reportsPageCount} className="rounded-lg border border-[#d8cbc7] px-4 py-2 text-sm font-bold text-[#a3113a] disabled:cursor-not-allowed disabled:opacity-40">Próxima</button>
+              </div>
+            </div>
+          </> : <p className="mt-4 rounded-xl bg-white p-5 text-sm text-[#817578]">Nenhum laudo concluído corresponde aos filtros. Confira a data selecionada ou limpe os filtros para ver todos.</p>}
+        </div>
       </> : null}
     </section>
   </div>
