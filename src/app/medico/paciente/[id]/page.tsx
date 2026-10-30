@@ -37,6 +37,7 @@ import { getPrickGroupsForDoctor, prickResultKey } from "../../../../lib/prick-b
 
 type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes" | "laudos" | "dashboard";
 type VaccineType = "rinite" | "imunobacteriana";
+type SignedPrescription = { id: string; document_id: string; signed_at: string | null; validated_at: string | null; validation_code: string };
 
 const immunobacterialFormulas: PrescriptionFormula[] = [
   { id: "imuno-pneumoniae", name: "S. pneumoniae", percentage: 40 },
@@ -72,6 +73,17 @@ function escapeHtml(value: string | number) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+async function fetchSignedPrescriptions(patientId: string): Promise<Record<string, SignedPrescription> | null> {
+  const { data } = await getSupabaseClient().auth.getSession();
+  if (!data.session?.access_token) return null;
+  const response = await fetch(`/api/signatures/prescriptions?patientId=${encodeURIComponent(patientId)}`, {
+    headers: { Authorization: `Bearer ${data.session.access_token}` },
+  });
+  if (!response.ok) return null;
+  const payload = await response.json() as { signatures: SignedPrescription[] };
+  return Object.fromEntries(payload.signatures.map((item) => [item.document_id, item]));
 }
 
 function treatmentProgress(patient: DemoPatientRecord) {
@@ -137,6 +149,8 @@ export default function MedicalPatientPage() {
   const [editingClinicalRecordId, setEditingClinicalRecordId] = useState<string | null>(null);
   const [recordSaving, setRecordSaving] = useState(false);
   const [signatureStarting, setSignatureStarting] = useState(false);
+  const [signedPrescriptions, setSignedPrescriptions] = useState<Record<string, SignedPrescription>>({});
+  const [signedPdfUrl, setSignedPdfUrl] = useState<string | null>(null);
   const [editingPatientData, setEditingPatientData] = useState(false);
   const [patientDataDraft, setPatientDataDraft] = useState({ name: "", cpf: "", birthDate: "" });
   const [patientSaving, setPatientSaving] = useState(false);
@@ -208,6 +222,40 @@ export default function MedicalPatientPage() {
   const selectedPrescription = selectedPrescriptionId
     ? prescriptions.find((item) => item.id === selectedPrescriptionId)
     : undefined;
+
+  async function refreshSignedPrescriptions() {
+    if (!patient) return;
+    const signatures = await fetchSignedPrescriptions(patient.id);
+    if (signatures) setSignedPrescriptions(signatures);
+  }
+
+  useEffect(() => {
+    if (!patient?.id) return;
+    let active = true;
+    void fetchSignedPrescriptions(patient.id).then((signatures) => {
+      if (active && signatures) setSignedPrescriptions(signatures);
+    });
+    return () => { active = false; };
+  }, [patient?.id]);
+
+  useEffect(() => {
+    const signatureId = selectedPrescriptionId ? signedPrescriptions[selectedPrescriptionId]?.id : undefined;
+    if (!signatureId) return;
+    let active = true;
+    let objectUrl: string | null = null;
+    void (async () => {
+      const { data } = await getSupabaseClient().auth.getSession();
+      if (!data.session?.access_token) return;
+      const response = await fetch(`/api/signatures/${signatureId}/download`, {
+        headers: { Authorization: `Bearer ${data.session.access_token}` },
+      });
+      if (!response.ok) return;
+      objectUrl = URL.createObjectURL(await response.blob());
+      if (active) setSignedPdfUrl(objectUrl);
+      else URL.revokeObjectURL(objectUrl);
+    })();
+    return () => { active = false; setSignedPdfUrl(null); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [selectedPrescriptionId, signedPrescriptions]);
 
   const generatedPosology = `Aplicar ${drops} gotas, ${frequency}. ${sublingualUseInstructions}`;
   const currentPosology = customPosology && posology.trim()
@@ -367,11 +415,12 @@ export default function MedicalPatientPage() {
         const existingResponse = await fetch("/api/signatures", { headers });
         const existingPayload = await existingResponse.json();
         const existing = existingResponse.ok ? existingPayload.signatures?.find((item: { document_id: string; provider: string }) => item.document_id === targetPrescription.id && item.provider === "a3") : null;
-        if (!existing) throw new Error(preparedPayload.error ?? "Confira a solicitação na tela Assinatura Digital.");
+        if (!existing) throw new Error(preparedPayload.error ?? "Não foi possível localizar a assinatura desta receita.");
         signatureId = existing.id;
         if (existing.status === "signed") {
           signatureWindow?.close();
           setPrescriptions((current) => current.map((item) => item.id === targetPrescription.id ? { ...item, signatureStatus: "signed" } : item));
+          await refreshSignedPrescriptions();
           setMessage("Esta receita já está assinada e validada pela Certillion."); setSignatureStarting(false); return;
         }
       }
@@ -382,7 +431,8 @@ export default function MedicalPatientPage() {
       if (payload.kind === "completed") {
         signatureWindow?.close();
         setPrescriptions((current) => current.map((item) => item.id === targetPrescription.id ? { ...item, signatureStatus: "signed" } : item));
-        setMessage("Receita assinada e validada pela Certillion. O PDF assinado está disponível em Assinatura Digital.");
+        await refreshSignedPrescriptions();
+        setMessage("Receita assinada e validada. O PDF assinado está na prévia e no histórico.");
         setSignatureStarting(false); return;
       }
       if (!payload.authorizationUrl || !signatureWindow) throw new Error("Permita a abertura da janela para autorizar o VIDaaS.");
@@ -396,11 +446,12 @@ export default function MedicalPatientPage() {
           if (status === "signed") {
             window.clearInterval(interval);
             setPrescriptions((current) => current.map((item) => item.id === targetPrescription.id ? { ...item, signatureStatus: "signed" } : item));
-            setMessage("Receita assinada e validada pela Certillion. O PDF assinado está disponível em Assinatura Digital.");
+            await refreshSignedPrescriptions();
+            setMessage("Receita assinada e validada. O PDF assinado está na prévia e no histórico.");
             setSignatureStarting(false);
           } else if (["error", "invalid", "rejected", "expired", "cancelled"].includes(status ?? "")) {
             window.clearInterval(interval);
-            setError(statusPayload.signature?.error_message ?? "A assinatura não foi concluída. Consulte a tela Assinatura Digital.");
+            setError(statusPayload.signature?.error_message ?? "A assinatura não foi concluída. Tente novamente nesta receita.");
             setSignatureStarting(false);
           }
         } catch { /* A consulta será repetida até o prazo da autorização. */ }
@@ -548,6 +599,11 @@ export default function MedicalPatientPage() {
   const printablePatient = patient;
 
   function printPrescription() {
+    if (selectedPrescription?.signatureStatus === "signed") {
+      if (!signedPdfUrl) { setError("O PDF assinado ainda está carregando. Aguarde um instante."); return; }
+      window.open(signedPdfUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
     if (preview.formulas.length === 0) {
       setError("Adicione a composição antes de imprimir a receita.");
       return;
@@ -940,7 +996,7 @@ export default function MedicalPatientPage() {
                   {signatureStarting ? "Aguardando assinatura…" : selectedPrescription?.signatureStatus === "signed" ? "Assinada digitalmente" : "Assinar digitalmente"}
                 </button>
               </div>
-              <p className="mt-3 text-xs text-[#817578]">Gere para salvar no prontuário; imprima quando precisar. A assinatura encaminha a receita para assinatura válida com o certificado ICP-Brasil do médico.</p>
+              <p className="mt-3 text-xs text-[#817578]">Gere a receita, confira a prévia e assine nesta tela. Após a validação, o PDF assinado fica disponível aqui e no histórico.</p>
             </div>
 
             <aside className="self-start rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
@@ -948,7 +1004,7 @@ export default function MedicalPatientPage() {
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#a3113a]">Prévia da receita</p>
                   <p className="mt-1 text-xs text-[#817578]">
-                    {selectedPrescription ? "Receita salva no histórico" : "Atualização em tempo real"}
+                    {selectedPrescription && signedPrescriptions[selectedPrescription.id] ? "PDF assinado e validado" : selectedPrescription ? "Receita salva no histórico" : "Atualização em tempo real"}
                   </p>
                 </div>
                 <div className="rounded-xl bg-[#a3113a] px-2 py-1">
@@ -956,7 +1012,7 @@ export default function MedicalPatientPage() {
                 </div>
               </div>
 
-              <div className="mt-7 rounded-2xl border border-[#eee5e0] bg-[#fffefd] p-5 sm:p-7">
+              {!(selectedPrescription && signedPrescriptions[selectedPrescription.id]) && <div className="mt-7 rounded-2xl border border-[#eee5e0] bg-[#fffefd] p-5 sm:p-7">
                 <div className="space-y-2 text-sm text-[#55474a]">
                   <p><strong>Paciente:</strong> {patient.name}</p>
                   <p><strong>CPF:</strong> {patient.cpf}</p>
@@ -1002,7 +1058,15 @@ export default function MedicalPatientPage() {
                   </div>
                   {preview.signatureStatus === "ready" && <p className="mt-3 text-xs text-[#817578]">Preparada em {formatDate(preview.signaturePreparedAt)}. A assinatura real dependerá do certificado do médico.</p>}
                 </div>
-              </div>
+              </div>}
+              {selectedPrescription && signedPrescriptions[selectedPrescription.id] && <div className="mt-5 space-y-3">
+                <p className="text-sm font-semibold text-[#187157]">Assinatura validada em {new Date(signedPrescriptions[selectedPrescription.id].validated_at ?? signedPrescriptions[selectedPrescription.id].signed_at ?? selectedPrescription.createdAt).toLocaleString("pt-BR")}</p>
+                {signedPdfUrl ? <iframe title="Receita assinada e validada" src={signedPdfUrl} className="h-[540px] w-full rounded-xl border border-[#e6dbd6]" /> : <p className="text-xs text-[#817578]">Carregando PDF assinado…</p>}
+                <div className="flex flex-wrap gap-3">
+                  {signedPdfUrl && <a href={signedPdfUrl} target="_blank" rel="noreferrer" className="rounded-xl bg-[#187157] px-4 py-3 text-xs font-semibold text-white">Abrir PDF assinado</a>}
+                  <Link href={`/validar-documento/${signedPrescriptions[selectedPrescription.id].validation_code}`} target="_blank" className="rounded-xl border border-[#187157] px-4 py-3 text-xs font-semibold text-[#187157]">Validar assinatura</Link>
+                </div>
+              </div>}
             </aside>
           </section>
         )}
@@ -1163,7 +1227,7 @@ export default function MedicalPatientPage() {
                     </p>
                   </div>
                   <button type="button" onClick={() => { setSelectedPrescriptionId(prescription.id); setActiveTab("receitas"); }} className="self-start rounded-xl border border-[#e6dbd6] px-4 py-3 text-xs font-semibold text-[#a3113a]">
-                    Visualizar receita
+                    {signedPrescriptions[prescription.id] ? "Ver receita assinada" : "Visualizar receita"}
                   </button>
                 </article>
               ))}
