@@ -45,7 +45,7 @@ function SignedPrescriptionPreview({ src }: { src: string }) {
 
   useEffect(() => {
     let active = true;
-    let loadingTask: { destroy: () => Promise<void> } | null = null;
+    let loadingTask: ReturnType<typeof import("pdfjs-dist/legacy/build/pdf.mjs").getDocument> | null = null;
     const container = pagesRef.current;
     if (!container) return;
 
