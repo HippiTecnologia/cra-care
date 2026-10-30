@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   availableFormulas,
   bottleVolumeOptions,
@@ -38,6 +38,64 @@ import { getPrickGroupsForDoctor, prickResultKey } from "../../../../lib/prick-b
 type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes" | "laudos" | "dashboard";
 type VaccineType = "rinite" | "imunobacteriana";
 type SignedPrescription = { id: string; document_id: string; signed_at: string | null; validated_at: string | null; validation_code: string };
+
+function SignedPrescriptionPreview({ src }: { src: string }) {
+  const pagesRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    let loadingTask: { destroy: () => Promise<void> } | null = null;
+    const container = pagesRef.current;
+    if (!container) return;
+
+    setError("");
+    container.replaceChildren();
+    void (async () => {
+      const { GlobalWorkerOptions, getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+      GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/legacy/build/pdf.worker.min.mjs", import.meta.url).toString();
+      const response = await fetch(src);
+      if (!response.ok) throw new Error("Não foi possível abrir o PDF assinado.");
+      const data = new Uint8Array(await response.arrayBuffer());
+      loadingTask = getDocument({ data });
+      const pdf = await loadingTask.promise;
+      if (!active) return;
+
+      const width = Math.min(container.clientWidth || 720, 720);
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+        const page = await pdf.getPage(pageNumber);
+        const baseViewport = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: width / baseViewport.width });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.ceil(viewport.width * pixelRatio);
+        canvas.height = Math.ceil(viewport.height * pixelRatio);
+        canvas.style.width = "100%";
+        canvas.style.height = "auto";
+        canvas.style.maxWidth = "720px";
+        canvas.className = "mx-auto block bg-white shadow-sm";
+        const pageFrame = document.createElement("div");
+        pageFrame.className = "overflow-hidden rounded-lg bg-white";
+        pageFrame.append(canvas);
+        container.append(pageFrame);
+        await page.render({ canvas, viewport, transform: pixelRatio === 1 ? undefined : [pixelRatio, 0, 0, pixelRatio, 0, 0] }).promise;
+        if (!active) return;
+      }
+    })().catch((cause: unknown) => {
+      if (active) setError(cause instanceof Error ? cause.message : "Não foi possível mostrar a receita assinada.");
+    });
+
+    return () => {
+      active = false;
+      if (loadingTask) void loadingTask.destroy();
+      container.replaceChildren();
+    };
+  }, [src]);
+
+  return <div className="max-h-[720px] space-y-3 overflow-auto rounded-xl border border-[#e6dbd6] bg-[#f3f0ee] p-3">
+    {error ? <p className="p-4 text-sm text-red-700">{error}</p> : <div ref={pagesRef} className="space-y-3" aria-label="Páginas da receita assinada" />}
+  </div>;
+}
 
 const immunobacterialFormulas: PrescriptionFormula[] = [
   { id: "imuno-pneumoniae", name: "S. pneumoniae", percentage: 40 },
@@ -1061,7 +1119,7 @@ export default function MedicalPatientPage() {
               </div>}
               {selectedPrescription && signedPrescriptions[selectedPrescription.id] && <div className="mt-5 space-y-3">
                 <p className="text-sm font-semibold text-[#187157]">Assinatura validada em {new Date(signedPrescriptions[selectedPrescription.id].validated_at ?? signedPrescriptions[selectedPrescription.id].signed_at ?? selectedPrescription.createdAt).toLocaleString("pt-BR")}</p>
-                {signedPdfUrl ? <iframe title="Receita assinada e validada" src={signedPdfUrl} className="h-[540px] w-full rounded-xl border border-[#e6dbd6]" /> : <p className="text-xs text-[#817578]">Carregando PDF assinado…</p>}
+                {signedPdfUrl ? <SignedPrescriptionPreview src={signedPdfUrl} /> : <p className="text-xs text-[#817578]">Carregando receita assinada…</p>}
                 <div className="flex flex-wrap gap-3">
                   {signedPdfUrl && <a href={signedPdfUrl} target="_blank" rel="noreferrer" className="rounded-xl bg-[#187157] px-4 py-3 text-xs font-semibold text-white">Abrir PDF assinado</a>}
                   <Link href={`/validar-documento/${signedPrescriptions[selectedPrescription.id].validation_code}`} target="_blank" className="rounded-xl border border-[#187157] px-4 py-3 text-xs font-semibold text-[#187157]">Validar assinatura</Link>
