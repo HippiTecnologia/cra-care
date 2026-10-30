@@ -334,6 +334,17 @@ export default function PatientRecordsPage() {
   const activePayments = (patient?.payments ?? []).filter((item) =>
     item.treatment === activeFinancialTrack || (!item.treatment && legacyFinancialAllowed),
   );
+  const activeBottleBilling = patient
+    ? getBottleBillingState(patient, activeFinancialTrack, stockRecords, batchRecords, historicalDeliveredForTrack(activeFinancialTrack))
+    : undefined;
+  const activePaidTotal = activePayments.reduce((total, payment) => {
+    const status = payment.status ?? (payment.paidAt ? "recebido" : "pendente");
+    return status === "recebido" ? total + Number(payment.amount || 0) : total;
+  }, 0);
+  const activeLastPaymentDate = activePayments.reduce<string | undefined>((latest, payment) => {
+    const date = payment.registeredAt || payment.paidAt;
+    return date && (!latest || date > latest) ? date : latest;
+  }, undefined);
   const availablePaymentMethods = useMemo(
     () => uniquePaymentMethods([...paymentOptions, ...adminMethods.map((method) => method.paymentMethod)]),
     [adminMethods],
@@ -1095,15 +1106,25 @@ export default function PatientRecordsPage() {
             </div>}
 
             {tab === "financeiro" && <div className="mt-4 space-y-3">
+              <div className="rounded-2xl border border-[#eee5e0] bg-[#fffdfc] p-4">
+                <p className="text-xs font-bold uppercase tracking-[.14em] text-[#a3113a]">Financeiro por tratamento</p>
+                <div className="mt-3 flex flex-wrap gap-2" aria-label="Tratamento financeiro">
+                  {visibleTreatmentTracks.map((track) => <button key={track} type="button" onClick={() => { cancelEditingPayment(); setFinancialTrack(track); setEditing(false); setDraft(patient); }} className={`rounded-xl px-4 py-3 text-sm font-semibold ${activeFinancialTrack === track ? "bg-[#a3113a] text-white" : "bg-[#f6efec] text-[#716569]"}`}>{track}</button>)}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <Metric label="Valor pago" value={money(activePaidTotal)} />
+                <Metric label="Frascos contratados" value={String(activeBottleBilling?.coveredBottles ?? 0)} />
+                <Metric label="Frascos recebidos" value={String(activeBottleBilling?.deliveredBottles ?? 0)} />
+                <Metric label="Último registro de pagamento" value={activeLastPaymentDate ? formatDate(activeLastPaymentDate) : "Nenhum"} />
+              </div>
+              {activeBottleBilling && <p className="text-xs text-[#817578]">Cobertura total: {activeBottleBilling.coveredBottles} frasco(s) ({activeBottleBilling.contractedBottles} contratado(s) + {activeBottleBilling.additionalPaidBottles} extra(s) pago(s)). Frascos recebidos incluem os entregues, em uso e concluídos.</p>}
               <div className="rounded-2xl border border-[#eee5e0] p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <h3 className="font-bold">Registrar pagamento · {activeFinancialTrack}</h3>
                     <p className="mt-1 text-xs text-[#817578]">Os campos de valor e forma são sugeridos pela configuração de aquisição e continuam editáveis.</p>
                   </div>
-                  {visibleTreatmentTracks.length > 1 && <div className="flex flex-wrap gap-2" aria-label="Tratamento do pagamento">
-                    {visibleTreatmentTracks.map((track) => <button key={track} type="button" onClick={() => { cancelEditingPayment(); setFinancialTrack(track); setEditing(false); setDraft(patient); }} className={activeFinancialTrack === track ? "rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-semibold text-white" : "rounded-lg bg-[#f6efec] px-3 py-2 text-xs font-semibold text-[#716569]"}>{track}</button>)}
-                  </div>}
                 </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <Field label="Método de aquisição"><select value={paymentAcquisitionMethodId} onChange={(event) => { const method = adminMethods.find((item) => item.id === event.target.value); if (method) applyPaymentAcquisitionMethod(method, paymentCondition); else setPaymentAcquisitionMethodId(""); }} className={inputClass}><option value="">Sem método configurado</option>{paymentAcquisitionMethodId && !adminMethods.some((item) => item.id === paymentAcquisitionMethodId) && <option value={paymentAcquisitionMethodId}>{activeDraftPayment?.acquisitionMethod ?? "Configuração anterior"} · anterior</option>}{adminMethods.map((method) => <option key={method.id} value={method.id}>{method.name} · {method.category}</option>)}</select></Field>
