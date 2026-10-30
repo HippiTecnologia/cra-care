@@ -992,7 +992,7 @@ export default function MedicalPatientPage() {
                 <button type="button" onClick={printPrescription} disabled={preview.formulas.length === 0} className="rounded-xl border border-[#a3113a] bg-white px-4 py-4 text-sm font-semibold text-[#a3113a] disabled:cursor-not-allowed disabled:opacity-45">
                   Imprimir receita
                 </button>
-                <button type="button" onClick={() => void createAndSignPrescription()} disabled={totalPercentage !== 100 || selectedPrescription?.signatureStatus === "signed" || signatureStarting} className="rounded-xl bg-[#263f73] px-4 py-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">
+                <button type="button" onClick={() => void createAndSignPrescription()} disabled={(!selectedPrescription && totalPercentage !== 100) || selectedPrescription?.signatureStatus === "signed" || signatureStarting} className="rounded-xl bg-[#263f73] px-4 py-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45">
                   {signatureStarting ? "Aguardando assinatura…" : selectedPrescription?.signatureStatus === "signed" ? "Assinada digitalmente" : "Assinar digitalmente"}
                 </button>
               </div>
@@ -1054,7 +1054,7 @@ export default function MedicalPatientPage() {
                   <p className="font-bold text-[#433438]">{preview.doctor}</p>
                   <p className="mt-1 text-[#776b6e]">CRM PR {preview.doctorCrm}</p>
                   <div className={`mt-4 rounded-xl px-3 py-2 text-xs font-semibold ${preview.signatureStatus === "signed" ? "bg-[#edf8f3] text-[#187157]" : preview.signatureStatus === "demo" ? "bg-[#fff4e8] text-[#9a5d1b]" : preview.signatureStatus === "ready" ? "bg-[#eef3ff] text-[#3c5da0]" : "bg-[#fff5e8] text-[#956426]"}`}>
-                    {preview.signatureStatus === "signed" ? "✓ Assinada digitalmente" : preview.signatureStatus === "demo" ? "Demonstração de assinatura — sem validade jurídica" : preview.signatureStatus === "ready" ? `Pronta para assinatura por ${preview.signaturePreparedBy ?? preview.doctor}` : "Aguardando preparação para assinatura digital"}
+                    {preview.signatureStatus === "signed" ? "✓ Assinada digitalmente" : preview.signatureStatus === "demo" ? "Demonstração de assinatura — sem validade jurídica" : preview.signatureStatus === "ready" ? `Pronta para assinatura por ${preview.signaturePreparedBy ?? preview.doctor}` : "Aguardando assinatura digital"}
                   </div>
                   {preview.signatureStatus === "ready" && <p className="mt-3 text-xs text-[#817578]">Preparada em {formatDate(preview.signaturePreparedAt)}. A assinatura real dependerá do certificado do médico.</p>}
                 </div>
