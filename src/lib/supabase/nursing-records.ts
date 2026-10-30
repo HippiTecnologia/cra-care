@@ -18,6 +18,13 @@ function doctorCanAccessNursing(name: string, crm: string | null) {
     || normalized.includes("patricia") && normalized.includes("martins");
 }
 
+function nursingReportContentSignature(content: Record<string, unknown>) {
+  const stableContent = { ...content };
+  delete stableContent.registeredAt;
+  delete stableContent.duplicateOf;
+  return JSON.stringify(stableContent);
+}
+
 export async function loadNursingWorkspace() {
   const supabase = getSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -69,7 +76,23 @@ export async function updateNursingPatient(profile: NursingProfile, patientId: s
 }
 
 export async function createNursingReport(profile: NursingProfile, input: { patientId: string; doctorId?: string; reportType: "prick_test" | "patch_test"; content: Record<string, unknown> }) {
-  const { error } = await (getSupabaseClient().from("nursing_reports") as any).insert({ clinic_id: profile.clinicId, patient_id: input.patientId, nurse_profile_id: profile.id, doctor_profile_id: input.doctorId, report_type: input.reportType, content: input.content });
+  const reportTable = getSupabaseClient().from("nursing_reports") as any;
+  if (input.reportType === "patch_test" && input.content.status === "em_andamento") {
+    const { data: existingReports, error: lookupError } = await reportTable
+      .select("content")
+      .eq("clinic_id", profile.clinicId)
+      .eq("patient_id", input.patientId)
+      .eq("report_type", "patch_test")
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (lookupError) throw lookupError;
+    const signature = nursingReportContentSignature(input.content);
+    const alreadySaved = (existingReports ?? []).some((row: { content?: Record<string, unknown> | null }) => row.content?.status === "em_andamento"
+      && !(typeof row.content.duplicateOf === "string" && row.content.duplicateOf)
+      && nursingReportContentSignature(row.content) === signature);
+    if (alreadySaved) throw new Error("PATCH_REPORT_DUPLICATE");
+  }
+  const { error } = await reportTable.insert({ clinic_id: profile.clinicId, patient_id: input.patientId, nurse_profile_id: profile.id, doctor_profile_id: input.doctorId, report_type: input.reportType, content: input.content });
   if (error) throw error;
 }
 

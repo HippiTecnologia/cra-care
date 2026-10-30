@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { ClipboardEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ClipboardEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   createNursingPatient,
   createNursingReport,
@@ -27,6 +27,17 @@ type Modal = "patient" | "patient-edit" | "report" | null;
 type PrickResult = { mm: number; reaction: "-" | "+" | "++" | "+++" | "++++"; pseudopod: boolean; dermatographism: boolean };
 type PatchResult = { firstReading: "" | "-" | "?" | "+" | "++" | "+++"; secondReading: "" | "-" | "?" | "+" | "++" | "+++" };
 type SavedReport = { id: string; patient_id: string; nurse_profile_id: string; doctor_profile_id?: string | null; report_type: ReportType; content: Record<string, unknown>; created_at: string };
+
+function isDuplicateReport(report: SavedReport) {
+  return typeof report.content.duplicateOf === "string" && Boolean(report.content.duplicateOf);
+}
+
+function reportContentSignature(content: Record<string, unknown>) {
+  const stableContent = { ...content };
+  delete stableContent.registeredAt;
+  delete stableContent.duplicateOf;
+  return JSON.stringify(stableContent);
+}
 
 function normalizePersonName(value: string) {
   return value.toLocaleLowerCase("pt-BR").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -121,6 +132,9 @@ export default function NursingPage() {
   const [prickResults, setPrickResults] = useState<Record<string, PrickResult>>({});
   const [patchResults, setPatchResults] = useState<Record<string, PatchResult>>({});
   const [editingReportId, setEditingReportId] = useState<string | null>(null);
+  const [editingDuplicateReportIds, setEditingDuplicateReportIds] = useState<string[]>([]);
+  const [savingReport, setSavingReport] = useState(false);
+  const reportSaveInFlight = useRef(false);
   const [notes, setNotes] = useState("");
   const [reportDate, setReportDate] = useState(() => new Date().toISOString().slice(0, 10));
 
@@ -144,14 +158,28 @@ export default function NursingPage() {
       const matchesSearch = !query || patientName.toLocaleLowerCase("pt-BR").includes(query) || patientCpf.replace(/\D/g, "").includes(query.replace(/\D/g, ""));
       const matchesPatient = !reportPatientFilter || patientName === reportPatientFilter;
       const reportDate = (typeof report.content.examDate === "string" ? report.content.examDate : report.created_at).slice(0, 10);
-      return report.content.status !== "em_andamento" && matchesSearch && matchesPatient && (!reportDateFilter || reportDate === reportDateFilter);
+      return report.content.status !== "em_andamento" && !isDuplicateReport(report) && matchesSearch && matchesPatient && (!reportDateFilter || reportDate === reportDateFilter);
     });
   }, [rawReports, reportDateFilter, reportPatientFilter, reportSearchQuery]);
   const allReports = filteredReports;
   const inProgressReports = useMemo(
-    () => rawReports.filter((report) => report.report_type === "patch_test"
-      && report.content.status === "em_andamento"
-      && (profile?.role !== "medico" || report.nurse_profile_id === profile.id)),
+    () => {
+      const pendingReports = rawReports.filter((report) => report.report_type === "patch_test"
+        && report.content.status === "em_andamento"
+        && !isDuplicateReport(report)
+        && (profile?.role !== "medico" || report.nurse_profile_id === profile.id));
+      const groups = new Map<string, SavedReport[]>();
+      for (const report of pendingReports) {
+        const key = `${report.patient_id}:${String(report.content.examDate ?? report.created_at).slice(0, 10)}:${reportContentSignature(report.content)}`;
+        groups.set(key, [...(groups.get(key) ?? []), report]);
+      }
+      return [...groups.values()]
+        .map((group) => {
+          const [report, ...duplicates] = [...group].sort((first, second) => first.created_at.localeCompare(second.created_at));
+          return { report, duplicates };
+        })
+        .sort((first, second) => second.report.created_at.localeCompare(first.report.created_at));
+    },
     [profile, rawReports],
   );
   const allowedReportDoctors = useMemo(
@@ -203,7 +231,7 @@ export default function NursingPage() {
   async function openPatient(patient: NursingPatient, destination: Section = "patients") {
     setSelected(patient);
     const patientReports = await loadNursingReportsForPatient(patient.id) as SavedReport[];
-    setReports(patientReports.filter((report) => report.content.status !== "em_andamento"));
+    setReports(patientReports.filter((report) => report.content.status !== "em_andamento" && !isDuplicateReport(report)));
     setSection(destination);
   }
 
@@ -275,7 +303,7 @@ export default function NursingPage() {
     const includeBattery = Boolean(nextDoctor && isAlessandraPrickDoctor(nextDoctor.fullName, nextDoctor.crm));
     setReportType(nextType); setReportDoctorId(nextDoctorId); setIncludeImmunotechBattery(includeBattery);
     setPrickResults(createInitialPrickResults(getPrickGroupsForDoctor(nextDoctor?.fullName ?? "", nextDoctor?.crm, includeBattery)));
-    setPatchResults(createInitialPatchResults()); setEditingReportId(null); setNotes(""); setReportDate(new Date().toISOString().slice(0, 10)); setModal("report");
+    setPatchResults(createInitialPatchResults()); setEditingReportId(null); setEditingDuplicateReportIds([]); setNotes(""); setReportDate(new Date().toISOString().slice(0, 10)); setModal("report");
   }
 
   function changeReportType(nextType: ReportType) {
@@ -300,10 +328,13 @@ export default function NursingPage() {
 
   async function saveReport() {
     if (!profile || !selected) return;
+    if (reportSaveInFlight.current) return;
     if (!selectedReportDoctor) {
       setMessage("Selecione um médico autorizado para gerar o laudo.");
       return;
     }
+    reportSaveInFlight.current = true;
+    setSavingReport(true);
     const isPatchInProgress = reportType === "patch_test" && !editingReportId;
     const content = {
       status: isPatchInProgress ? "em_andamento" : "concluido",
@@ -323,17 +354,50 @@ export default function NursingPage() {
       examDate: reportDate,
       registeredAt: new Date().toISOString(),
     };
-    if (editingReportId) {
-      await updateNursingReport(profile, editingReportId, content, selectedReportDoctor.id);
-    } else {
-      await createNursingReport(profile, { patientId: selected.id, doctorId: selectedReportDoctor.id, reportType, content });
+    try {
+      if (!editingReportId && isPatchInProgress) {
+        const alreadySaved = rawReports.some((report) => report.patient_id === selected.id
+          && report.report_type === "patch_test"
+          && report.content.status === "em_andamento"
+          && !isDuplicateReport(report)
+          && reportContentSignature(report.content) === reportContentSignature(content));
+        if (alreadySaved) {
+          setMessage("Este laudo Patch já está salvo. Continue a 2ª leitura em Exames em andamento para evitar uma cópia.");
+          return;
+        }
+      }
+      if (editingReportId && editingDuplicateReportIds.length) {
+        const duplicates = rawReports.filter((report) => editingDuplicateReportIds.includes(report.id));
+        await Promise.all(duplicates.map((report) => updateNursingReport(
+          profile,
+          report.id,
+          { ...report.content, duplicateOf: editingReportId },
+          report.doctor_profile_id ?? undefined,
+        )));
+      }
+      if (editingReportId) {
+        await updateNursingReport(profile, editingReportId, content, selectedReportDoctor.id);
+      } else {
+        await createNursingReport(profile, { patientId: selected.id, doctorId: selectedReportDoctor.id, reportType, content });
+      }
+      const updatedReports = await loadNursingReportsForPatient(selected.id) as SavedReport[];
+      setReports(updatedReports.filter((report) => report.content.status !== "em_andamento" && !isDuplicateReport(report)));
+      await reload();
+      setModal(null);
+      setSection("patients");
+      const duplicateMessage = editingDuplicateReportIds.length
+        ? ` ${editingDuplicateReportIds.length} cópia(s) idêntica(s) foram preservadas e associadas ao laudo, sem apagar dados.`
+        : "";
+      setMessage(isPatchInProgress ? "1ª leitura salva. O laudo permanece em andamento para a 2ª leitura." : `Laudo salvo no histórico da paciente.${duplicateMessage}`);
+      setEditingDuplicateReportIds([]);
+    } catch (cause) {
+      setMessage(cause instanceof Error && cause.message === "PATCH_REPORT_DUPLICATE"
+        ? "Este laudo Patch já está salvo. Continue a 2ª leitura em Exames em andamento para evitar uma cópia."
+        : "Não foi possível salvar o laudo. Os registros existentes foram preservados; tente novamente.");
+    } finally {
+      reportSaveInFlight.current = false;
+      setSavingReport(false);
     }
-    const updatedReports = await loadNursingReportsForPatient(selected.id) as SavedReport[];
-    setReports(updatedReports.filter((report) => report.content.status !== "em_andamento"));
-    await reload();
-    setModal(null);
-    setSection("patients");
-    setMessage(isPatchInProgress ? "1ª leitura salva. O laudo permanece em andamento para a 2ª leitura." : "Laudo salvo no histórico da paciente.");
   }
 
   async function editReport(report: SavedReport) {
@@ -359,6 +423,15 @@ export default function NursingPage() {
     setNotes(String(report.content.notes ?? ""));
     setReportDate(String(report.content.examDate ?? report.created_at).slice(0, 10));
     setEditingReportId(report.id);
+    setEditingDuplicateReportIds(report.report_type === "patch_test" && report.content.status === "em_andamento"
+      ? rawReports.filter((candidate) => candidate.id !== report.id
+        && candidate.patient_id === report.patient_id
+        && candidate.report_type === "patch_test"
+        && candidate.content.status === "em_andamento"
+        && !isDuplicateReport(candidate)
+        && String(candidate.content.examDate ?? candidate.created_at).slice(0, 10) === String(report.content.examDate ?? report.created_at).slice(0, 10)
+        && reportContentSignature(candidate.content) === reportContentSignature(report.content)).map((candidate) => candidate.id)
+      : []);
     setModal("report");
   }
 
@@ -513,7 +586,7 @@ export default function NursingPage() {
       {message && <p className="mt-5 rounded-xl bg-[#edf8f3] p-4 text-sm">{message}</p>}
       {section === "patients" && <p className="mt-4 text-sm text-[#817578]">Você pode localizar a paciente pelo nome ou pelo CPF.</p>}
       {section === "reports" && <div className="mt-6 rounded-2xl bg-white p-4"><input value={reportSearchQuery} onChange={(event) => setReportSearchQuery(event.target.value)} placeholder="Pesquisar laudo pelo nome ou CPF do paciente" className="w-full rounded-xl border p-3" /></div>}
-      {section === "in-progress" && <section className="mt-6 rounded-2xl border border-[#f1d5dc] bg-[#fff8fa] p-5"><p className="text-sm text-[#817578]">Laudos Patch aguardando a 2ª leitura.</p>{inProgressReports.length === 0 ? <p className="mt-5 rounded-xl bg-white p-4 text-sm text-[#817578]">Nenhum laudo em andamento no momento.</p> : <div className="mt-4 space-y-3">{inProgressReports.map((report) => <article key={report.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4"><div><strong>{String(report.content.patientName ?? "Paciente")}</strong><p className="mt-1 text-sm text-[#817578]">1ª leitura: {new Date(String(report.content.examDate ?? report.created_at)).toLocaleDateString("pt-BR")}</p></div>{canEditReports ? <button type="button" onClick={() => void editReport(report)} className="rounded-xl bg-[#a3113a] px-4 py-2 text-sm font-bold text-white">Continuar 2ª leitura</button> : <span className="text-xs font-semibold text-[#817578]">Aguardando a Enfermagem</span>}</article>)}</div>}</section>}
+      {section === "in-progress" && <section className="mt-6 rounded-2xl border border-[#f1d5dc] bg-[#fff8fa] p-5"><p className="text-sm text-[#817578]">Laudos Patch aguardando a 2ª leitura.</p>{inProgressReports.length === 0 ? <p className="mt-5 rounded-xl bg-white p-4 text-sm text-[#817578]">Nenhum laudo em andamento no momento.</p> : <div className="mt-4 space-y-3">{inProgressReports.map(({ report, duplicates }) => <article key={report.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4"><div><strong>{String(report.content.patientName ?? "Paciente")}</strong><p className="mt-1 text-sm text-[#817578]">1ª leitura: {new Date(String(report.content.examDate ?? report.created_at)).toLocaleDateString("pt-BR")}</p>{duplicates.length > 0 && <p className="mt-2 rounded-lg bg-[#fff4e5] px-3 py-2 text-xs font-medium text-[#805313]">{duplicates.length} cópia(s) idêntica(s) detectada(s). Nenhum registro será apagado; ao concluir a leitura, as cópias ficarão associadas a este laudo.</p>}</div>{canEditReports ? <button type="button" onClick={() => void editReport(report)} className="rounded-xl bg-[#a3113a] px-4 py-2 text-sm font-bold text-white">Continuar 2ª leitura</button> : <span className="text-xs font-semibold text-[#817578]">Aguardando a Enfermagem</span>}</article>)}</div>}</section>}
       {section === "patients" ? <>
         <div className="mt-7 flex gap-2 rounded-2xl bg-white p-4"><input value={searchCpf} onChange={(e) => setSearchCpf(e.target.value)} placeholder="Pesquisar paciente pelo nome ou CPF" className="flex-1 rounded-xl border p-3"/><button onClick={() => void searchPatient()} className="rounded-xl border px-5 font-bold text-[#a3113a]">Buscar</button></div>
         {selected && <article className="mt-5 rounded-3xl border border-[#eadfd9] bg-white p-6">
@@ -533,7 +606,7 @@ export default function NursingPage() {
   {canEditPatients && modal === "patient-edit" && <div className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4"><form onSubmit={savePatientEdit} className="w-full max-w-lg rounded-3xl bg-white p-6"><div className="flex justify-between"><h2 className="text-xl font-bold">Editar dados da paciente</h2><button type="button" onClick={() => setModal(null)}>Fechar</button></div><div className="mt-5 grid gap-3"><input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo" className="rounded-xl border p-3"/><input required inputMode="numeric" maxLength={14} value={cpf} onChange={(e) => setCpf(formatCpf(e.target.value))} placeholder="CPF" className="rounded-xl border p-3"/><label className="text-sm font-medium text-[#544449]">Data de nascimento<input required type="date" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} onPaste={pasteBirthDate} className="mt-1 w-full rounded-xl border p-3"/><span className="mt-1 block text-xs text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span></label><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Telefone" className="rounded-xl border p-3"/></div><button className="mt-5 w-full rounded-xl bg-[#a3113a] p-3 font-bold text-white">Salvar alterações</button></form></div>}
   {canEditReports && modal === "report" && <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4"><section className="mx-auto my-5 max-w-6xl rounded-3xl bg-white p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-2xl font-bold">Preencher laudo</h2><p className="mt-1 text-sm text-[#817578]">Paciente: {selected?.name ?? "Selecione uma paciente antes de criar o laudo"}</p></div><button onClick={() => setModal(null)} className="rounded-xl border px-4 py-2 font-semibold">Fechar laudo</button></div><div className="mt-5 grid gap-3 md:grid-cols-[1fr_210px]"><label className="text-sm font-semibold text-[#544449]">Paciente<input readOnly value={selected?.name ?? ""} className="mt-1 w-full rounded-xl border border-[#ddd5d0] bg-[#faf8f6] p-3 font-normal"/></label><label className="text-sm font-semibold text-[#544449]">Data<input type="date" value={reportDate} onChange={(event) => setReportDate(event.target.value)} className="mt-1 w-full rounded-xl border border-[#ddd5d0] p-3 font-normal"/></label></div><div className="mt-4 grid gap-3 md:grid-cols-2"><label className="text-sm font-semibold text-[#544449]">Tipo de laudo<select value={reportType} onChange={(event) => changeReportType(event.target.value as ReportType)} className="mt-1 w-full rounded-xl border p-3 font-normal"><option value="prick_test">Laudo Prick</option><option value="patch_test">Laudo Patch</option></select></label><label className="text-sm font-semibold text-[#544449]">Médico responsável<select value={selectedReportDoctor?.id ?? ""} onChange={(event) => changeReportDoctor(event.target.value)} disabled={profile?.role === "medico" || allowedReportDoctors.length <= 1} className="mt-1 w-full rounded-xl border p-3 font-normal disabled:bg-[#f7f4f2]"><option value="">Selecione o médico</option>{allowedReportDoctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.fullName}{doctor.crm ? ` · CRM ${doctor.crm}` : ""}</option>)}</select><span className="mt-1 block text-xs font-normal text-[#817578]">{profile?.role === "medico" ? "O laudo será registrado no seu perfil médico." : reportType === "prick_test" ? "Prick: Dr. Sérgio, Dra. Alessandra ou Dra. Patrícia Martinski." : "Patch: Dra. Alessandra ou Dra. Patrícia Martinski."}</span>{reportType === "prick_test" && includeImmunotechBattery && <span className="mt-1 block text-xs font-semibold text-[#187157]">Bateria Immunotech incluída para a Dra. Alessandra.</span>}</label></div>
     {reportType === "prick_test" ? <div className="mt-6 overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="sr-only"><tr><th>Item</th><th>Medida</th><th>Observações</th><th>Resultado</th></tr></thead><tbody>{activePrickGroups.map((group, groupIndex) => <MemoGroup key={`${group.battery}-${group.category}`} group={group} allGroups={activePrickGroups} showBattery={groupIndex === 0 || activePrickGroups[groupIndex - 1].battery !== group.battery} values={prickResults} update={updatePrick}/>)}</tbody></table></div> : <div className="mt-6 space-y-5">{patchBatteries.map((battery) => <section key={battery.name} className="overflow-hidden rounded-xl border"><h3 className="bg-[#d4d8dd] px-4 py-2 text-sm font-bold">{battery.name}</h3>{battery.items.map((item) => { const result = patchResults[item] ?? { firstReading: "", secondReading: "" }; return <div key={item} className="grid gap-3 border-t p-3 text-sm sm:grid-cols-[1fr_180px_180px]"><span>{item}</span><label>1ª leitura · 48h<select value={result.firstReading} onChange={(event) => setPatchResults((current) => ({ ...current, [item]: { ...result, firstReading: event.target.value as PatchResult["firstReading"] } }))} className="mt-1 w-full rounded-lg border p-2"><option value="">Não informado</option><option>-</option><option>?</option><option>+</option><option>++</option><option>+++</option></select></label><label>2ª leitura · 48h<select value={result.secondReading} onChange={(event) => setPatchResults((current) => ({ ...current, [item]: { ...result, secondReading: event.target.value as PatchResult["secondReading"] } }))} className="mt-1 w-full rounded-lg border p-2"><option value="">Não informado</option><option>-</option><option>?</option><option>+</option><option>++</option><option>+++</option></select></label></div>; })}</section>)}</div>}
-    <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Observações clínicas" className="mt-6 min-h-24 w-full rounded-xl border p-3"/><button disabled={!selected} onClick={() => void saveReport()} className="mt-5 w-full rounded-xl bg-[#a3113a] p-3 font-bold text-white disabled:opacity-50">Salvar laudo</button></section></div>}
+    <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Observações clínicas" className="mt-6 min-h-24 w-full rounded-xl border p-3"/><button disabled={!selected || savingReport} onClick={() => void saveReport()} className="mt-5 w-full rounded-xl bg-[#a3113a] p-3 font-bold text-white disabled:cursor-wait disabled:opacity-50">{savingReport ? "Salvando laudo…" : "Salvar laudo"}</button></section></div>}
   </main>;
 }
 

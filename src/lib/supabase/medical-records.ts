@@ -704,7 +704,12 @@ export async function loadMedicalPatientWorkspace(patientId: string) {
     patient: mapMedicalPatient(patientData as unknown as MedicalPatientRow, doctor.fullName),
     prescriptions: ((prescriptionResult.data ?? []) as unknown as PrescriptionRow[]).map((row) => mapPrescription(row, doctor)),
     clinicalRecords: ((clinicalRecordResult.data ?? []) as unknown as ClinicalRecordRow[]).map(mapClinicalRecord),
-    nursingReports: ((nursingReportResult.data ?? []) as Record<string, unknown>[]).map((row): NursingReport => ({ id: String(row.id), patientId: String(row.patient_id), reportType: row.report_type === "patch_test" ? "patch_test" : "prick_test", content: recordValue(row.content), createdAt: String(row.created_at) })),
+    nursingReports: ((nursingReportResult.data ?? []) as Record<string, unknown>[])
+      .filter((row) => {
+        const content = recordValue(row.content);
+        return !(typeof content.duplicateOf === "string" && content.duplicateOf);
+      })
+      .map((row): NursingReport => ({ id: String(row.id), patientId: String(row.patient_id), reportType: row.report_type === "patch_test" ? "patch_test" : "prick_test", content: recordValue(row.content), createdAt: String(row.created_at) })),
     portal,
   };
 }
