@@ -846,13 +846,22 @@ export async function loadSecretaryPortals(
 
 export async function loadSecretaryNotifications(patientIds: string[]) {
   if (!patientIds.length) return {} as Record<string, PatientManualNotification[]>;
-  const { data, error } = await getSupabaseClient()
-    .from("patient_portal_settings")
-    .select("patient_id, manual_notifications")
-    .in("patient_id", patientIds);
-  if (error) throw error;
+  const supabase = getSupabaseClient();
+  const rowsByPatientId = new Map<string, Record<string, unknown>>();
+  const results = await Promise.all(splitIntoChunks(patientIds, 100).map((patientIdChunk) =>
+    supabase
+      .from("patient_portal_settings")
+      .select("patient_id, manual_notifications")
+      .in("patient_id", patientIdChunk),
+  ));
+  for (const { data, error } of results) {
+    if (error) throw error;
+    for (const row of (data ?? []) as unknown as Record<string, unknown>[]) {
+      rowsByPatientId.set(text(row.patient_id), row);
+    }
+  }
   return Object.fromEntries(patientIds.map((patientId) => {
-    const row = (data ?? []).find((item) => text(item.patient_id) === patientId) as Record<string, unknown> | undefined;
+    const row = rowsByPatientId.get(patientId);
     const values = Array.isArray(row?.manual_notifications)
       ? row.manual_notifications.map(manualNotificationFromValue).filter((item): item is PatientManualNotification => Boolean(item))
       : [];
