@@ -17,6 +17,28 @@ import type { DemoPatientRecord } from "../../medico/patient-store";
 import { getSupabaseClient } from "../../../lib/supabase/client";
 
 const icons = ["📣", "💊", "📅", "⚠️", "✅", "💗"];
+type ScheduledNotification = {
+  id: string;
+  title: string;
+  message: string;
+  icon: string;
+  scheduledFor: string;
+  status: "pending" | "sending" | "sent" | "failed" | "cancelled";
+  recipientCount: number;
+  sentPatientCount: number;
+  pushSentCount: number;
+  lastError: string | null;
+  createdAt: string;
+  createdByName: string;
+};
+
+function scheduledDateLabel(value: string) {
+  return new Date(value).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", dateStyle: "short", timeStyle: "short" });
+}
+
+function localDateTimeInputValue(value: Date) {
+  return new Date(value.getTime() - value.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
 
 export default function SecretariaNotificationsPage() {
   const [context, setContext] = useState<SecretaryContext | null>(null);
@@ -36,18 +58,37 @@ export default function SecretariaNotificationsPage() {
   const [birthdayMonth, setBirthdayMonth] = useState("todos");
   const [orderDate, setOrderDate] = useState("");
   const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
+  const [deliveryMode, setDeliveryMode] = useState<"now" | "scheduled">("now");
+  const [scheduledFor, setScheduledFor] = useState("");
+  const [scheduledNotifications, setScheduledNotifications] = useState<ScheduledNotification[]>([]);
+  const [schedulingReady, setSchedulingReady] = useState(false);
+  const [scheduledMutation, setScheduledMutation] = useState("");
 
   async function load() {
     try {
       const workspace = await loadSecretaryPatients();
-      const [loadedNotifications, loadedTeamNotifications] = await Promise.all([
+      const { data: { session } } = await getSupabaseClient().auth.getSession();
+      const [loadedNotifications, loadedTeamNotifications, scheduledResponse] = await Promise.all([
         loadSecretaryNotifications(workspace.patients.map((patient) => patient.id)),
         loadTeamNotifications(workspace.context),
+        fetch("/api/notifications/scheduled", {
+          headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
+          cache: "no-store",
+        }).catch(() => null),
       ]);
       setContext(workspace.context);
       setPatients(workspace.patients);
       setNotifications(loadedNotifications);
       setTeamNotifications(loadedTeamNotifications);
+      if (scheduledResponse?.ok) {
+        const result = await scheduledResponse.json() as { notifications?: ScheduledNotification[]; schedulingReady?: boolean };
+        setScheduledNotifications(Array.isArray(result.notifications) ? result.notifications : []);
+        setSchedulingReady(result.schedulingReady === true);
+      } else {
+        // A missing migration should not prevent immediate notifications from working.
+        setScheduledNotifications([]);
+        setSchedulingReady(false);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível carregar as notificações.");
     }
@@ -71,8 +112,31 @@ export default function SecretariaNotificationsPage() {
     }
     const targetIds = recipient === "todos" ? filteredPatients.map((patient) => patient.id) : recipient === "selecionados" ? selectedRecipients : [recipient];
     if (!targetIds.length) { setError("Selecione ao menos um paciente para receber a notificação."); return; }
+    if (deliveryMode === "scheduled" && !schedulingReady) {
+      setError("O agendamento ainda não está ativo no sistema. A Secretaria continua podendo enviar avisos na hora.");
+      return;
+    }
+    if (deliveryMode === "scheduled" && !scheduledFor) { setError("Escolha a data e o horário do envio."); return; }
     setSaving(true);
     try {
+      if (deliveryMode === "scheduled") {
+        const { data: { session } } = await getSupabaseClient().auth.getSession();
+        const response = await fetch("/api/notifications/scheduled", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` },
+          body: JSON.stringify({ patientIds: targetIds, icon, title, message: text, scheduledFor: new Date(scheduledFor).toISOString() }),
+        });
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        if (!response.ok) throw new Error(result.error || "Não foi possível agendar a notificação.");
+        setTitle("");
+        setText("");
+        setRecipient("todos");
+        setScheduledFor("");
+        setMessage(`Notificação agendada para ${scheduledDateLabel(new Date(scheduledFor).toISOString())}. O envio será processado em até 1 minuto do horário escolhido.`);
+        setError("");
+        await load();
+        return;
+      }
       await createSecretaryNotification(context, targetIds, { icon, title, text });
       const { data: { session } } = await getSupabaseClient().auth.getSession();
       const pushResponse = await fetch("/api/push/send", {
@@ -91,6 +155,27 @@ export default function SecretariaNotificationsPage() {
       setError(cause instanceof Error ? cause.message : "Não foi possível enviar a notificação.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function updateScheduledNotification(item: ScheduledNotification, action: "cancel" | "retry") {
+    setScheduledMutation(item.id);
+    try {
+      const { data: { session } } = await getSupabaseClient().auth.getSession();
+      const response = await fetch("/api/notifications/scheduled" + (action === "cancel" ? `?id=${encodeURIComponent(item.id)}` : ""), {
+        method: action === "cancel" ? "DELETE" : "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` },
+        ...(action === "retry" ? { body: JSON.stringify({ id: item.id }) } : {}),
+      });
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Não foi possível atualizar o agendamento.");
+      setMessage(action === "cancel" ? "Agendamento cancelado." : "Nova tentativa programada para os próximos minutos.");
+      setError("");
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível atualizar o agendamento.");
+    } finally {
+      setScheduledMutation("");
     }
   }
 
@@ -151,6 +236,15 @@ export default function SecretariaNotificationsPage() {
             <form onSubmit={submit} className="rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
               <h2 className="text-xl font-bold text-[#433438]">Novo aviso</h2>
               <p className="mt-1 text-sm text-[#817578]">O aviso ficará salvo no histórico do portal.</p>
+              <div className="mt-5 grid gap-2 sm:grid-cols-2" role="group" aria-label="Quando enviar a notificação">
+                <button type="button" aria-pressed={deliveryMode === "now"} onClick={() => setDeliveryMode("now")} className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold ${deliveryMode === "now" ? "border-[#a3113a] bg-[#fff4f6] text-[#a3113a]" : "border-[#e9dfda] text-[#66595d]"}`}>Enviar agora</button>
+                <button type="button" aria-pressed={deliveryMode === "scheduled"} onClick={() => setDeliveryMode("scheduled")} className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold ${deliveryMode === "scheduled" ? "border-[#a3113a] bg-[#fff4f6] text-[#a3113a]" : "border-[#e9dfda] text-[#66595d]"}`}>Agendar envio</button>
+              </div>
+              {deliveryMode === "scheduled" && <label className="mt-4 block text-sm font-semibold text-[#544449]">Data e horário do envio
+                <input required type="datetime-local" value={scheduledFor} min={localDateTimeInputValue(new Date(Date.now() + 2 * 60_000))} onChange={(event) => setScheduledFor(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 font-normal outline-none focus:border-[#b91142]" />
+                <span className="mt-1 block text-xs font-normal text-[#817578]">O Supabase verifica os envios a cada minuto. Horários seguem o fuso de São Paulo.</span>
+                {!schedulingReady && <span className="mt-1 block text-xs font-semibold text-[#a36a20]">O agendamento ficará disponível depois da ativação no Supabase.</span>}
+              </label>}
               <label className="mt-6 block text-sm font-semibold text-[#544449]">Destinatário
                 <select value={recipient} onChange={(event) => setRecipient(event.target.value)} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] bg-white px-4 font-normal outline-none focus:border-[#b91142]">
                   <option value="todos">Todos do filtro ({filteredPatients.length})</option>
@@ -177,10 +271,19 @@ export default function SecretariaNotificationsPage() {
               <label className="mt-5 block text-sm font-semibold text-[#544449]">Mensagem
                 <textarea required value={text} onChange={(event) => setText(event.target.value)} rows={6} placeholder="Digite a orientação que o paciente verá no portal." className="mt-2 w-full rounded-xl border border-[#e9dfda] px-4 py-3 font-normal outline-none focus:border-[#b91142]" />
               </label>
-              <button type="submit" disabled={saving || !patients.length} className="mt-6 w-full rounded-xl bg-[#a3113a] px-5 py-3.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{saving ? "Enviando..." : "Enviar notificação"}</button>
+              <button type="submit" disabled={saving || !patients.length || (deliveryMode === "scheduled" && !schedulingReady)} className="mt-6 w-full rounded-xl bg-[#a3113a] px-5 py-3.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{saving ? (deliveryMode === "scheduled" ? "Agendando..." : "Enviando...") : deliveryMode === "scheduled" ? "Agendar notificação" : "Enviar notificação"}</button>
             </form>
 
             <section className="rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-8">
+              <h2 className="text-xl font-bold text-[#433438]">Notificações agendadas</h2>
+              <p className="mt-1 text-sm text-[#817578]">Acompanhe, cancele ou tente novamente os avisos programados.</p>
+              <div className="mt-5 space-y-3">
+                {scheduledNotifications.length === 0 ? <p className="rounded-2xl border border-dashed border-[#e6dbd6] p-6 text-center text-sm text-[#817578]">Nenhum envio agendado.</p> : scheduledNotifications.map((item) => <article key={item.id} className="rounded-2xl border border-[#eee6e2] bg-[#fdfbf9] p-4">
+                  <div className="flex items-start gap-3"><span className="text-xl">{item.icon}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-bold text-[#433438]">{item.title}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${item.status === "sent" ? "bg-[#eaf7f1] text-[#187157]" : item.status === "failed" ? "bg-[#fff0f1] text-[#a3113a]" : "bg-[#fff5e7] text-[#91601b]"}`}>{item.status === "pending" ? "Agendada" : item.status === "sending" ? "Processando" : item.status === "sent" ? "Enviada" : item.status === "failed" ? "Falhou" : "Cancelada"}</span></div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#66595d]">{item.message}</p><p className="mt-2 text-xs text-[#817578]">{scheduledDateLabel(item.scheduledFor)} · {item.recipientCount} paciente(s) · criada por {item.createdByName}</p>{item.status === "sent" && <p className="mt-1 text-xs text-[#187157]">Aviso no portal para {item.sentPatientCount} paciente(s){item.pushSentCount ? ` · push enviado a ${item.pushSentCount} dispositivo(s)` : ""}.</p>}{item.status === "failed" && item.lastError && <p className="mt-1 text-xs text-[#a3113a]">{item.lastError}</p>}</div></div>
+                  {(item.status === "pending" || item.status === "failed") && <div className="mt-3 flex justify-end gap-2">{item.status === "failed" && <button type="button" disabled={scheduledMutation === item.id} onClick={() => void updateScheduledNotification(item, "retry")} className="rounded-lg border border-[#d9b4bf] px-3 py-2 text-xs font-semibold text-[#a3113a] disabled:opacity-50">Tentar novamente</button>}{item.status === "pending" && <button type="button" disabled={scheduledMutation === item.id} onClick={() => void updateScheduledNotification(item, "cancel")} className="rounded-lg border border-[#ead0d5] px-3 py-2 text-xs font-semibold text-[#a3113a] disabled:opacity-50">Cancelar</button>}</div>}
+                </article>)}
+              </div>
+              <div className="my-7 border-t border-[#eee5e0]" />
               <h2 className="text-xl font-bold text-[#433438]">Avisos recentes</h2>
               <p className="mt-1 text-sm text-[#817578]">Mensagens já publicadas pela Secretaria.</p>
               <div className="mt-6 space-y-3">
