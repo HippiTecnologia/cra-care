@@ -8,6 +8,7 @@ import type {
 import type { PatientPortalState } from "./patient-portal-store";
 
 export type BottleHistoryEntry = {
+  bottleId?: string;
   number: number;
   prescriptionId?: string;
   treatment?: string;
@@ -76,6 +77,7 @@ export function buildBottleHistory(
       : undefined;
 
     return {
+      bottleId: bottle?.id,
       number,
       prescriptionId: bottle?.prescriptionId,
       treatment: bottle?.treatment ?? prescription?.treatment ?? stockItem?.treatment,

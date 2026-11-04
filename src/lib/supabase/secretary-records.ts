@@ -1129,7 +1129,7 @@ export async function saveSecretaryStockItem(context: SecretaryContext, item: De
   return { ...item, id, bottleNumber };
 }
 
-export async function deleteSecretaryManualBottle(
+export async function deleteSecretaryBottleHistoryEntry(
   context: SecretaryContext,
   patientId: string,
   bottleId: string,
@@ -1144,15 +1144,17 @@ export async function deleteSecretaryManualBottle(
   if (error) throw error;
   if (!data) throw new Error("Frasco não encontrado.");
   const metadata = objectValue(data.metadata);
-  if (text(metadata.batchCode) !== "ADICIONADO MANUALMENTE") {
-    throw new Error("Somente frascos registrados manualmente podem ser excluídos por esta ação.");
+  const isManualBottle = text(metadata.batchCode) === "ADICIONADO MANUALMENTE";
+  const isHistoricalImport = Boolean(metadata.historicalImportSource);
+  if (!isManualBottle && !isHistoricalImport) {
+    throw new Error("Somente frascos manuais ou históricos importados podem ser removidos por esta ação.");
   }
   const deletedAt = new Date().toISOString();
   const { error: updateError } = await supabase.from("bottles").update({
     metadata: { ...metadata, manuallyDeleted: true, manuallyDeletedAt: deletedAt, manuallyDeletedBy: context.fullName },
   }).eq("id", bottleId).eq("patient_id", patientId).eq("clinic_id", context.clinicId);
   if (updateError) throw updateError;
-  void audit(context, "delete_manual", "bottle", bottleId, { patientId, bottleNumber: number(data.bottle_number), deletedAt });
+  void audit(context, isManualBottle ? "delete_manual" : "delete_historical_import", "bottle", bottleId, { patientId, bottleNumber: number(data.bottle_number), deletedAt });
   return { bottleNumber: number(data.bottle_number) };
 }
 
