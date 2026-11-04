@@ -61,5 +61,5 @@ export function isAlessandraPrickDoctor(name: string, crm?: string) {
 
 export function getPrickGroupsForDoctor(name: string, crm?: string, includeImmunotechBattery = false): PrickBatteryGroup[] {
   if (!includeImmunotechBattery || !isAlessandraPrickDoctor(name, crm)) return standardPrickGroups;
-  return [...standardPrickGroups, alessandraImmunotechPrickGroup];
+  return [alessandraImmunotechPrickGroup];
 }
