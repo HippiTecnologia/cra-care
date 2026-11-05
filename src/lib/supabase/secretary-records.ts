@@ -1439,5 +1439,5 @@ export async function permanentlyDeleteSecretaryPatient(patientId: string, confi
     p_patient_id: patientId,
     p_confirmation: confirmation,
   });
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 }
