@@ -252,6 +252,107 @@ export default function LaboratorioPage() {
     reportWindow.document.close(); reportWindow.focus();
   }
 
+  function printSelectedBatchReport(batch: DemoBatch) {
+    const rows = batch.items.map((item) => {
+      const prescription = prescriptions.find((record) => record.id === item.prescriptionId);
+      const composition = item.formulas
+        .map((formula) => `${formula.name} ${formula.percentage}%`)
+        .join(" · ") || "Composição não informada";
+
+      return `<tr>
+        <td>${escapeReportHtml(item.patientName || "Pronta entrega")}</td>
+        <td>${escapeReportHtml(item.patientCpf || "—")}</td>
+        <td>${escapeReportHtml(item.treatment)}</td>
+        <td>${escapeReportHtml(item.phase || "—")}</td>
+        <td>${escapeReportHtml(composition)}</td>
+        <td>${escapeReportHtml(item.bottles)}</td>
+        <td>${escapeReportHtml(item.doctor || "—")}${item.doctorCrm ? ` · CRM ${escapeReportHtml(item.doctorCrm)}` : ""}</td>
+        <td>${escapeReportHtml(prescription ? formatDate(prescription.createdAt) : "—")}</td>
+      </tr>`;
+    }).join("");
+    const totalBottles = batch.items.reduce((total, item) => total + item.bottles, 0);
+    const reportWindow = window.open("", "_blank", "width=1100,height=800");
+
+    if (!reportWindow) {
+      setError("Permita a abertura de janelas no navegador para baixar o relatório do lote.");
+      return;
+    }
+
+    const printedAt = new Date().toLocaleString("pt-BR");
+    reportWindow.document.write(`<!doctype html>
+      <html lang="pt-BR">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Relatório do lote ${escapeReportHtml(batch.name ?? batch.code)}</title>
+          <style>
+            @page { size: A4 landscape; margin: 12mm; }
+            * { box-sizing: border-box; }
+            body { margin: 0; color: #34292d; font: 11px/1.45 Arial, sans-serif; }
+            .actions { margin-bottom: 14px; }
+            .actions button { padding: 9px 14px; border: 0; border-radius: 7px; color: #fff; background: #a3113a; font-weight: 700; cursor: pointer; }
+            header { display: flex; align-items: center; gap: 12px; padding-bottom: 10px; border-bottom: 3px solid #a3113a; }
+            header img { width: 54px; height: 54px; object-fit: contain; }
+            header strong { color: #8e1535; font-size: 18px; letter-spacing: .7px; }
+            header p { margin: 2px 0 0; color: #66595d; font-size: 9px; font-weight: 700; letter-spacing: .5px; }
+            h1 { margin: 16px 0 8px; color: #a3113a; font-size: 19px; }
+            .metadata { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px 16px; margin: 10px 0 14px; }
+            .metadata p { margin: 0; }
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            th, td { padding: 6px; border: 1px solid #d9d3d0; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+            th { background: #eee9e7; font-size: 9px; }
+            .totals { margin-top: 9px; font-weight: 700; }
+            .signoff { display: flex; justify-content: space-between; gap: 30px; margin-top: 32px; break-inside: avoid; }
+            .signoff div { width: 42%; padding-top: 7px; border-top: 1px solid #6f6568; text-align: center; }
+            .notes { margin-top: 12px; padding: 9px; border: 1px solid #e6dfdc; border-radius: 6px; white-space: pre-wrap; }
+            @media print { .actions { display: none; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+          </style>
+        </head>
+        <body>
+          <div class="actions"><button onclick="window.print()">Imprimir / salvar como PDF</button></div>
+          <header>
+            <img src="${window.location.origin}/logo-cra.png" alt="CRA Care">
+            <div><strong>CRA CARE</strong><p>CENTRO DE RINITE E ALERGIA</p></div>
+          </header>
+          <h1>Relatório de produção · Lote ${escapeReportHtml(batch.name ?? batch.code)}</h1>
+          <div class="metadata">
+            <p><strong>Código:</strong> ${escapeReportHtml(batch.code)}</p>
+            <p><strong>Indicação:</strong> ${escapeReportHtml(indicationLabel(batch.indication))}</p>
+            <p><strong>Status:</strong> ${escapeReportHtml(batchStatusLabel(batch.status))}</p>
+            <p><strong>Laboratório:</strong> ${escapeReportHtml(batch.laboratory || "CRA")}</p>
+            <p><strong>Criado em:</strong> ${escapeReportHtml(formatDate(batch.createdAt))}</p>
+            <p><strong>Enviado em:</strong> ${escapeReportHtml(formatDate(batch.sentAt))}</p>
+            <p><strong>Produção iniciada:</strong> ${escapeReportHtml(formatDate(batch.productionStartedAt))}</p>
+            <p><strong>Produção concluída:</strong> ${escapeReportHtml(formatDate(batch.productionFinishedAt))}</p>
+          </div>
+          <table>
+            <thead><tr><th>Paciente / origem</th><th>CPF</th><th>Tratamento</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Médico solicitante</th><th>Receita emitida</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="8">Este lote não possui itens.</td></tr>'}</tbody>
+          </table>
+          <p class="totals">Total: ${batch.items.length} item(ns) · ${totalBottles} frasco(s)</p>
+          ${batch.notes ? `<div class="notes"><strong>Orientações da secretaria:</strong><br>${escapeReportHtml(batch.notes)}</div>` : ""}
+          ${batch.productionNotes ? `<div class="notes"><strong>Observações do laboratório:</strong><br>${escapeReportHtml(batch.productionNotes)}</div>` : ""}
+          <div class="signoff">
+            <div>${escapeReportHtml(batch.productionResponsible || "Equipe de manipulação CRA")}<br>Responsável pela manipulação</div>
+            <div>${escapeReportHtml(technicalDoctor.name)} · CRM PR ${escapeReportHtml(technicalDoctor.crm)}<br>Responsável técnico</div>
+          </div>
+          <p style="margin-top:18px;color:#817578;font-size:9px">Relatório gerado em ${escapeReportHtml(printedAt)}${batch.laboratoryOkAt ? ` · OK do laboratório registrado por ${escapeReportHtml(batch.laboratoryOkBy || "Equipe do laboratório")} em ${escapeReportHtml(formatDate(batch.laboratoryOkAt))}` : ""}</p>
+        </body>
+      </html>`);
+    reportWindow.document.close();
+    reportWindow.focus();
+    const logo = reportWindow.document.querySelector("img");
+    const openPrintDialog = () => reportWindow.requestAnimationFrame(() => reportWindow.print());
+    if (logo && !logo.complete) {
+      logo.addEventListener("load", openPrintDialog, { once: true });
+      logo.addEventListener("error", openPrintDialog, { once: true });
+    } else {
+      openPrintDialog();
+    }
+    setError("");
+    setMessage(`Relatório do lote ${batch.name ?? batch.code} aberto. Escolha “Salvar como PDF” na impressão.`);
+  }
+
   const summaryCards = [
     {
       label: "Lotes recebidos",
@@ -868,6 +969,13 @@ export default function LaboratorioPage() {
                       <p className="mt-1 text-sm text-[#566c99]">CRM PR {technicalDoctor.crm}</p>
                       <p className="mt-4 text-xs leading-5 text-[#647399]">Todos os documentos deste lote saem com a identificação final do Dr. Sérgio. A assinatura digital real será aplicada quando o certificado estiver configurado.</p>
                       {selectedBatch.laboratoryOkAt ? <p className="mt-3 rounded-xl bg-[#eaf8f3] px-3 py-2 text-xs font-semibold text-[#187157]">✓ OK registrado por {selectedBatch.laboratoryOkBy} em {formatDate(selectedBatch.laboratoryOkAt)}</p> : <p className="mt-3 rounded-xl bg-[#fff8eb] px-3 py-2 text-xs font-semibold text-[#88642c]">Aguardando OK do laboratório.</p>}
+                      <button
+                        type="button"
+                        onClick={() => printSelectedBatchReport(selectedBatch)}
+                        className="mt-5 w-full rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#870e31]"
+                      >
+                        ↓ Baixar relatório do lote / Imprimir
+                      </button>
                     </section>
                   </div>
 
