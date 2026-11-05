@@ -21,6 +21,7 @@ import { bottlesBeyondCoverage, getBottleBillingState, historicalBottleCountForP
 import type { HistoricalBottleCounts } from "../bottle-billing";
 import {
   confirmSecretaryBatch,
+  deleteSecretaryDraftBatch,
   loadSecretaryLotWorkspace,
   saveSecretaryBatch,
   SecretaryContext,
@@ -300,10 +301,24 @@ export default function SecretariaLotesPage() {
     [editingBatch],
   );
 
-  const availablePrescriptions = useMemo(() => prescriptions.filter((prescription) => {
-    const patient = patientById.get(prescription.patientId);
-    return Boolean(patient) && ["com-pedido", "ativo", "em-conversa"].includes(patient?.status ?? "") && !includedPrescriptionIds.has(prescription.id) && indicationForTreatment(prescription.treatment) === batchIndication;
-  }), [batchIndication, includedPrescriptionIds, patientById, prescriptions]);
+  const latestPrescriptionIds = useMemo(() => {
+    const eligiblePatientStatuses = new Set<string>(["com-pedido", "ativo", "em-conversa"]);
+    const latestByPatient = new Map<string, DemoPrescription>();
+    for (const prescription of prescriptions) {
+      const patient = patientById.get(prescription.patientId);
+      if (!patient || !eligiblePatientStatuses.has(patient.status ?? "")) continue;
+      if (indicationForTreatment(prescription.treatment) !== batchIndication) continue;
+      const current = latestByPatient.get(prescription.patientId);
+      const candidateTime = Date.parse(prescription.createdAt) || 0;
+      const currentTime = current ? Date.parse(current.createdAt) || 0 : -1;
+      if (!current || candidateTime >= currentTime) latestByPatient.set(prescription.patientId, prescription);
+    }
+    return new Set([...latestByPatient.values()].map((prescription) => prescription.id));
+  }, [batchIndication, patientById, prescriptions]);
+
+  const availablePrescriptions = useMemo(() => prescriptions.filter((prescription) =>
+    latestPrescriptionIds.has(prescription.id) && !includedPrescriptionIds.has(prescription.id),
+  ), [includedPrescriptionIds, latestPrescriptionIds, prescriptions]);
 
   const filteredPrescriptions = useMemo(() => {
     const normalized = normalizeSearch(search);
@@ -551,6 +566,29 @@ export default function SecretariaLotesPage() {
     });
     setMessage(`${item.patientName} removido do lote ${batch.name ?? batch.code}.`);
     setError("");
+  }
+
+  async function deleteDraftBatch(batch: DemoBatch) {
+    if (!context || batch.status !== "rascunho") return;
+    const label = batch.name ?? batch.code;
+    if (!window.confirm(`Excluir o lote ${label}? Os itens deste rascunho também serão removidos.`)) return;
+    if (!window.confirm(`Confirma a exclusão definitiva do lote ${label}? Esta ação não pode ser desfeita.`)) return;
+
+    try {
+      await deleteSecretaryDraftBatch(context, batch.id);
+      setBatches((current) => current.filter((item) => item.id !== batch.id));
+      if (expandedBatchId === batch.id) setExpandedBatchId(null);
+      if (editingBatchId === batch.id) {
+        setEditingBatchId(null);
+        setSelectedIds([]);
+        setPaymentConfirmations({});
+        setBatchName(defaultBatchName());
+      }
+      setMessage(`Lote ${label} excluído.`);
+      setError("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Não foi possível excluir o lote.");
+    }
   }
 
   function editDraftBatch(batch: DemoBatch) {
@@ -1258,6 +1296,9 @@ export default function SecretariaLotesPage() {
                           </button>
                           {batch.status === "rascunho" && (
                             <>
+                              <button type="button" onClick={() => void deleteDraftBatch(batch)} className="rounded-xl border border-[#f3c8d3] bg-[#fff1f3] px-4 py-3 text-xs font-semibold text-[#a3113a]">
+                                Excluir lote
+                              </button>
                               {batch.orderType !== "pronta-entrega" && (
                                 <button type="button" onClick={() => editDraftBatch(batch)} className="rounded-xl border border-[#e6dbd6] px-4 py-3 text-xs font-semibold text-[#a3113a]">
                                   Adicionar pacientes

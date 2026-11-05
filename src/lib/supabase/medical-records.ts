@@ -334,16 +334,43 @@ function normalizedSearch(value: string) {
 export async function searchClinicPatients(doctor: MedicalDoctorProfile, query: string) {
   const term = normalizedSearch(query);
   if (term.length < 3) return [] as DemoPatientRecord[];
-  // A migration 019 libera somente esta consulta de clínica para médicos autenticados.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (getSupabaseClient().from("patients") as any)
-    .select("id, clinic_id, auth_user_id, username, full_name, cpf, birth_date, phone, email, status, doctor_profile_id, address, treatment, financial, created_at, profiles!patients_doctor_profile_id_fkey(full_name)")
+  const supabase = getSupabaseClient();
+  const select = "id, clinic_id, auth_user_id, username, full_name, cpf, birth_date, phone, email, status, doctor_profile_id, address, treatment, financial, created_at, profiles!patients_doctor_profile_id_fkey(full_name)";
+  const baseQuery = () => (supabase.from("patients") as any)
+    .select(select)
     .eq("clinic_id", doctor.clinicId)
     .is("archived_at", null)
     .order("created_at", { ascending: false });
-  if (error) throw error;
-  return ((data ?? []) as (MedicalPatientRow & { profiles?: { full_name?: string } | null })[])
-    .filter((patient) => normalizedSearch(`${patient.full_name} ${patient.cpf}`).includes(term))
+
+  // Filtra no Postgres antes de receber os resultados. Baixar toda a clínica
+  // fazia o limite padrão da API (1.000 linhas) esconder pacientes antigos.
+  const nameTokens = query
+    .trim()
+    .split(/\s+/)
+    .map((token) => token.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").replace(/[%_\\]/g, ""))
+    .filter((token) => /\p{L}/u.test(token) && normalizedSearch(token).length >= 2);
+  const cpfTerm = /\p{L}/u.test(query) ? "" : query.replace(/\D/g, "");
+
+  let nameQuery = baseQuery();
+  for (const token of nameTokens) {
+    nameQuery = nameQuery.ilike("full_name", `%${token}%`);
+  }
+
+  const [nameResult, cpfResult] = await Promise.all([
+    nameTokens.length ? nameQuery : Promise.resolve({ data: [], error: null }),
+    cpfTerm.length >= 3
+      ? baseQuery().ilike("cpf", `%${cpfTerm}%`)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (nameResult.error) throw nameResult.error;
+  if (cpfResult.error) throw cpfResult.error;
+
+  const patients = new Map<string, MedicalPatientRow & { profiles?: { full_name?: string } | null }>();
+  for (const row of [...(nameResult.data ?? []), ...(cpfResult.data ?? [])]) {
+    patients.set(row.id, row);
+  }
+
+  return [...patients.values()]
     .map((patient) => mapMedicalPatient(patient, patient.profiles?.full_name ?? "Equipe médica CRA Care"));
 }
 
