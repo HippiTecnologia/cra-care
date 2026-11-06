@@ -140,6 +140,7 @@ export async function saveLaboratoryBatch(context: LaboratoryContext, batch: Dem
     code: batch.code,
     name: batch.name,
     notes: batch.notes,
+    archivedAt: batch.archivedAt,
     sentAt: batch.sentAt,
     productionStartedAt: batch.productionStartedAt,
     productionFinishedAt: batch.productionFinishedAt,

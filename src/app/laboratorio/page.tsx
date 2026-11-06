@@ -142,7 +142,7 @@ export default function LaboratorioPage() {
         const workspace = await loadLaboratoryWorkspace();
         if (!active) return;
         setContext(workspace.context);
-        setBatches(workspace.batches.filter((batch) => batch.status !== "rascunho" && isRiniteBatch(batch)));
+        setBatches(workspace.batches.filter((batch) => !batch.archivedAt && batch.status !== "rascunho" && isRiniteBatch(batch)));
         setPrescriptions(workspace.prescriptions);
         setLoaded(true);
       } catch (cause) {
