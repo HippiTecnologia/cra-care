@@ -990,6 +990,7 @@ export default function LaboratorioPage() {
                         </div>
                       </nav>
                     )}
+                  </div>
                   </div>}
 
                   <div className="mt-7 border-t border-[#eee5e0] pt-6">
