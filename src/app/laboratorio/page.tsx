@@ -26,6 +26,8 @@ const technicalDoctor = {
   crm: "20762",
 };
 
+const BATCH_ITEMS_PER_PAGE = 10;
+
 const statusAppearance: Record<
   Exclude<DemoBatchStatus, "rascunho">,
   { label: string; badge: string; description: string }
@@ -111,6 +113,7 @@ export default function LaboratorioPage() {
   const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
   const [context, setContext] = useState<LaboratoryContext | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
+  const [selectedItemsPage, setSelectedItemsPage] = useState(1);
   const [filter, setFilter] = useState<LaboratoryFilter>("todos");
   const [search, setSearch] = useState("");
   const [responsible, setResponsible] = useState("Equipe de manipulação CRA");
@@ -200,6 +203,20 @@ export default function LaboratorioPage() {
     filteredBatches.find((batch) => batch.id === selectedBatchId) ??
     filteredBatches[0];
 
+  const selectedItemsPageCount = Math.max(
+    1,
+    Math.ceil((selectedBatch?.items.length ?? 0) / BATCH_ITEMS_PER_PAGE),
+  );
+  const currentSelectedItemsPage = Math.min(selectedItemsPage, selectedItemsPageCount);
+  const selectedBatchItemsPage = selectedBatch?.items.slice(
+    (currentSelectedItemsPage - 1) * BATCH_ITEMS_PER_PAGE,
+    currentSelectedItemsPage * BATCH_ITEMS_PER_PAGE,
+  ) ?? [];
+
+  useEffect(() => {
+    setSelectedItemsPage(1);
+  }, [selectedBatch?.id]);
+
   const selectedBottleCount = selectedBatch?.items.reduce(
     (total, item) => total + item.bottles,
     0,
@@ -245,10 +262,14 @@ export default function LaboratorioPage() {
   }, [reportBatches, reportDoctor, reportPatient, reportTreatment]);
 
   function printBatchReport() {
-    const rows = reportRows.map(({ batch, item }) => `<tr><td>${escapeReportHtml(batch.name ?? batch.code)}</td><td>${escapeReportHtml(indicationLabel(batch.indication))}</td><td>${escapeReportHtml(batchStatusLabel(batch.status))}</td><td>${escapeReportHtml(item.patientName || "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf || "—")}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase || "—")}</td><td>${escapeReportHtml(item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ") || "—")}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(item.doctor || "—")}</td><td>${escapeReportHtml(formatDate(batch.createdAt))}</td></tr>`).join("");
+    const rows = reportRows.map(({ batch, item }) => {
+      const prescription = prescriptions.find((record) => record.id === item.prescriptionId);
+      const bottleVolumeMl = item.bottleVolumeMl ?? prescription?.bottleVolumeMl;
+      return `<tr><td>${escapeReportHtml(batch.name ?? batch.code)}</td><td>${escapeReportHtml(indicationLabel(batch.indication))}</td><td>${escapeReportHtml(batchStatusLabel(batch.status))}</td><td>${escapeReportHtml(item.patientName || "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf || "—")}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase || "—")}</td><td>${escapeReportHtml(item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ") || "—")}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(bottleVolumeMl ? `${bottleVolumeMl} mL` : "Não informado")}</td><td>${escapeReportHtml(item.doctor || "—")}</td><td>${escapeReportHtml(formatDate(batch.createdAt))}</td></tr>`;
+    }).join("");
     const reportWindow = window.open("", "_blank");
     if (!reportWindow) { setError("Permita a abertura de janelas para gerar o relatório."); return; }
-    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de lotes · Laboratório</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:10px;line-height:1.35}.actions{margin-bottom:8px}.actions button{border:0;border-radius:7px;background:#a3113a;color:#fff;padding:8px 12px;font-weight:bold}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:8px;margin-bottom:10px}.brand img{width:42px;height:42px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:16px;letter-spacing:.8px}.brand span{display:block;font-size:8px;font-weight:bold;letter-spacing:.6px;color:#66595d}h1{color:#a3113a;margin:0;font-size:17px}p{margin:5px 0}table{border-collapse:collapse;width:100%;margin-top:12px;table-layout:fixed}th,td{border:1px solid #ddd;padding:5px;text-align:left;vertical-align:top;word-break:break-word}th{background:#f1e6e8;font-size:8px}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header class="brand"><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><strong>CRA CARE</strong><span>CENTRO DE RINITE E ALERGIA</span></div></header><h1>Relatório de lotes</h1><p>Laboratório · Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${reportBatches.length} lote(s) · ${reportRows.length} registro(s)</p><table><thead><tr><th>Lote</th><th>Indicação</th><th>Status</th><th>Paciente/origem</th><th>CPF</th><th>Tratamento</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Médico</th><th>Criação</th></tr></thead><tbody>${rows || '<tr><td colspan="11">Nenhum registro encontrado com os filtros selecionados.</td></tr>'}</tbody></table></body></html>`);
+    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de lotes · Laboratório</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:10px;line-height:1.35}.actions{margin-bottom:8px}.actions button{border:0;border-radius:7px;background:#a3113a;color:#fff;padding:8px 12px;font-weight:bold}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:8px;margin-bottom:10px}.brand img{width:42px;height:42px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:16px;letter-spacing:.8px}.brand span{display:block;font-size:8px;font-weight:bold;letter-spacing:.6px;color:#66595d}h1{color:#a3113a;margin:0;font-size:17px}p{margin:5px 0}table{border-collapse:collapse;width:100%;margin-top:12px;table-layout:fixed}th,td{border:1px solid #ddd;padding:5px;text-align:left;vertical-align:top;word-break:break-word}th{background:#f1e6e8;font-size:8px}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header class="brand"><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><strong>CRA CARE</strong><span>CENTRO DE RINITE E ALERGIA</span></div></header><h1>Relatório de lotes</h1><p>Laboratório · Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${reportBatches.length} lote(s) · ${reportRows.length} registro(s)</p><table><thead><tr><th>Lote</th><th>Indicação</th><th>Status</th><th>Paciente/origem</th><th>CPF</th><th>Tratamento</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Volume por frasco</th><th>Médico</th><th>Criação</th></tr></thead><tbody>${rows || '<tr><td colspan="12">Nenhum registro encontrado com os filtros selecionados.</td></tr>'}</tbody></table></body></html>`);
     reportWindow.document.close(); reportWindow.focus();
   }
 
@@ -258,6 +279,7 @@ export default function LaboratorioPage() {
       const composition = item.formulas
         .map((formula) => `${formula.name} ${formula.percentage}%`)
         .join(" · ") || "Composição não informada";
+      const bottleVolumeMl = item.bottleVolumeMl ?? prescription?.bottleVolumeMl;
 
       return `<tr>
         <td>${escapeReportHtml(item.patientName || "Pronta entrega")}</td>
@@ -266,6 +288,7 @@ export default function LaboratorioPage() {
         <td>${escapeReportHtml(item.phase || "—")}</td>
         <td>${escapeReportHtml(composition)}</td>
         <td>${escapeReportHtml(item.bottles)}</td>
+        <td>${escapeReportHtml(bottleVolumeMl ? `${bottleVolumeMl} mL` : "Não informado")}</td>
         <td>${escapeReportHtml(item.doctor || "—")}${item.doctorCrm ? ` · CRM ${escapeReportHtml(item.doctorCrm)}` : ""}</td>
         <td>${escapeReportHtml(prescription ? formatDate(prescription.createdAt) : "—")}</td>
       </tr>`;
@@ -326,8 +349,8 @@ export default function LaboratorioPage() {
             <p><strong>Produção concluída:</strong> ${escapeReportHtml(formatDate(batch.productionFinishedAt))}</p>
           </div>
           <table>
-            <thead><tr><th>Paciente / origem</th><th>CPF</th><th>Tratamento</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Médico solicitante</th><th>Receita emitida</th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="8">Este lote não possui itens.</td></tr>'}</tbody>
+            <thead><tr><th>Paciente / origem</th><th>CPF</th><th>Tratamento</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Volume por frasco</th><th>Médico solicitante</th><th>Receita emitida</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="9">Este lote não possui itens.</td></tr>'}</tbody>
           </table>
           <p class="totals">Total: ${batch.items.length} item(ns) · ${totalBottles} frasco(s)</p>
           ${batch.notes ? `<div class="notes"><strong>Orientações da secretaria:</strong><br>${escapeReportHtml(batch.notes)}</div>` : ""}
@@ -473,6 +496,7 @@ export default function LaboratorioPage() {
       treatment: item.treatment,
       phase: item.phase,
       bottles: item.bottles,
+      bottleVolumeMl: item.bottleVolumeMl,
       posology: "Conforme orientação da equipe técnica.",
       frequency: "Conforme orientação da equipe técnica.",
       drops: 0,
@@ -517,6 +541,8 @@ export default function LaboratorioPage() {
     addText("p", `Tratamento: ${documentData.treatment}`);
     addText("p", `Fase: ${documentData.phase}`);
     addText("p", `Quantidade: ${documentData.bottles} frasco(s)`);
+    const bottleVolumeMl = documentData.bottleVolumeMl ?? item.bottleVolumeMl;
+    addText("p", `Volume por frasco: ${bottleVolumeMl ? `${bottleVolumeMl} mL` : "Não informado"}`);
     addText("p", `Posologia: ${documentData.posology}${documentData.posology.includes(sublingualUseInstructions) ? "" : ` ${sublingualUseInstructions}`}`);
     addText("p", `Frequência: ${documentData.frequency} · ${documentData.drops} gotas`);
     addText("h2", "Fórmula e composição");
@@ -880,8 +906,9 @@ export default function LaboratorioPage() {
                     </div>
 
                     <div className="mt-4 space-y-4">
-                      {selectedBatch.items.map((item) => {
+                      {selectedBatchItemsPage.map((item) => {
                         const prescription = prescriptions.find((record) => record.id === item.prescriptionId);
+                        const bottleVolumeMl = item.bottleVolumeMl ?? prescription?.bottleVolumeMl;
 
                         return (
                           <article
@@ -898,7 +925,7 @@ export default function LaboratorioPage() {
                                 </p>
                               </div>
                               <span className="self-start rounded-full bg-white px-3 py-1 text-xs font-semibold text-[#a3113a]">
-                                {item.bottles} frasco(s)
+                                {item.bottles} frasco(s) · {bottleVolumeMl ? `${bottleVolumeMl} mL` : "volume não informado"}
                               </span>
                             </div>
 
@@ -949,21 +976,35 @@ export default function LaboratorioPage() {
                         );
                       })}
                     </div>
+                    {selectedBatch.items.length > BATCH_ITEMS_PER_PAGE && (
+                      <nav className="mt-5 flex flex-col gap-3 rounded-xl bg-[#fbf5f2] px-4 py-3 text-sm text-[#66595d] sm:flex-row sm:items-center sm:justify-between" aria-label="Paginação das receitas do lote">
+                        <span>
+                          Mostrando {(currentSelectedItemsPage - 1) * BATCH_ITEMS_PER_PAGE + 1}–{Math.min(currentSelectedItemsPage * BATCH_ITEMS_PER_PAGE, selectedBatch.items.length)} de {selectedBatch.items.length} itens · Página {currentSelectedItemsPage} de {selectedItemsPageCount}
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedItemsPage((page) => Math.max(1, page - 1))}
+                            disabled={currentSelectedItemsPage <= 1}
+                            className="rounded-lg border border-[#e6dbd6] bg-white px-3 py-2 text-xs font-semibold text-[#a3113a] disabled:cursor-not-allowed disabled:opacity-45"
+                          >
+                            Anterior
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedItemsPage((page) => Math.min(selectedItemsPageCount, page + 1))}
+                            disabled={currentSelectedItemsPage >= selectedItemsPageCount}
+                            className="rounded-lg border border-[#e6dbd6] bg-white px-3 py-2 text-xs font-semibold text-[#a3113a] disabled:cursor-not-allowed disabled:opacity-45"
+                          >
+                            Próxima
+                          </button>
+                        </div>
+                      </nav>
+                    )}
                   </div>
 
-                  <div className="mt-7 grid gap-5 border-t border-[#eee5e0] pt-6 lg:grid-cols-[1fr_0.85fr]">
-                    <section className="rounded-2xl border border-[#eee5e0] bg-[#fdfbf9] p-5">
-                      <h3 className="text-base font-bold text-[#433438]">Relatório geral da produção</h3>
-                      <p className="mt-1 text-xs text-[#817578]">Paciente / fase / composição / médico / quantidade de frascos.</p>
-                      <div className="mt-4 space-y-2">
-                        {selectedBatch.items.map((item) => (
-                          <div key={item.prescriptionId} className="rounded-xl bg-white px-3 py-3 text-sm text-[#433438]">
-                            {item.patientName} / {item.phase} / {item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ") || "Composição não informada"} / {item.doctor} / {item.bottles} frasco(s)
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                    <section className="rounded-2xl border border-[#d8e4f5] bg-[#f7faff] p-5">
+                  <div className="mt-7 border-t border-[#eee5e0] pt-6">
+                    <section className="max-w-2xl rounded-2xl border border-[#d8e4f5] bg-[#f7faff] p-5">
                       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#3c5da0]">Responsável técnico</p>
                       <h3 className="mt-2 text-base font-bold text-[#263f73]">{technicalDoctor.name}</h3>
                       <p className="mt-1 text-sm text-[#566c99]">CRM PR {technicalDoctor.crm}</p>

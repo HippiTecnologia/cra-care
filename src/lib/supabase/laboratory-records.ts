@@ -28,6 +28,13 @@ function number(value: unknown, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function bottleVolume(value: unknown): DemoBatchItem["bottleVolumeMl"] {
+  const parsed = number(value, Number.NaN);
+  return [4, 6, 8, 9, 10, 12].includes(parsed)
+    ? parsed as DemoBatchItem["bottleVolumeMl"]
+    : undefined;
+}
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -49,6 +56,7 @@ function prescriptionFromRow(row: Record<string, unknown>): DemoPrescription {
     treatment: text(content.treatment, "Imunoterapia para rinite"),
     phase: text(content.phase),
     bottles: number(content.bottles, 1),
+    bottleVolumeMl: bottleVolume(content.bottleVolumeMl),
     drops: number(content.drops, 6),
     frequency: text(content.frequency, "3 vezes por semana"),
     posology: text(content.posology),
@@ -72,6 +80,7 @@ function batchItemFromRow(row: Record<string, unknown>): DemoBatchItem {
     treatment: text(metadata.treatment),
     phase: text(metadata.phase),
     bottles: number(row.bottles, number(metadata.bottles, 1)),
+    bottleVolumeMl: bottleVolume(row.bottle_volume_ml) ?? bottleVolume(metadata.bottleVolumeMl),
     formulas: Array.isArray(metadata.formulas) ? metadata.formulas as PrescriptionFormula[] : [],
   };
 }
