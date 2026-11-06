@@ -966,8 +966,10 @@ function batchItemFromRow(row: Record<string, unknown>): DemoBatchItem {
   const metadata = objectValue(row.metadata);
   return {
     ...(metadata as unknown as DemoBatchItem),
-    prescriptionId: text(metadata.prescriptionId, text(row.prescription_id, `ready-${text(row.id)}`)),
-    patientId: text(metadata.patientId, text(row.patient_id)),
+    // Keep the database relationship ahead of the snapshot in metadata. This
+    // also lets older batch rows resolve the original prescription correctly.
+    prescriptionId: text(row.prescription_id) || text(metadata.prescriptionId) || `ready-${text(row.id)}`,
+    patientId: text(row.patient_id) || text(metadata.patientId),
     patientName: text(metadata.patientName, "Pronta entrega · sem paciente"),
     patientCpf: text(metadata.patientCpf),
     doctor: text(metadata.doctor, "Médico responsável"),

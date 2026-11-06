@@ -72,8 +72,11 @@ function batchItemFromRow(row: Record<string, unknown>): DemoBatchItem {
   const metadata = objectValue(row.metadata);
   return {
     ...(metadata as unknown as DemoBatchItem),
-    prescriptionId: text(metadata.prescriptionId, text(row.prescription_id)),
-    patientId: text(metadata.patientId, text(row.patient_id)),
+    // The relational columns are authoritative. Older metadata can contain a
+    // blank or stale identifier, which would prevent joining the prescription
+    // and make its saved phase disappear in laboratory reports.
+    prescriptionId: text(row.prescription_id) || text(metadata.prescriptionId),
+    patientId: text(row.patient_id) || text(metadata.patientId),
     patientName: text(metadata.patientName, "Pronta entrega · sem paciente"),
     patientCpf: text(metadata.patientCpf),
     doctor: text(metadata.doctor, "Médico responsável"),
