@@ -255,7 +255,7 @@ export default function MedicalPatientPage() {
         setNursingReports(workspace.nursingReports);
         setPortal(workspace.portal);
         if (workspace.patient) {
-          setPhase(workspace.patient.phase ?? treatmentPhases[0]);
+      setPhase(workspace.patient.phase?.trim() || treatmentPhases[0]);
           setBottleVolumeMl(workspace.patient.treatmentBottles?.find((plan) => plan.treatment === "Rinite")?.volumeMl ?? 4);
           // A receita nova abre sempre no padrão da Rinite. A dose do último
           // tratamento do paciente não pode alterar essa configuração inicial.
@@ -373,7 +373,7 @@ export default function MedicalPatientPage() {
     setFormulas(vaccineType === "imunobacteriana" ? immunobacterialFormulas.map((formula) => ({ ...formula })) : []);
     setFormulaPercentage("");
     setSelectedFormula(availableFormulas[0]);
-    setPhase(patient?.phase ?? treatmentPhases[0]);
+    setPhase(patient?.phase?.trim() || treatmentPhases[0]);
     setBottles(vaccineType === "imunobacteriana" ? 4 : 1);
     setBottleVolumeMl(vaccineType === "imunobacteriana" ? 9 : patient?.treatmentBottles?.find((plan) => plan.treatment === "Rinite")?.volumeMl ?? 4);
     setDrops(vaccineType === "imunobacteriana" ? 4 : 2);
@@ -418,7 +418,7 @@ export default function MedicalPatientPage() {
       doctorCrm: doctor.crm,
       createdAt: new Date().toISOString(),
       treatment: vaccineType === "imunobacteriana" ? "Vacina Imunobacteriana" : "Vacina Rinite",
-      phase: vaccineType === "imunobacteriana" ? "" : phase,
+      phase: vaccineType === "imunobacteriana" ? "" : (phase.trim() || treatmentPhases[0]),
       bottles,
       bottleVolumeMl: vaccineType === "imunobacteriana" ? 9 : bottleVolumeMl,
       drops,
@@ -439,7 +439,7 @@ export default function MedicalPatientPage() {
       setPrescriptions((current) => [saved, ...current]);
       setPatient((current) => current ? {
         ...current,
-        phase: vaccineType === "imunobacteriana" ? undefined : phase,
+      phase: vaccineType === "imunobacteriana" ? undefined : (phase.trim() || treatmentPhases[0]),
         drops,
         treatment: prescription.treatment,
       } : current);
@@ -642,7 +642,7 @@ export default function MedicalPatientPage() {
     doctorCrm: doctor?.crm ?? "",
     createdAt: new Date().toISOString(),
     treatment: vaccineType === "imunobacteriana" ? "Vacina Imunobacteriana" : "Vacina Rinite",
-    phase: vaccineType === "imunobacteriana" ? "" : phase,
+      phase: vaccineType === "imunobacteriana" ? "" : (phase.trim() || treatmentPhases[0]),
     bottles,
     bottleVolumeMl: vaccineType === "imunobacteriana" ? 9 : bottleVolumeMl,
     drops,
