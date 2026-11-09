@@ -86,6 +86,45 @@ function escapeReportHtml(value: string | number) {
   return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 
+function treatmentKey(value: string) {
+  const normalized = normalizeSearch(value);
+  if (normalized.includes("bacteriana") || normalized.includes("imuno")) return "bacteriana";
+  if (normalized.includes("rinite")) return "rinite";
+  return normalized;
+}
+
+function formulaKey(formulas: DemoPrescription["formulas"]) {
+  return formulas
+    .map((formula) => `${normalizeSearch(formula.name)}:${Number(formula.percentage) || 0}`)
+    .sort()
+    .join("|");
+}
+
+function batchItemPhase(item: DemoBatchItem, batch: DemoBatch, prescriptions: DemoPrescription[]) {
+  const exact = prescriptions.find((record) => record.id === item.prescriptionId);
+  if (item.phase?.trim()) return item.phase.trim();
+  if (exact?.phase?.trim()) return exact.phase.trim();
+  if (!item.patientId) return "Não informada";
+
+  const batchTime = Date.parse(batch.sentAt || batch.createdAt);
+  if (!Number.isFinite(batchTime)) return "Não informada";
+  const candidates = prescriptions.filter((record) => {
+    const recipeTime = Date.parse(record.createdAt);
+    return record.patientId === item.patientId
+      && treatmentKey(record.treatment) === treatmentKey(item.treatment)
+      && Boolean(record.phase?.trim())
+      && Number.isFinite(recipeTime)
+      && recipeTime <= batchTime;
+  });
+  const itemFormula = formulaKey(item.formulas);
+  const matchingFormula = itemFormula
+    ? candidates.filter((record) => formulaKey(record.formulas) === itemFormula)
+    : [];
+  const eligible = matchingFormula.length ? matchingFormula : candidates;
+  eligible.sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt));
+  return eligible[0]?.phase?.trim() || "Não informada";
+}
+
 function batchStatusLabel(status: DemoBatchStatus) {
   return status === "rascunho" ? "Rascunho" : statusAppearance[status].label;
 }
@@ -267,13 +306,13 @@ export default function LaboratorioPage() {
     const rows = reportRows.map(({ batch, item }) => {
       const prescription = prescriptions.find((record) => record.id === item.prescriptionId);
       const bottleVolumeMl = item.bottleVolumeMl ?? prescription?.bottleVolumeMl;
-      const phase = item.phase?.trim() || prescription?.phase?.trim() || "—";
+      const phase = batchItemPhase(item, batch, prescriptions);
       const doctorName = item.doctor?.trim() || prescription?.doctor?.trim() || "—";
       return `<tr><td>${escapeReportHtml(batch.name ?? batch.code)}</td><td>${escapeReportHtml(item.patientName || "Pronta entrega")}</td><td>${escapeReportHtml(phase)}</td><td>${escapeReportHtml(item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ") || "—")}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(bottleVolumeMl ? `${bottleVolumeMl} mL` : "Não informado")}</td><td>${escapeReportHtml(doctorName)}</td></tr>`;
     }).join("");
     const reportWindow = window.open("", "_blank");
     if (!reportWindow) { setError("Permita a abertura de janelas para gerar o relatório."); return; }
-    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de lotes · Laboratório</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:10px;line-height:1.35}.actions{margin-bottom:8px}.actions button{border:0;border-radius:7px;background:#a3113a;color:#fff;padding:8px 12px;font-weight:bold}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:8px;margin-bottom:10px}.brand img{width:42px;height:42px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:16px;letter-spacing:.8px}.brand span{display:block;font-size:8px;font-weight:bold;letter-spacing:.6px;color:#66595d}h1{color:#a3113a;margin:0;font-size:17px}p{margin:5px 0}table{border-collapse:collapse;width:100%;margin-top:12px;table-layout:fixed}th,td{border:1px solid #ddd;padding:5px;text-align:left;vertical-align:top;word-break:break-word}th{background:#f1e6e8;font-size:8px}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header class="brand"><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><strong>CRA CARE</strong><span>CENTRO DE RINITE E ALERGIA</span></div></header><h1>Relatório de lotes</h1><p>Laboratório · Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${reportBatches.length} lote(s) · ${reportRows.length} registro(s)</p><table><thead><tr><th>Lote</th><th>Nome</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Volume por frasco</th><th>Médico</th></tr></thead><tbody>${rows || '<tr><td colspan="7">Nenhum registro encontrado com os filtros selecionados.</td></tr>'}</tbody></table></body></html>`);
+    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de lotes · Laboratório</title><style>@page{size:A4 landscape;margin:8mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:10px;line-height:1.35}.actions{margin-bottom:8px}.actions button{border:0;border-radius:7px;background:#a3113a;color:#fff;padding:8px 12px;font-weight:bold}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:6px;margin-bottom:8px}.brand img{width:38px;height:38px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:15px;letter-spacing:.8px}.brand span{display:block;font-size:8px;font-weight:bold;letter-spacing:.6px;color:#66595d}h1{color:#a3113a;margin:0;font-size:16px}p{margin:4px 0}table{border-collapse:collapse;width:100%;margin-top:9px;table-layout:fixed}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}th,td{border:1px solid #ddd;padding:4px 5px;text-align:left;vertical-align:top;overflow-wrap:anywhere}th{background:#f1e6e8;font-size:8px}td:nth-child(1){width:9%}td:nth-child(2){width:16%}td:nth-child(3){width:15%}td:nth-child(4){width:30%}td:nth-child(5){width:7%;text-align:center}td:nth-child(6){width:11%}td:nth-child(7){width:12%}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header class="brand"><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><strong>CRA CARE</strong><span>CENTRO DE RINITE E ALERGIA</span></div></header><h1>Relatório de lotes</h1><p>Laboratório · Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${reportBatches.length} lote(s) · ${reportRows.length} registro(s)</p><table><colgroup><col style="width:9%"><col style="width:16%"><col style="width:15%"><col style="width:30%"><col style="width:7%"><col style="width:11%"><col style="width:12%"></colgroup><thead><tr><th>Lote</th><th>Nome</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Volume por frasco</th><th>Médico</th></tr></thead><tbody>${rows || '<tr><td colspan="7">Nenhum registro encontrado com os filtros selecionados.</td></tr>'}</tbody></table></body></html>`);
     reportWindow.document.close(); reportWindow.focus();
   }
 
@@ -284,7 +323,7 @@ export default function LaboratorioPage() {
         .map((formula) => `${formula.name} ${formula.percentage}%`)
         .join(" · ") || "Composição não informada";
       const bottleVolumeMl = item.bottleVolumeMl ?? prescription?.bottleVolumeMl;
-      const phase = item.phase?.trim() || prescription?.phase?.trim() || "—";
+      const phase = batchItemPhase(item, batch, prescriptions);
       const doctorName = item.doctor?.trim() || prescription?.doctor?.trim() || "—";
 
       return `<tr>
@@ -312,25 +351,30 @@ export default function LaboratorioPage() {
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <title>Relatório do lote ${escapeReportHtml(batch.name ?? batch.code)}</title>
           <style>
-            @page { size: A4 landscape; margin: 12mm; }
+            @page { size: A4 landscape; margin: 8mm; }
             * { box-sizing: border-box; }
-            body { margin: 0; color: #34292d; font: 11px/1.45 Arial, sans-serif; }
-            .actions { margin-bottom: 14px; }
+            body { margin: 0; color: #34292d; font: 11px/1.4 Arial, sans-serif; }
+            .actions { margin-bottom: 8px; }
             .actions button { padding: 9px 14px; border: 0; border-radius: 7px; color: #fff; background: #a3113a; font-weight: 700; cursor: pointer; }
-            header { display: flex; align-items: center; gap: 12px; padding-bottom: 10px; border-bottom: 3px solid #a3113a; }
-            header img { width: 54px; height: 54px; object-fit: contain; }
-            header strong { color: #8e1535; font-size: 18px; letter-spacing: .7px; }
-            header p { margin: 2px 0 0; color: #66595d; font-size: 9px; font-weight: 700; letter-spacing: .5px; }
-            h1 { margin: 16px 0 8px; color: #a3113a; font-size: 19px; }
-            .metadata { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px 16px; margin: 10px 0 14px; }
+            header { display: flex; align-items: center; gap: 10px; padding-bottom: 6px; border-bottom: 2px solid #a3113a; }
+            header img { width: 40px; height: 40px; object-fit: contain; }
+            header strong { color: #8e1535; font-size: 16px; letter-spacing: .7px; }
+            header p { margin: 2px 0 0; color: #66595d; font-size: 8px; font-weight: 700; letter-spacing: .5px; }
+            h1 { margin: 9px 0 6px; color: #a3113a; font-size: 16px; }
+            .metadata { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 10px; margin: 7px 0 9px; font-size: 9px; }
             .metadata p { margin: 0; }
             table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-            th, td { padding: 6px; border: 1px solid #d9d3d0; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
-            th { background: #eee9e7; font-size: 9px; }
-            .totals { margin-top: 9px; font-weight: 700; }
-            .signoff { display: flex; justify-content: space-between; gap: 30px; margin-top: 32px; break-inside: avoid; }
+            thead { display: table-header-group; }
+            tr { break-inside: avoid; page-break-inside: avoid; }
+            th, td { padding: 5px 6px; border: 1px solid #d9d3d0; text-align: left; vertical-align: top; overflow-wrap: anywhere; white-space: normal; }
+            th { background: #eee9e7; font-size: 10px; }
+            td:nth-child(2) { font-weight: 700; }
+            td:nth-child(4), td:nth-child(5) { text-align: center; }
+            .totals { margin-top: 6px; font-weight: 700; }
+            .signoff { display: flex; justify-content: space-between; gap: 30px; margin-top: 20px; break-inside: avoid; }
             .signoff div { width: 42%; padding-top: 7px; border-top: 1px solid #6f6568; text-align: center; }
-            .notes { margin-top: 12px; padding: 9px; border: 1px solid #e6dfdc; border-radius: 6px; white-space: pre-wrap; }
+            .notes { margin-top: 8px; padding: 7px; border: 1px solid #e6dfdc; border-radius: 6px; white-space: pre-wrap; }
+            @media screen { body { max-width: 1200px; margin: 24px auto; } }
             @media print { .actions { display: none; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
           </style>
         </head>
@@ -352,6 +396,7 @@ export default function LaboratorioPage() {
             <p><strong>Produção concluída:</strong> ${escapeReportHtml(formatDate(batch.productionFinishedAt))}</p>
           </div>
           <table>
+            <colgroup><col style="width:18%"><col style="width:19%"><col style="width:28%"><col style="width:7%"><col style="width:10%"><col style="width:18%"></colgroup>
             <thead><tr><th>Nome</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Volume por frasco</th><th>Médico</th></tr></thead>
             <tbody>${rows || '<tr><td colspan="6">Este lote não possui itens.</td></tr>'}</tbody>
           </table>
@@ -497,7 +542,7 @@ export default function LaboratorioPage() {
       doctor: item.doctor || technicalDoctor.name,
       doctorCrm: item.doctorCrm || technicalDoctor.crm,
       treatment: item.treatment,
-      phase: item.phase,
+      phase: batchItemPhase(item, batch, prescriptions),
       bottles: item.bottles,
       bottleVolumeMl: item.bottleVolumeMl,
       posology: "Conforme orientação da equipe técnica.",
@@ -542,7 +587,7 @@ export default function LaboratorioPage() {
     addText("h2", "Prescrição médica");
     addText("p", `Médico solicitante: ${documentData.doctor} · CRM ${documentData.doctorCrm}`);
     addText("p", `Tratamento: ${documentData.treatment}`);
-    addText("p", `Fase: ${documentData.phase}`);
+    addText("p", `Fase: ${batchItemPhase(item, batch, prescriptions)}`);
     addText("p", `Quantidade: ${documentData.bottles} frasco(s)`);
     const bottleVolumeMl = documentData.bottleVolumeMl ?? item.bottleVolumeMl;
     addText("p", `Volume por frasco: ${bottleVolumeMl ? `${bottleVolumeMl} mL` : "Não informado"}`);
@@ -924,7 +969,7 @@ export default function LaboratorioPage() {
                       {selectedBatchItemsPage.map((item) => {
                         const prescription = prescriptions.find((record) => record.id === item.prescriptionId);
                         const bottleVolumeMl = item.bottleVolumeMl ?? prescription?.bottleVolumeMl;
-                        const phase = item.phase?.trim() || prescription?.phase?.trim() || "Não informada";
+                        const phase = batchItemPhase(item, selectedBatch, prescriptions);
                         const doctorName = item.doctor?.trim() || prescription?.doctor?.trim() || "Não informado";
                         const composition = item.formulas
                           .map((formula) => `${formula.name} ${formula.percentage}%`)

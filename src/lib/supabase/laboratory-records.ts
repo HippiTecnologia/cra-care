@@ -105,17 +105,56 @@ export async function loadLaboratoryContext(): Promise<LaboratoryContext> {
 export async function loadLaboratoryWorkspace(context?: LaboratoryContext) {
   const current = context ?? await loadLaboratoryContext();
   const supabase = getSupabaseClient();
-  const [batchResult, itemResult, prescriptionResult] = await Promise.all([
-    supabase.from("batches").select("*").eq("clinic_id", current.clinicId).neq("status", "rascunho").order("created_at", { ascending: false }),
-    supabase.from("batch_items").select("*"),
-    supabase.from("prescriptions").select("*").eq("clinic_id", current.clinicId).order("created_at", { ascending: false }),
-  ]);
+  const batchResult = await supabase.from("batches").select("*")
+    .eq("clinic_id", current.clinicId).neq("status", "rascunho")
+    .order("created_at", { ascending: false });
   if (batchResult.error) throw batchResult.error;
-  if (itemResult.error) throw itemResult.error;
-  if (prescriptionResult.error) throw prescriptionResult.error;
+  const batchIds = (batchResult.data ?? []).map((row) => row.id);
+  const itemRows: Record<string, unknown>[] = [];
+  for (let index = 0; index < batchIds.length; index += 100) {
+    const ids = batchIds.slice(index, index + 100);
+    let offset = 0;
+    while (ids.length) {
+      const { data, error } = await supabase.from("batch_items").select("*")
+        .in("batch_id", ids).range(offset, offset + 999);
+      if (error) throw error;
+      itemRows.push(...(data ?? []) as Record<string, unknown>[]);
+      if ((data?.length ?? 0) < 1000) break;
+      offset += 1000;
+    }
+  }
+
+  // Fetch only the prescriptions used by these lots. A single unpaginated
+  // clinic-wide query stops at the API row limit and loses older phases.
+  const prescriptionRows = new Map<string, Record<string, unknown>>();
+  const prescriptionIds = [...new Set(itemRows.map((row) => text(row.prescription_id) || text(objectValue(row.metadata).prescriptionId)).filter(Boolean))];
+  for (let index = 0; index < prescriptionIds.length; index += 100) {
+    const { data, error } = await supabase.from("prescriptions").select("*")
+      .eq("clinic_id", current.clinicId).in("id", prescriptionIds.slice(index, index + 100));
+    if (error) throw error;
+    for (const row of (data ?? []) as Record<string, unknown>[]) prescriptionRows.set(text(row.id), row);
+  }
+  const missingPhasePatients = [...new Set(itemRows.filter((row) => {
+    const metadata = objectValue(row.metadata);
+    const prescription = prescriptionRows.get(text(row.prescription_id) || text(metadata.prescriptionId));
+    return !text(metadata.phase) && !text(objectValue(prescription?.content).phase);
+  }).map((row) => text(row.patient_id) || text(objectValue(row.metadata).patientId)).filter(Boolean))];
+  for (let index = 0; index < missingPhasePatients.length; index += 100) {
+    const ids = missingPhasePatients.slice(index, index + 100);
+    let offset = 0;
+    while (ids.length) {
+      const { data, error } = await supabase.from("prescriptions").select("*")
+        .eq("clinic_id", current.clinicId).in("patient_id", ids)
+        .order("created_at", { ascending: false }).range(offset, offset + 999);
+      if (error) throw error;
+      for (const row of (data ?? []) as Record<string, unknown>[]) prescriptionRows.set(text(row.id), row);
+      if ((data?.length ?? 0) < 1000) break;
+      offset += 1000;
+    }
+  }
 
   const itemsByBatch = new Map<string, DemoBatchItem[]>();
-  for (const row of (itemResult.data ?? []) as unknown as Record<string, unknown>[]) {
+  for (const row of itemRows) {
     const batchId = text(row.batch_id);
     itemsByBatch.set(batchId, [...(itemsByBatch.get(batchId) ?? []), batchItemFromRow(row)]);
   }
@@ -133,7 +172,7 @@ export async function loadLaboratoryWorkspace(context?: LaboratoryContext) {
       items: itemsByBatch.get(text(row.id)) ?? [],
     };
   });
-  const prescriptions = ((prescriptionResult.data ?? []) as unknown as Record<string, unknown>[]).map(prescriptionFromRow);
+  const prescriptions = [...prescriptionRows.values()].map(prescriptionFromRow);
   return { context: current, batches, prescriptions };
 }
 
