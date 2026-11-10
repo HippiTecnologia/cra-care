@@ -430,6 +430,9 @@ export type SecretaryContactReportPatient = {
   status: string;
   doctor: string;
   treatment: string;
+  birthDate: string;
+  lastReceivedDate: string;
+  bottlesReceived: number;
 };
 
 export async function loadSecretaryContactReport(
@@ -441,7 +444,7 @@ export async function loadSecretaryContactReport(
     loadSecretaryDoctors(current),
     loadAllPages<Record<string, unknown>>((from, to) => {
       let query = supabase.from("patients")
-        .select("id, full_name, phone, status, doctor_profile_id, treatment")
+        .select("id, full_name, birth_date, phone, status, doctor_profile_id, treatment")
         .eq("clinic_id", current.clinicId)
         .is("archived_at", null);
       if (status !== "todos") query = query.eq("status", status);
@@ -462,6 +465,9 @@ export async function loadSecretaryContactReport(
       status: text(row.status, "em-conversa"),
       doctor: doctorId ? doctorById.get(doctorId) ?? "Médico não vinculado" : "Médico não vinculado",
       treatment: text(treatment.name, text(treatment.treatment, "Não informado")),
+      birthDate: text(row.birth_date),
+      lastReceivedDate: text(treatment.lastReceivedDate),
+      bottlesReceived: number(treatment.bottlesReceived),
     };
   });
 

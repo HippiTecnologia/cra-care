@@ -3,14 +3,33 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import type { DemoPatientRecord } from "../../medico/patient-store";
+import type { DemoBatch, DemoPatientRecord, DemoPrescription, DemoStockItem } from "../../medico/patient-store";
+import { buildBottleHistory } from "../../paciente/bottle-history";
+import { createDefaultPortalState } from "../../paciente/patient-portal-store";
+import { getNextOrderReminders, hasNextOrderDue, hasNextOrderInProgress } from "../next-order";
 import {
+  loadSecretaryBatches,
+  loadSecretaryBottleRows,
   loadSecretaryContactReport,
+  loadSecretaryPortals,
+  loadSecretaryPrescriptions,
+  loadSecretaryStock,
   type SecretaryContactReportPatient,
   type SecretaryContactReportStatus,
 } from "../../../lib/supabase/secretary-records";
 
 type PatientStatus = NonNullable<DemoPatientRecord["status"]>;
+type ReportPatientFilter = SecretaryContactReportStatus | "aniversariantes" | "proximo-pedido";
+type ContactReportPatient = {
+  id: string;
+  name: string;
+  phone: string;
+  status: string;
+  doctor: string;
+  treatment: string;
+  birthDate: string;
+  hasPendingNextOrder: boolean;
+};
 
 const statusLabels: Record<PatientStatus, string> = {
   "com-pedido": "Paciente com pedido",
@@ -48,7 +67,7 @@ function csvCell(value: string) {
   return `"${protectedValue.replace(/"/g, '""')}"`;
 }
 
-function downloadCsv(patients: SecretaryContactReportPatient[]) {
+function downloadCsv(patients: ContactReportPatient[]) {
   const rows = [
     ["Nome", "Telefone", "Médico", "Tratamento", "Situação"].map(csvCell).join(";"),
     ...patients.map((patient) => [
@@ -69,11 +88,11 @@ function downloadCsv(patients: SecretaryContactReportPatient[]) {
 }
 
 export default function SecretariaRelatoriosPage() {
-  const [statusFilter, setStatusFilter] = useState<SecretaryContactReportStatus>("em-conversa");
+  const [statusFilter, setStatusFilter] = useState<ReportPatientFilter>("em-conversa");
   const [doctorFilter, setDoctorFilter] = useState("todos");
   const [search, setSearch] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
-  const [patients, setPatients] = useState<SecretaryContactReportPatient[]>([]);
+  const [patients, setPatients] = useState<ContactReportPatient[]>([]);
   const [doctors, setDoctors] = useState<Array<{ id: string; fullName: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -81,29 +100,98 @@ export default function SecretariaRelatoriosPage() {
 
   useEffect(() => {
     let active = true;
-    void loadSecretaryContactReport(statusFilter)
-      .then((report) => {
+    void (async () => {
+      try {
+        const workspace = await loadSecretaryContactReport("todos");
+        const bottleRowsPromise = loadSecretaryBottleRows(workspace.context);
+        const [loadedPrescriptions, loadedBatches, bottleRows] = await Promise.all([
+          loadSecretaryPrescriptions(workspace.context),
+          loadSecretaryBatches(workspace.context),
+          bottleRowsPromise,
+        ]);
+        const [loadedPortals, loadedStock] = await Promise.all([
+          loadSecretaryPortals(workspace.patients.map((patient) => patient.id), workspace.context, bottleRows),
+          loadSecretaryStock(workspace.context, bottleRows),
+        ]);
         if (!active) return;
-        setPatients(report.patients);
-        setDoctors(report.doctors.map(({ id, fullName }) => ({ id, fullName })));
-      })
-      .catch((cause: unknown) => {
+
+        const prescriptionsByPatient = new Map<string, DemoPrescription[]>();
+        for (const prescription of loadedPrescriptions) {
+          const items = prescriptionsByPatient.get(prescription.patientId) ?? [];
+          items.push(prescription);
+          prescriptionsByPatient.set(prescription.patientId, items);
+        }
+        const stockByPatient = new Map<string, DemoStockItem[]>();
+        for (const item of loadedStock) {
+          if (!item.patientId) continue;
+          const items = stockByPatient.get(item.patientId) ?? [];
+          items.push(item);
+          stockByPatient.set(item.patientId, items);
+        }
+        const batchesByPatient = new Map<string, DemoBatch[]>();
+        for (const batch of loadedBatches) {
+          for (const patientId of new Set(batch.items.map((item) => item.patientId))) {
+            const items = batchesByPatient.get(patientId) ?? [];
+            items.push(batch);
+            batchesByPatient.set(patientId, items);
+          }
+        }
+        const now = new Date();
+        const reportPatients = workspace.patients.map((patient: SecretaryContactReportPatient): ContactReportPatient => {
+          const patientPrescriptions = prescriptionsByPatient.get(patient.id) ?? [];
+          const patientStock = stockByPatient.get(patient.id) ?? [];
+          const patientBatches = batchesByPatient.get(patient.id) ?? [];
+          const portal = loadedPortals[patient.id] ?? createDefaultPortalState(patient.id);
+          const orderPatient = {
+            id: patient.id,
+            status: patient.status,
+            treatment: patient.treatment,
+            lastReceivedDate: patient.lastReceivedDate,
+            bottlesReceived: patient.bottlesReceived,
+          };
+          const bottleHistory = buildBottleHistory(orderPatient, portal, patientStock, patientPrescriptions);
+          const reminders = getNextOrderReminders(orderPatient, bottleHistory, patientPrescriptions, now);
+          const hasPendingNextOrder = reminders.some((reminder) =>
+            hasNextOrderDue(reminder.date, now)
+            && !hasNextOrderInProgress(patient.id, reminder.treatment, patientStock, patientBatches),
+          );
+          return {
+            id: patient.id,
+            name: patient.name,
+            phone: patient.phone ?? "",
+            status: patient.status ?? "em-conversa",
+            doctor: patient.doctor || "Médico não vinculado",
+            treatment: patient.treatment || "Não informado",
+            birthDate: patient.birthDate ?? "",
+            hasPendingNextOrder,
+          };
+        }).sort((first, second) => first.name.localeCompare(second.name, "pt-BR"));
+        if (!active) return;
+        setPatients(reportPatients);
+        setDoctors(workspace.doctors.map(({ id, fullName }) => ({ id, fullName })));
+      } catch (cause: unknown) {
         if (active) setError(cause instanceof Error ? cause.message : "Não foi possível carregar o relatório.");
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    })();
     return () => { active = false; };
-  }, [statusFilter]);
+  }, []);
 
   const filteredPatients = useMemo(() => {
     const normalizedSearch = normalizeSearch(search);
+    const today = new Date();
+    const todayMonthDay = `${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
     return patients.filter((patient) => {
       const matchesSearch = !normalizedSearch || normalizeSearch(`${patient.name} ${patient.phone}`).includes(normalizedSearch);
       const matchesDoctor = doctorFilter === "todos" || patient.doctor === doctorFilter;
-      return matchesSearch && matchesDoctor;
+      const matchesFilter = statusFilter === "todos"
+        || (statusFilter === "aniversariantes" && patient.birthDate.slice(5, 10) === todayMonthDay)
+        || (statusFilter === "proximo-pedido" && patient.hasPendingNextOrder)
+        || (statusFilter !== "aniversariantes" && statusFilter !== "proximo-pedido" && patient.status === statusFilter);
+      return matchesSearch && matchesDoctor && matchesFilter;
     });
-  }, [doctorFilter, patients, search]);
+  }, [doctorFilter, patients, search, statusFilter]);
 
   const patientsWithPhone = filteredPatients.filter((patient) => whatsappHref(patient.phone)).length;
 
@@ -177,9 +265,11 @@ export default function SecretariaRelatoriosPage() {
             </div>
 
             <div className="mt-5 grid gap-3 md:grid-cols-[1fr_1fr_1.4fr]">
-              <label className="text-xs font-semibold text-[#66595d]">Situação
-                <select value={statusFilter} onChange={(event) => { setLoading(true); setError(""); setStatusFilter(event.target.value as SecretaryContactReportStatus); }} className="mt-1.5 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
-                  <option value="todos">Todas as situações</option>
+              <label className="text-xs font-semibold text-[#66595d]">Filtrar pacientes por
+                <select value={statusFilter} onChange={(event) => { setError(""); setStatusFilter(event.target.value as ReportPatientFilter); }} className="mt-1.5 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
+                  <option value="todos">Todos os pacientes</option>
+                  <option value="aniversariantes">Aniversariantes de hoje</option>
+                  <option value="proximo-pedido">Com próximo pedido pendente</option>
                   {statuses.map(([status, label]) => <option key={status} value={status}>{label}</option>)}
                 </select>
               </label>
