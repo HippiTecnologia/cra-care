@@ -144,11 +144,26 @@ export default function SecretariaNotificationsPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token ?? ""}` },
         body: JSON.stringify({ patientIds: targetIds, icon, title, text }),
       });
-      const pushResult = await pushResponse.json().catch(() => ({ sent: 0 }));
+      const pushResult = await pushResponse.json().catch(() => ({})) as {
+        sent?: number;
+        attempted?: number;
+        failed?: number;
+        failureCodes?: Record<string, number>;
+        reason?: string;
+      };
+      const pushDeliveryMessage = pushResponse.ok && (pushResult.sent ?? 0) > 0
+        ? ` · serviço push aceitou o envio para ${pushResult.sent} dispositivo(s)${(pushResult.failed ?? 0) > 0 ? `; ${pushResult.failed} falharam${Object.entries(pushResult.failureCodes ?? {}).length ? ` (códigos ${Object.entries(pushResult.failureCodes ?? {}).map(([code, count]) => `${code}: ${count}`).join(", ")})` : ""}` : ""}.`
+        : !pushResponse.ok
+          ? " · o aviso ficou no sino, mas o serviço push retornou erro."
+          : (pushResult.attempted ?? 0) === 0
+            ? pushResult.reason === "push_not_configured"
+              ? " · o aviso ficou no sino; falta configurar o serviço push na hospedagem."
+              : " · o aviso ficou no sino; nenhum dispositivo dos pacientes selecionados está autorizado para push."
+            : ` · push tentou ${pushResult.attempted} dispositivo(s), mas nenhum confirmou entrega${Object.entries(pushResult.failureCodes ?? {}).length ? ` (códigos ${Object.entries(pushResult.failureCodes ?? {}).map(([code, count]) => `${code}: ${count}`).join(", ")})` : ""}.`;
       setTitle("");
       setText("");
       setRecipient("todos");
-      setMessage(`Notificação enviada para ${targetIds.length === 1 ? "o paciente selecionado" : `${targetIds.length} pacientes`}${pushResult.sent ? ` · ${pushResult.sent} dispositivo(s) avisado(s) no celular.` : " · O aviso ficou no sino; o paciente ainda não habilitou o celular para receber push."}`);
+      setMessage(`Notificação salva para ${targetIds.length === 1 ? "o paciente selecionado" : `${targetIds.length} pacientes`}${pushDeliveryMessage}`);
       setError("");
       await load();
     } catch (cause) {
@@ -279,7 +294,7 @@ export default function SecretariaNotificationsPage() {
               <p className="mt-1 text-sm text-[#817578]">Acompanhe, cancele ou tente novamente os avisos programados.</p>
               <div className="mt-5 space-y-3">
                 {scheduledNotifications.length === 0 ? <p className="rounded-2xl border border-dashed border-[#e6dbd6] p-6 text-center text-sm text-[#817578]">Nenhum envio agendado.</p> : scheduledNotifications.map((item) => <article key={item.id} className="rounded-2xl border border-[#eee6e2] bg-[#fdfbf9] p-4">
-                  <div className="flex items-start gap-3"><span className="text-xl">{item.icon}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-bold text-[#433438]">{item.title}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${item.status === "sent" ? "bg-[#eaf7f1] text-[#187157]" : item.status === "failed" ? "bg-[#fff0f1] text-[#a3113a]" : "bg-[#fff5e7] text-[#91601b]"}`}>{item.status === "pending" ? "Agendada" : item.status === "sending" ? "Processando" : item.status === "sent" ? "Enviada" : item.status === "failed" ? "Falhou" : "Cancelada"}</span></div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#66595d]">{item.message}</p><p className="mt-2 text-xs text-[#817578]">{scheduledDateLabel(item.scheduledFor)} · {item.recipientCount} paciente(s) · criada por {item.createdByName}</p>{item.status === "sent" && <p className="mt-1 text-xs text-[#187157]">Aviso no portal para {item.sentPatientCount} paciente(s){item.pushSentCount ? ` · push enviado a ${item.pushSentCount} dispositivo(s)` : " · nenhum dispositivo recebeu push; o aviso fica no sino do portal"}.</p>}{item.status === "failed" && item.lastError && <p className="mt-1 text-xs text-[#a3113a]">{item.lastError}</p>}</div></div>
+                  <div className="flex items-start gap-3"><span className="text-xl">{item.icon}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-bold text-[#433438]">{item.title}</h3><span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${item.status === "sent" ? "bg-[#eaf7f1] text-[#187157]" : item.status === "failed" ? "bg-[#fff0f1] text-[#a3113a]" : "bg-[#fff5e7] text-[#91601b]"}`}>{item.status === "pending" ? "Agendada" : item.status === "sending" ? "Processando" : item.status === "sent" ? "Enviada" : item.status === "failed" ? "Falhou" : "Cancelada"}</span></div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#66595d]">{item.message}</p><p className="mt-2 text-xs text-[#817578]">{scheduledDateLabel(item.scheduledFor)} · {item.recipientCount} paciente(s) · criada por {item.createdByName}</p>{item.status === "sent" && <p className="mt-1 text-xs text-[#187157]">Aviso no portal para {item.sentPatientCount} paciente(s){item.pushSentCount ? ` · serviço push aceitou ${item.pushSentCount} envio(s)` : item.lastError ? " · push sem confirmação (detalhes abaixo)" : " · nenhum dispositivo recebeu push; o aviso fica no sino do portal"}.</p>}{item.status === "sent" && item.lastError && <p className="mt-1 text-xs text-[#966419]">{item.lastError}</p>}{item.status === "failed" && item.lastError && <p className="mt-1 text-xs text-[#a3113a]">{item.lastError}</p>}</div></div>
                   {(item.status === "pending" || item.status === "failed") && <div className="mt-3 flex justify-end gap-2">{item.status === "failed" && <button type="button" disabled={scheduledMutation === item.id} onClick={() => void updateScheduledNotification(item, "retry")} className="rounded-lg border border-[#d9b4bf] px-3 py-2 text-xs font-semibold text-[#a3113a] disabled:opacity-50">Tentar novamente</button>}{item.status === "pending" && <button type="button" disabled={scheduledMutation === item.id} onClick={() => void updateScheduledNotification(item, "cancel")} className="rounded-lg border border-[#ead0d5] px-3 py-2 text-xs font-semibold text-[#a3113a] disabled:opacity-50">Cancelar</button>}</div>}
                 </article>)}
               </div>

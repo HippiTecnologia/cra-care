@@ -2,7 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import webpush from "web-push";
 import { getSupabaseAdminClient } from "../../../../lib/supabase/admin";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 type Payload = { patientIds?: unknown; title?: unknown; text?: unknown; icon?: unknown };
+
+function chunks<T>(items: T[], size: number) {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
+  return result;
+}
 
 function configuredPush() {
   const publicKey = process.env.NEXT_PUBLIC_WEB_PUSH_PUBLIC_KEY;
@@ -15,7 +24,7 @@ function configuredPush() {
 
 export async function POST(request: NextRequest) {
   try {
-    if (!configuredPush()) return NextResponse.json({ sent: 0, reason: "Push ainda não configurado." });
+    if (!configuredPush()) return NextResponse.json({ sent: 0, attempted: 0, failed: 0, reason: "push_not_configured" });
     const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
     if (!token) return NextResponse.json({ error: "Sessão não encontrada." }, { status: 401 });
     const admin = getSupabaseAdminClient();
@@ -29,19 +38,43 @@ export async function POST(request: NextRequest) {
     const { data: activePatients, error: patientsError } = await (admin.from("patients") as any).select("id").eq("clinic_id", profile.clinic_id).in("id", patientIds).is("archived_at", null);
     if (patientsError) throw patientsError;
     const activePatientIds = (activePatients ?? []).map((patient: { id: string }) => patient.id);
-    if (!activePatientIds.length) return NextResponse.json({ sent: 0 });
+    if (!activePatientIds.length) return NextResponse.json({ sent: 0, attempted: 0, failed: 0, reason: "no_active_patients" });
     const { data: subscriptions, error } = await (admin.from("push_subscriptions") as any).select("id, subscription").eq("clinic_id", profile.clinic_id).in("patient_id", activePatientIds);
     if (error) throw error;
     const message = JSON.stringify({ title: payload.title, body: payload.text, icon: payload.icon, url: "/paciente" });
     let sent = 0;
-    await Promise.all((subscriptions ?? []).map(async (row: { id: string; subscription: webpush.PushSubscription }) => {
-      try { await webpush.sendNotification(row.subscription, message); sent += 1; }
-      catch (cause) {
-        const statusCode = (cause as { statusCode?: number }).statusCode;
-        if (statusCode === 404 || statusCode === 410) await (admin.from("push_subscriptions") as any).delete().eq("id", row.id);
+    const failureCodes: Record<string, number> = {};
+    const rows = (subscriptions ?? []) as { id: string; subscription: webpush.PushSubscription }[];
+    for (const batch of chunks(rows, 20)) {
+      const results = await Promise.all(batch.map(async (row) => {
+        try {
+          await webpush.sendNotification(row.subscription, message);
+          return { ok: true as const };
+        } catch (cause) {
+          const statusCode = (cause as { statusCode?: number }).statusCode;
+          if (statusCode === 404 || statusCode === 410) {
+            await (admin.from("push_subscriptions") as any).delete().eq("id", row.id);
+          }
+          return { ok: false as const, statusCode };
+        }
+      }));
+      for (const result of results) {
+        if (result.ok) {
+          sent += 1;
+          continue;
+        }
+        const code = result.statusCode == null ? "unknown" : String(result.statusCode);
+        failureCodes[code] = (failureCodes[code] ?? 0) + 1;
       }
-    }));
-    return NextResponse.json({ sent });
+    }
+    const attempted = rows.length;
+    return NextResponse.json({
+      sent,
+      attempted,
+      failed: attempted - sent,
+      failureCodes,
+      reason: attempted === 0 ? "no_subscriptions" : undefined,
+    });
   } catch {
     return NextResponse.json({ error: "Não foi possível disparar as notificações." }, { status: 500 });
   }

@@ -737,8 +737,10 @@ export default function PatientPortalPage() {
     let subscription = await registration.pushManager.getSubscription();
     const currentKey = subscription?.options.applicationServerKey;
     const currentKeyBytes = currentKey ? new Uint8Array(currentKey) : null;
-    const sameApplicationKey = currentKeyBytes?.length === applicationServerKey.length
-      && currentKeyBytes.every((byte, index) => byte === applicationServerKey[index]);
+    const sameApplicationKey = currentKeyBytes === null || (
+      currentKeyBytes.length === applicationServerKey.length
+      && currentKeyBytes.every((byte, index) => byte === applicationServerKey[index])
+    );
     if (subscription && !sameApplicationKey) {
       await subscription.unsubscribe();
       subscription = null;
