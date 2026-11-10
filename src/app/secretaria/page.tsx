@@ -988,6 +988,10 @@ export default function SecretariaPage() {
               Dashboard
             </button>
 
+            <Link href="/secretaria/relatorios" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
+              Relatórios
+            </Link>
+
             <button type="button" onClick={() => setKanbanMenuOpen((open) => !open)} className="flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10"><span>Kanban de pacientes</span><span>{kanbanMenuOpen ? "⌃" : "⌄"}</span></button>
             {kanbanMenuOpen && <div className="ml-3 space-y-1 border-l border-white/20 pl-3">{([
               ["todos", "Visão geral"], ["com-pedido", "Com pedido"], ["em-conversa", "Em conversa"], ["ativo", "Ativos"], ["bacteriana", "Bacteriana"], ["perdido", "Tratamento não contratado"], ["desistente", "Desistentes"], ["em-alta", "Pacientes com alta"], ["concluido", "Concluídos"],

@@ -420,6 +420,53 @@ export async function loadSecretaryPatients(
   return { context: current, doctors, patients };
 }
 
+export type SecretaryContactReportStatus = NonNullable<DemoPatientRecord["status"]> | "todos";
+
+export type SecretaryContactReportPatient = {
+  id: string;
+  name: string;
+  phone: string;
+  status: string;
+  doctor: string;
+  treatment: string;
+};
+
+export async function loadSecretaryContactReport(
+  status: SecretaryContactReportStatus = "em-conversa",
+) {
+  const current = await loadSecretaryContext();
+  const supabase = getSupabaseClient();
+  const [doctors, patientRows] = await Promise.all([
+    loadSecretaryDoctors(current),
+    loadAllPages<Record<string, unknown>>((from, to) => {
+      let query = supabase.from("patients")
+        .select("id, full_name, phone, status, doctor_profile_id, treatment")
+        .eq("clinic_id", current.clinicId)
+        .is("archived_at", null);
+      if (status !== "todos") query = query.eq("status", status);
+      return query.order("full_name", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to);
+    }),
+  ]);
+
+  const doctorById = new Map(doctors.map((doctor) => [doctor.id, doctor.fullName]));
+  const patients = patientRows.map((row): SecretaryContactReportPatient => {
+    const treatment = objectValue(row.treatment);
+    const doctorId = text(row.doctor_profile_id);
+    return {
+      id: text(row.id),
+      name: text(row.full_name, "Paciente sem nome"),
+      phone: text(row.phone),
+      status: text(row.status, "em-conversa"),
+      doctor: doctorId ? doctorById.get(doctorId) ?? "Médico não vinculado" : "Médico não vinculado",
+      treatment: text(treatment.name, text(treatment.treatment, "Não informado")),
+    };
+  });
+
+  return { context: current, doctors, patients };
+}
+
 function patientPayload(patient: DemoPatientRecord, existing: MedicalPatientRow) {
   const existingAddress = objectValue(existing.address);
   const existingTreatment = objectValue(existing.treatment);
