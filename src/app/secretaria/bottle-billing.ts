@@ -79,7 +79,6 @@ export function getBottleBillingState(
     })
     : -1;
   const additionalPaymentBottles = treatmentPayments.reduce((total, payment, index) => {
-    if (isNoChargeMethod(payment.method) || isNoChargeMethod(payment.acquisitionMethod)) return total;
     const isPaid = payment.status ? payment.status === "recebido" : Boolean(payment.paidAt);
     if (!isPaid || index === duplicateContractPaymentIndex) return total;
     return total + positiveInteger(payment.additionalBottles);

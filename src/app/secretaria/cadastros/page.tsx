@@ -589,7 +589,7 @@ export default function PatientRecordsPage() {
       acquisitionMethodVersion: configuredTreatmentPayment?.methodSnapshotVersion ?? selectedPaymentAcquisitionMethod?.version,
       paymentCondition: noChargePayment ? "À vista" : paymentCondition,
       bottlePlanId: noChargePayment ? undefined : paymentBottlePlanId || undefined,
-      additionalBottles: noChargePayment ? 0 : Math.max(0, Math.trunc(paymentAdditionalBottles)),
+      additionalBottles: Math.max(0, Math.trunc(paymentAdditionalBottles)),
       amount: parsed,
       paidAt: noChargePayment || paymentStatus === "recebido" ? paidAt : "",
       registeredAt: paidAt,
@@ -689,9 +689,7 @@ export default function PatientRecordsPage() {
       ? NO_CHARGE_METHOD_NAME
       : payment.method);
     setEditingPaymentBottlePlanId(payment.bottlePlanId ?? "");
-    setEditingPaymentAdditionalBottles(isNoChargeMethod(payment.method) || isNoChargeMethod(payment.acquisitionMethod)
-      ? 0
-      : Math.max(0, Math.trunc(payment.additionalBottles ?? 0)));
+    setEditingPaymentAdditionalBottles(Math.max(0, Math.trunc(payment.additionalBottles ?? 0)));
     setEditingPaymentReference(payment.asaasReference ?? "");
     setEditingPaymentNotes(payment.notes ?? "");
     setMessage("");
@@ -746,7 +744,7 @@ export default function PatientRecordsPage() {
         installmentNumber: Math.max(1, Math.trunc(editingPaymentInstallmentNumber)),
         method: editingPaymentMethod || payment.method,
         bottlePlanId: editingPaymentBottlePlanId || undefined,
-        additionalBottles: noChargePayment ? 0 : Math.max(0, Math.trunc(editingPaymentAdditionalBottles)),
+        additionalBottles: Math.max(0, Math.trunc(editingPaymentAdditionalBottles)),
         asaasReference: editingPaymentReference.trim() || undefined,
         notes: editingPaymentNotes.trim() || undefined,
       } : payment),
@@ -1162,7 +1160,7 @@ export default function PatientRecordsPage() {
                           <Field label="Situação"><select value={editingPaymentStatus} onChange={(event) => setEditingPaymentStatus(event.target.value)} className={inputClass}>{paymentEntryStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
                           <Field label="Data do pagamento/registro"><input type="date" value={editingPaymentDate} onChange={(event) => setEditingPaymentDate(event.target.value)} className={inputClass} /></Field>
                           <Field label="Método de aquisição"><select value={editingPaymentAcquisitionMethodId} onChange={(event) => setEditingPaymentAcquisitionMethodId(event.target.value)} className={inputClass}><option value="">Não informado</option>{editingPaymentAcquisitionMethodId && !adminMethods.some((method) => method.id === editingPaymentAcquisitionMethodId) && <option value={editingPaymentAcquisitionMethodId}>{item.acquisitionMethod ?? "Método anterior"}</option>}{adminMethods.map((method) => <option key={method.id} value={method.id}>{method.name} · {method.category}</option>)}</select></Field>
-                          <Field label="Forma de pagamento"><PaymentMethodSelect key={`edit-payment-${editingPaymentId}`} value={editingPaymentMethod} options={availablePaymentMethods} onChange={(value) => { const wasNoCharge = normalizePaymentMethod(editingPaymentMethod) === NO_CHARGE_METHOD_NAME; setEditingPaymentMethod(value); if (normalizePaymentMethod(value) === NO_CHARGE_METHOD_NAME) { setEditingPaymentAmount("0"); setEditingPaymentInstallmentValue("0"); setEditingPaymentAdditionalBottles(0); } else if (wasNoCharge && editingPaymentAmount === "0") { setEditingPaymentAmount(""); setEditingPaymentInstallmentValue(""); } }} /></Field>
+                          <Field label="Forma de pagamento"><PaymentMethodSelect key={`edit-payment-${editingPaymentId}`} value={editingPaymentMethod} options={availablePaymentMethods} onChange={(value) => { const wasNoCharge = normalizePaymentMethod(editingPaymentMethod) === NO_CHARGE_METHOD_NAME; setEditingPaymentMethod(value); if (normalizePaymentMethod(value) === NO_CHARGE_METHOD_NAME) { setEditingPaymentAmount("0"); setEditingPaymentInstallmentValue("0"); } else if (wasNoCharge && editingPaymentAmount === "0") { setEditingPaymentAmount(""); setEditingPaymentInstallmentValue(""); } }} /></Field>
                           <Field label="Condição"><select value={editingPaymentCondition} onChange={(event) => { const condition = event.target.value as "À vista" | "Parcelado"; setEditingPaymentCondition(condition); if (condition === "À vista") { setEditingPaymentInstallments(1); setEditingPaymentInstallmentNumber(1); } }} className={inputClass}><option value="À vista">À vista</option><option value="Parcelado">Parcelado</option></select></Field>
                           {editingPaymentCondition === "Parcelado" && <Field label="Número de parcelas"><input type="number" min={1} max={36} value={editingPaymentInstallments} onChange={(event) => { const count = Math.max(1, Math.trunc(Number(event.target.value) || 1)); setEditingPaymentInstallments(count); setEditingPaymentInstallmentNumber((current) => Math.min(current, count)); }} className={inputClass} /></Field>}
                           {editingPaymentCondition === "Parcelado" && <Field label="Parcela registrada"><input type="number" min={1} max={editingPaymentInstallments} value={editingPaymentInstallmentNumber} onChange={(event) => setEditingPaymentInstallmentNumber(Math.min(editingPaymentInstallments, Math.max(1, Number(event.target.value))))} className={inputClass} /></Field>}
@@ -1173,7 +1171,7 @@ export default function PatientRecordsPage() {
                             {item.bottlePlanId && !activeBottlePlans.some((plan) => plan.id === item.bottlePlanId) && <option value={item.bottlePlanId}>Vínculo antigo</option>}
                             {activeBottlePlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.quantity}x {plan.volumeMl} mL</option>)}
                           </select></Field>
-                          <Field label="Frascos liberados"><input type="number" min={0} step={1} disabled={isNoChargeMethod(editingPaymentMethod)} value={isNoChargeMethod(editingPaymentMethod) ? 0 : editingPaymentAdditionalBottles} onChange={(event) => setEditingPaymentAdditionalBottles(Math.max(0, Math.trunc(Number(event.target.value))))} className={`${inputClass} disabled:bg-[#f7f4f2] disabled:text-[#817578]`} /></Field>
+                          <Field label="Frascos liberados"><input type="number" min={0} step={1} value={editingPaymentAdditionalBottles} onChange={(event) => setEditingPaymentAdditionalBottles(Math.max(0, Math.trunc(Number(event.target.value))))} className={inputClass} /></Field>
                           <Field label="Referência ASAAS/CV"><input value={editingPaymentReference} onChange={(event) => setEditingPaymentReference(event.target.value)} className={inputClass} /></Field>
                           <Field label="Observações" wide><textarea rows={2} value={editingPaymentNotes} onChange={(event) => setEditingPaymentNotes(event.target.value)} className={textareaClass} /></Field>
                         </div>
@@ -1193,7 +1191,7 @@ export default function PatientRecordsPage() {
                               <p><strong>Condição:</strong> {item.paymentCondition ?? "Não informada"}</p>
                               <p><strong>Parcela:</strong> {item.installmentNumber ?? 1}/{item.installments ?? 1}{item.installmentValue != null ? ` · ${money(item.installmentValue)}` : ""}</p>
                               <p><strong>Vencimento:</strong> {formatDate(item.dueAt)}</p>
-                              <p><strong>Frascos liberados:</strong> {noChargePayment ? 0 : item.additionalBottles ?? 0}{!noChargePayment && linkedPlan ? ` · Plano ${linkedPlan.quantity}x ${linkedPlan.volumeMl} mL` : ""}</p>
+                              <p><strong>Frascos liberados:</strong> {item.additionalBottles ?? 0}{linkedPlan ? ` · Plano ${linkedPlan.quantity}x ${linkedPlan.volumeMl} mL` : ""}</p>
                               {item.asaasReference && <p><strong>Referência ASAAS/CV:</strong> {item.asaasReference}</p>}
                             </div>
                             {item.notes && <p className="mt-2 whitespace-pre-line text-sm text-[#66595d]"><strong>Observações:</strong> {item.notes}</p>}
