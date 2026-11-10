@@ -11,6 +11,7 @@ import type {
   PatientPortalState,
 } from "../../app/paciente/patient-portal-store";
 import { createDefaultPortalState } from "../../app/paciente/patient-portal-store";
+import { formatCpfDisplay, normalizeCpf } from "../cpf";
 import { getSupabaseClient } from "./client";
 
 export type MedicalDoctorProfile = {
@@ -147,7 +148,7 @@ export function mapMedicalPatient(
     id: row.id,
     username: row.username ?? undefined,
     name: row.full_name,
-    cpf: row.cpf ?? "",
+    cpf: formatCpfDisplay(row.cpf),
     birthDate: row.birth_date ?? "",
     doctor: displayDoctorName,
     doctorId: row.doctor_profile_id ?? undefined,
@@ -483,7 +484,7 @@ export async function createDoctorPatient(
   input: { name: string; cpf: string; birthDate: string; phone?: string },
 ) {
   const supabase = getSupabaseClient();
-  const normalizedCpf = input.cpf.replace(/\D/g, "");
+  const normalizedCpf = normalizeCpf(input.cpf);
   if (normalizedCpf.length !== 11) throw new Error("CPF_INVALIDO");
 
   const { data, error } = await supabase.from("patients").insert({
@@ -597,10 +598,13 @@ export async function updateMedicalPatientBasics(
   patientId: string,
   input: Pick<DemoPatientRecord, "name" | "cpf" | "birthDate">,
 ) {
+  const normalizedCpf = normalizeCpf(input.cpf);
+  if (normalizedCpf.length !== 11) throw new Error("CPF_INVALIDO");
   const { data, error } = await getSupabaseClient().from("patients")
-    .update({ full_name: input.name.trim(), cpf: input.cpf.trim(), birth_date: input.birthDate, updated_at: new Date().toISOString() })
+    .update({ full_name: input.name.trim(), cpf: normalizedCpf, birth_date: input.birthDate, updated_at: new Date().toISOString() })
     .eq("id", patientId).eq("clinic_id", doctor.clinicId).eq("doctor_profile_id", doctor.id)
     .select("*").single();
+  if (error?.code === "23505") throw new Error("CPF_DUPLICADO");
   if (error || !data) throw error ?? new Error("Não foi possível atualizar os dados do paciente.");
   return mapMedicalPatient(data as unknown as MedicalPatientRow, doctor.fullName);
 }

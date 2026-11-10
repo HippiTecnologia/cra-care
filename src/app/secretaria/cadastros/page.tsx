@@ -29,6 +29,7 @@ import {
 import type { AdminTreatmentMethod } from "../../adm/admin-store";
 import { loadActiveAdminMethods } from "../../../lib/supabase/admin-records";
 import { normalizeBirthDate } from "../../../lib/birth-date";
+import { formatCpfInput, normalizeCpf } from "../../../lib/cpf";
 import { bottlesBeyondCoverage, getBottleBillingState } from "../bottle-billing";
 import {
   loadSecretaryBottleRows,
@@ -174,10 +175,6 @@ function formatBillingDocument(value: string, type: "cpf" | "cnpj") {
     .replace(/(\d{3})(\d)/, "$1.$2")
     .replace(/(\d{3})(\d)/, "$1.$2")
     .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
-}
-
-function formatCpf(value: string) {
-  return formatBillingDocument(value, "cpf");
 }
 
 export default function PatientRecordsPage() {
@@ -426,12 +423,12 @@ export default function PatientRecordsPage() {
     const currentPatient = patients.find((item) => item.id === draft.id);
     const cpfValue = draft.cpf.trim() || currentPatient?.cpf || "";
     const birthDateValue = draft.birthDate || currentPatient?.birthDate || "";
-    const normalizedCpf = cpfValue.replace(/\D/g, "");
+    const normalizedCpf = normalizeCpf(cpfValue);
     if (normalizedCpf && normalizedCpf.length !== 11) {
       setMessage("Informe um CPF com 11 números ou deixe o campo pendente.");
       return;
     }
-    if (normalizedCpf && patients.some((item) => item.id !== draft.id && item.cpf.replace(/\D/g, "") === normalizedCpf)) {
+    if (normalizedCpf && patients.some((item) => item.id !== draft.id && normalizeCpf(item.cpf) === normalizedCpf)) {
       setMessage("Já existe outro paciente cadastrado com esse CPF nesta clínica.");
       return;
     }
@@ -1044,7 +1041,7 @@ export default function PatientRecordsPage() {
 
             {tab === "pessoais" && <div className="mt-6">{editing ? <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Nome completo *"><input required value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} className={inputClass} /></Field>
-              <Field label="CPF"><input inputMode="numeric" maxLength={14} value={draft.cpf} onChange={(event) => updateDraft("cpf", formatCpf(event.target.value))} placeholder="000.000.000-00" className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Se estiver pendente, você pode salvar os outros dados e completar depois.</span></Field>
+              <Field label="CPF"><input inputMode="numeric" maxLength={14} value={draft.cpf} onChange={(event) => updateDraft("cpf", formatCpfInput(event.target.value))} placeholder="000.000.000-00" className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Se estiver pendente, você pode salvar os outros dados e completar depois.</span></Field>
               <Field label="Data de nascimento"><input type="date" value={draft.birthDate} onChange={(event) => updateDraft("birthDate", event.target.value)} onPaste={(event) => { const date = normalizeBirthDate(event.clipboardData.getData("text")); if (!date) return; event.preventDefault(); updateDraft("birthDate", date); }} className={inputClass} /><span className="mt-1 block text-xs text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span></Field>
               <Field label="Telefone / WhatsApp (opcional)"><input value={draft.phone ?? ""} onChange={(event) => updateDraft("phone", event.target.value)} className={inputClass} /></Field>
               <Field label="E-mail (opcional)"><input type="email" value={draft.email ?? ""} onChange={(event) => updateDraft("email", event.target.value)} placeholder="paciente@exemplo.com" className={inputClass} /></Field>

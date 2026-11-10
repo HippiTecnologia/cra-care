@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { getSupabaseClient } from "./client";
+import { formatCpfDisplay, normalizeCpf } from "../cpf";
 
 export type NursingProfile = { id: string; clinicId: string; fullName: string; coren?: string; role: "enfermagem" | "medico" };
 export type NursingPatient = { id: string; name: string; cpf: string; birthDate: string; phone?: string; doctorId?: string; doctorName: string; createdAt: string };
@@ -45,7 +46,7 @@ export async function loadNursingWorkspace() {
   if (patientsResult.error) throw patientsResult.error;
   if (doctorsResult.error) throw doctorsResult.error;
   if (reportsResult.error) throw reportsResult.error;
-  const patients = (patientsResult.data ?? []).map((item: any): NursingPatient => ({ id: item.id, name: item.full_name, cpf: item.cpf, birthDate: item.birth_date, phone: item.phone ?? undefined, doctorId: item.doctor_profile_id ?? undefined, doctorName: item.profiles?.full_name ?? "Não vinculado", createdAt: item.created_at }));
+  const patients = (patientsResult.data ?? []).map((item: any): NursingPatient => ({ id: item.id, name: item.full_name, cpf: formatCpfDisplay(item.cpf), birthDate: item.birth_date, phone: item.phone ?? undefined, doctorId: item.doctor_profile_id ?? undefined, doctorName: item.profiles?.full_name ?? "Não vinculado", createdAt: item.created_at }));
   return { profile: { id: profile.id, clinicId, fullName: profile.full_name, coren: profile.crm ?? undefined, role: profile.role as "enfermagem" | "medico" } as NursingProfile, patients, doctors: (doctorsResult.data ?? []).map((doctor) => ({ id: doctor.id, fullName: doctor.full_name, crm: doctor.crm ?? undefined })), reports: reportsResult.data ?? [] };
 }
 
@@ -53,7 +54,7 @@ export async function createNursingPatient(profile: NursingProfile, input: { nam
   const isNursingStaff = profile.role === "enfermagem";
   const isAuthorizedDoctor = profile.role === "medico" && doctorCanAccessNursing(profile.fullName, profile.coren ?? null);
   if (!isNursingStaff && !isAuthorizedDoctor) throw new Error("Este perfil não pode cadastrar pacientes nesta área.");
-  const normalizedCpf = input.cpf.replace(/\D/g, "");
+  const normalizedCpf = normalizeCpf(input.cpf);
   if (normalizedCpf.length !== 11) throw new Error("CPF_INVALIDO");
   if (await findNursingPatientByCpf(profile, normalizedCpf)) throw new Error("CPF_DUPLICADO");
   const { data, error } = await (getSupabaseClient().from("patients") as any).insert({ clinic_id: profile.clinicId, nursing_profile_id: isNursingStaff ? profile.id : null, doctor_profile_id: isAuthorizedDoctor ? profile.id : null, full_name: input.name.trim(), cpf: normalizedCpf, birth_date: input.birthDate, phone: input.phone?.trim() || null, status: "laudo", address: {}, treatment: {}, financial: {} }).select("id").single();
@@ -64,10 +65,12 @@ export async function createNursingPatient(profile: NursingProfile, input: { nam
 
 export async function updateNursingPatient(profile: NursingProfile, patientId: string, input: { name: string; cpf: string; birthDate: string; phone?: string }) {
   if (profile.role !== "enfermagem") throw new Error("Somente a Enfermagem pode editar dados de pacientes nesta área.");
+  const normalizedCpf = normalizeCpf(input.cpf);
+  if (normalizedCpf.length !== 11) throw new Error("CPF_INVALIDO");
   const { error } = await (getSupabaseClient() as any).rpc("update_nursing_patient_profile_fields", {
     p_patient_id: patientId,
     p_full_name: input.name.trim(),
-    p_cpf: input.cpf.replace(/\D/g, ""),
+    p_cpf: normalizedCpf,
     p_birth_date: input.birthDate,
     p_phone: input.phone?.trim() || null,
   });
@@ -115,29 +118,29 @@ export async function deleteNursingReport(profile: NursingProfile, reportId: str
 }
 
 export async function findNursingPatientByCpf(profile: NursingProfile, cpf: string): Promise<NursingPatient | null> {
-  const wantedCpf = cpf.replace(/\D/g, "");
+  const wantedCpf = normalizeCpf(cpf);
   const { data: rows, error } = await (getSupabaseClient().from("patients") as any).select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)").eq("clinic_id", profile.clinicId).is("archived_at", null);
   if (error) throw error;
-  const data = (rows ?? []).find((item: { cpf?: unknown }) => String(item.cpf ?? "").replace(/\D/g, "") === wantedCpf);
+  const data = (rows ?? []).find((item: { cpf?: unknown }) => normalizeCpf(item.cpf) === wantedCpf);
   if (!data) return null;
-  return { id: data.id, name: data.full_name, cpf: data.cpf, birthDate: data.birth_date, phone: data.phone ?? undefined, doctorId: data.doctor_profile_id ?? undefined, doctorName: data.profiles?.full_name ?? "Não vinculado", createdAt: data.created_at };
+  return { id: data.id, name: data.full_name, cpf: formatCpfDisplay(data.cpf), birthDate: data.birth_date, phone: data.phone ?? undefined, doctorId: data.doctor_profile_id ?? undefined, doctorName: data.profiles?.full_name ?? "Não vinculado", createdAt: data.created_at };
 }
 
 export async function findNursingPatient(profile: NursingProfile, query: string): Promise<NursingPatient | null> {
   const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
-  const digits = query.replace(/\D/g, "");
+  const digits = normalizeCpf(query);
   const { data: rows, error } = await (getSupabaseClient().from("patients") as any)
     .select("id, full_name, cpf, birth_date, phone, doctor_profile_id, created_at, profiles!patients_doctor_profile_id_fkey(full_name)")
     .eq("clinic_id", profile.clinicId)
     .is("archived_at", null);
   if (error) throw error;
   const item = (rows ?? []).find((candidate: { cpf?: unknown; full_name?: unknown }) => {
-    const candidateCpf = String(candidate.cpf ?? "").replace(/\D/g, "");
+    const candidateCpf = normalizeCpf(candidate.cpf);
     const candidateName = String(candidate.full_name ?? "").toLocaleLowerCase("pt-BR");
     return digits.length === 11 ? candidateCpf === digits : candidateName.includes(normalizedQuery);
   });
   if (!item) return null;
-  return { id: item.id, name: item.full_name, cpf: item.cpf, birthDate: item.birth_date, phone: item.phone ?? undefined, doctorId: item.doctor_profile_id ?? undefined, doctorName: item.profiles?.full_name ?? "Não vinculado", createdAt: item.created_at };
+  return { id: item.id, name: item.full_name, cpf: formatCpfDisplay(item.cpf), birthDate: item.birth_date, phone: item.phone ?? undefined, doctorId: item.doctor_profile_id ?? undefined, doctorName: item.profiles?.full_name ?? "Não vinculado", createdAt: item.created_at };
 }
 
 export async function loadNursingReportsForPatient(patientId: string) {

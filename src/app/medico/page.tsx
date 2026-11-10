@@ -15,18 +15,10 @@ import {
   type MedicalDoctorProfile,
 } from "../../lib/supabase/medical-records";
 import { normalizeBirthDate } from "../../lib/birth-date";
+import { formatCpfInput, normalizeCpf } from "../../lib/cpf";
 
 type DoctorSection = "dashboard" | "pacientes" | "evolucao";
 type DoctorPatientFilter = "todos" | "ativo" | "com-pedido" | "tentar-novamente" | "em-alta" | "concluido" | "perdido" | "desistente";
-
-function formatCpf(value: string) {
-  const digits = value.replace(/\D/g, "").slice(0, 11);
-
-  return digits
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
-}
 
 function formatDate(value: string) {
   return new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR");
@@ -150,7 +142,7 @@ export default function MedicoPage() {
   async function registerPatient(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const normalizedCpf = cpf.replace(/\D/g, "");
+    const normalizedCpf = normalizeCpf(cpf);
 
     if (normalizedCpf.length !== 11) {
       setError("Informe um CPF com 11 números.");
@@ -177,7 +169,7 @@ export default function MedicoPage() {
       if (caught instanceof Error && caught.message === "CPF_DUPLICADO") {
         const existing = doctor
           ? (await searchClinicPatients(doctor, normalizedCpf).catch(() => []))
-            .find((patient) => patient.cpf.replace(/\D/g, "") === normalizedCpf)
+            .find((patient) => normalizeCpf(patient.cpf) === normalizedCpf)
           : undefined;
         setDuplicatePatient(existing ?? null);
         setError("CPF já cadastrado. Não criamos um segundo paciente.");
@@ -458,7 +450,7 @@ export default function MedicoPage() {
                   maxLength={14}
                   value={cpf}
                   onChange={(event) => {
-                    setCpf(formatCpf(event.target.value));
+                    setCpf(formatCpfInput(event.target.value));
                     setError("");
                     setDuplicatePatient(null);
                   }}

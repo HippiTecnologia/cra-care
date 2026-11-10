@@ -18,6 +18,7 @@ import type {
 } from "../../app/paciente/patient-portal-store";
 import { createDefaultPortalState } from "../../app/paciente/patient-portal-store";
 import { historicalBottleCountsFromRows } from "../../app/secretaria/bottle-billing";
+import { formatCpfDisplay, normalizeCpf } from "../cpf";
 import {
   mapMedicalPatient,
   type MedicalPatientRow,
@@ -473,7 +474,7 @@ function patientPayload(patient: DemoPatientRecord, existing: MedicalPatientRow)
   const existingFinancial = objectValue(existing.financial);
   return {
     full_name: patient.name.trim(),
-    cpf: patient.cpf.trim() || existing.cpf || null,
+    cpf: normalizeCpf(patient.cpf.trim() || existing.cpf || "") || null,
     birth_date: patient.birthDate || existing.birth_date || null,
     phone: patient.phone || null,
     email: patient.email || null,
@@ -1460,7 +1461,7 @@ export async function loadSecretaryPatientRecords(context?: SecretaryContext): P
   return [...activeRows, ...archivedRows].map((row) => ({
     id: String(row.id),
     name: String(row.full_name ?? "Paciente sem nome"),
-    cpf: String(row.cpf ?? ""),
+    cpf: formatCpfDisplay(row.cpf),
     createdAt: String(row.created_at ?? ""),
     responsible: [
       row.doctor_profile_id ? `Médico · ${profileById.get(row.doctor_profile_id)?.full_name ?? "sem vínculo"}` : null,

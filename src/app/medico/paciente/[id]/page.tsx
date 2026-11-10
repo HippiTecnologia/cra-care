@@ -33,6 +33,7 @@ import { getSupabaseClient } from "../../../../lib/supabase/client";
 import { patchSubstanceCode, patchSubstanceDetails } from "../../../../lib/patch-substances";
 import { clinicContact, sublingualUseInstructions } from "../../../../lib/clinic-info";
 import { normalizeBirthDate } from "../../../../lib/birth-date";
+import { formatCpfInput, normalizeCpf } from "../../../../lib/cpf";
 import { getPrickGroupsForDoctor, prickResultKey } from "../../../../lib/prick-batteries";
 
 type Tab = "receitas" | "resumo" | "prontuario" | "historico" | "avaliacoes" | "laudos" | "dashboard";
@@ -114,14 +115,6 @@ function formatDate(value?: string) {
     : new Date(`${value}T12:00:00`);
 
   return date.toLocaleDateString("pt-BR");
-}
-
-function formatCpf(value: string) {
-  const digits = value.replace(/\D/g, "").slice(0, 11);
-  return digits
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
 }
 
 function escapeHtml(value: string | number) {
@@ -576,8 +569,13 @@ export default function MedicalPatientPage() {
 
   async function savePatientBasics() {
     if (!patient || !doctor) return;
+    const cpfDigits = normalizeCpf(patientDataDraft.cpf);
     if (!patientDataDraft.name.trim() || !patientDataDraft.cpf.trim() || !patientDataDraft.birthDate) {
       setError("Nome, CPF e data de nascimento são obrigatórios.");
+      return;
+    }
+    if (cpfDigits.length !== 11) {
+      setError("Informe um CPF com 11 números.");
       return;
     }
     setPatientSaving(true);
@@ -589,7 +587,11 @@ export default function MedicalPatientPage() {
       setError("");
       setMessage("Dados do paciente atualizados com sucesso.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Não foi possível atualizar os dados do paciente.");
+      setError(cause instanceof Error && cause.message === "CPF_DUPLICADO"
+        ? "Este CPF já está cadastrado em outro paciente da clínica. Confira o registro antes de alterar."
+        : cause instanceof Error && cause.message === "CPF_INVALIDO"
+          ? "Informe um CPF com 11 números."
+          : "Não foi possível atualizar os dados do paciente.");
     } finally {
       setPatientSaving(false);
     }
@@ -858,7 +860,7 @@ export default function MedicalPatientPage() {
             <h2 className="text-lg font-bold text-[#433438]">Editar dados do paciente</h2>
             <div className="mt-5 grid gap-4 md:grid-cols-3">
               <label className="text-sm font-semibold text-[#544449]">Nome completo<input value={patientDataDraft.name} onChange={(event) => setPatientDataDraft((current) => ({ ...current, name: event.target.value }))} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /></label>
-              <label className="text-sm font-semibold text-[#544449]">CPF<input inputMode="numeric" maxLength={14} value={patientDataDraft.cpf} onChange={(event) => setPatientDataDraft((current) => ({ ...current, cpf: formatCpf(event.target.value) }))} placeholder="000.000.000-00" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /></label>
+              <label className="text-sm font-semibold text-[#544449]">CPF<input inputMode="numeric" maxLength={14} value={patientDataDraft.cpf} onChange={(event) => setPatientDataDraft((current) => ({ ...current, cpf: formatCpfInput(event.target.value) }))} placeholder="000.000.000-00" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /></label>
               <label className="text-sm font-semibold text-[#544449]">Data de nascimento<input type="date" value={patientDataDraft.birthDate} onChange={(event) => setPatientDataDraft((current) => ({ ...current, birthDate: event.target.value }))} onPaste={(event) => { const date = normalizeBirthDate(event.clipboardData.getData("text")); if (!date) return; event.preventDefault(); setPatientDataDraft((current) => ({ ...current, birthDate: date })); }} className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 font-normal outline-none focus:border-[#b91142]" /><span className="mt-1 block text-xs font-normal text-[#817578]">Você pode selecionar ou colar DD/MM/AAAA.</span></label>
             </div>
             <button type="button" onClick={() => void savePatientBasics()} disabled={patientSaving} className="mt-5 rounded-xl bg-[#a3113a] px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">{patientSaving ? "Salvando..." : "Salvar dados"}</button>

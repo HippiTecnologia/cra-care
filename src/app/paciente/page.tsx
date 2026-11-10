@@ -24,6 +24,7 @@ import { loadPatientWorkspace, savePatientPortalState } from "../../lib/supabase
 import { getSupabaseClient } from "../../lib/supabase/client";
 import { currentRelease } from "../../lib/release-notes";
 import { clinicContact, sublingualUseInstructions } from "../../lib/clinic-info";
+import { formatCpfInput } from "../../lib/cpf";
 
 type PatientSection = "inicio" | "frasco" | "alertas" | "calendario" | "receitas" | "notas" | "notas-fiscais" | "termo";
 type TreatmentTrack = "rinite" | "imunobacteriana";
@@ -106,14 +107,6 @@ function normalizeName(value: string) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ");
-}
-
-function formatCpf(value: string) {
-  const digits = value.replace(/\D/g, "").slice(0, 11);
-  return digits
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
 }
 
 function escapeHtml(value: string) {
@@ -866,7 +859,7 @@ export default function PatientPortalPage() {
               </label>
               <label className="text-sm font-semibold text-[#544449]">
                 CPF
-                <input value={signatureCpf} onChange={(event) => { setSignatureCpf(formatCpf(event.target.value)); setSignatureError(""); }} inputMode="numeric" maxLength={14} placeholder="000.000.000-00" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 text-sm font-normal outline-none focus:border-[#b91142]" />
+                <input value={signatureCpf} onChange={(event) => { setSignatureCpf(formatCpfInput(event.target.value)); setSignatureError(""); }} inputMode="numeric" maxLength={14} placeholder="000.000.000-00" className="mt-2 h-12 w-full rounded-xl border border-[#e9dfda] px-4 text-sm font-normal outline-none focus:border-[#b91142]" />
               </label>
             </div>
 

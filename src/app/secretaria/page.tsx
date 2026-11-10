@@ -15,6 +15,7 @@ import { getBottleBillingState } from "./bottle-billing";
 import { getNextOrderDate, getNextOrderReminders, hasNextOrderDue, hasNextOrderInProgress } from "./next-order";
 import { patientUsername } from "../../lib/auth/credentials";
 import { normalizeBirthDate } from "../../lib/birth-date";
+import { formatCpfInput, normalizeCpf } from "../../lib/cpf";
 import { NO_CHARGE_METHOD_NAME, isNoChargeMethod } from "../adm/admin-store";
 import {
   createSecretaryPatientAccess,
@@ -244,15 +245,6 @@ function createEmptyPatientForm(): NewPatientForm {
     notes: "",
     abandonmentReason: "",
   };
-}
-
-function formatCpfInput(value: string) {
-  const digits = value.replace(/\D/g, "").slice(0, 11);
-
-  return digits
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d)/, "$1.$2")
-    .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
 }
 
 function formatCnpjInput(value: string) {
@@ -775,7 +767,7 @@ export default function SecretariaPage() {
     const previous = patients.find((item) => item.id === editingPatientId);
     const cpfValue = newPatient.cpf.trim() || previous?.cpf || "";
     const birthDateValue = newPatient.birthDate || previous?.birthDate || "";
-    const normalizedCpf = cpfValue.replace(/\D/g, "");
+    const normalizedCpf = normalizeCpf(cpfValue);
 
     if (normalizedCpf && normalizedCpf.length !== 11) {
       setFormError("Informe um CPF com 11 números.");
@@ -787,7 +779,7 @@ export default function SecretariaPage() {
       patients.some(
         (patient) =>
           patient.id !== editingPatientId &&
-          patient.cpf.replace(/\D/g, "") === normalizedCpf,
+          normalizeCpf(patient.cpf) === normalizedCpf,
       )
     ) {
       setFormError("Já existe um paciente cadastrado com esse CPF.");
