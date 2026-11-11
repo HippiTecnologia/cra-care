@@ -494,7 +494,7 @@ export async function createDoctorPatient(
     cpf: normalizedCpf,
     birth_date: input.birthDate,
     phone: input.phone?.trim() || null,
-    status: "com-pedido",
+    status: "laudo",
     address: {},
     treatment: {},
     financial: {},

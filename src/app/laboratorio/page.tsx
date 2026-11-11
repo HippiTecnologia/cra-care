@@ -312,7 +312,15 @@ export default function LaboratorioPage() {
     }).join("");
     const reportWindow = window.open("", "_blank");
     if (!reportWindow) { setError("Permita a abertura de janelas para gerar o relatório."); return; }
-    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de lotes · Laboratório</title><style>@page{size:A4 landscape;margin:8mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:10px;line-height:1.35}.actions{margin-bottom:8px}.actions button{border:0;border-radius:7px;background:#a3113a;color:#fff;padding:8px 12px;font-weight:bold}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:6px;margin-bottom:8px}.brand img{width:38px;height:38px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:15px;letter-spacing:.8px}.brand span{display:block;font-size:8px;font-weight:bold;letter-spacing:.6px;color:#66595d}h1{color:#a3113a;margin:0;font-size:16px}p{margin:4px 0}table{border-collapse:collapse;width:100%;margin-top:9px;table-layout:fixed}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}th,td{border:1px solid #ddd;padding:4px 5px;text-align:left;vertical-align:top;overflow-wrap:anywhere}th{background:#f1e6e8;font-size:8px}td:nth-child(1){width:9%}td:nth-child(2){width:16%}td:nth-child(3){width:15%}td:nth-child(4){width:30%}td:nth-child(5){width:7%;text-align:center}td:nth-child(6){width:11%}td:nth-child(7){width:12%}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header class="brand"><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><strong>CRA CARE</strong><span>CENTRO DE RINITE E ALERGIA</span></div></header><h1>Relatório de lotes</h1><p>Laboratório · Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${reportBatches.length} lote(s) · ${reportRows.length} registro(s)</p><table><colgroup><col style="width:9%"><col style="width:16%"><col style="width:15%"><col style="width:30%"><col style="width:7%"><col style="width:11%"><col style="width:12%"></colgroup><thead><tr><th>Lote</th><th>Nome</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Volume por frasco</th><th>Médico</th></tr></thead><tbody>${rows || '<tr><td colspan="7">Nenhum registro encontrado com os filtros selecionados.</td></tr>'}</tbody></table></body></html>`);
+    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Relatório de lotes · Laboratório</title><style>
+      @page{size:A4 landscape;margin:9mm 8mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:10pt;line-height:1.35}
+      .actions{margin:0 0 12px}.actions button{border:0;border-radius:7px;background:#a3113a;color:#fff;padding:9px 14px;font-weight:bold;cursor:pointer}
+      .brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:7px;margin-bottom:9px}.brand img{width:38px;height:38px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:15pt;letter-spacing:.8px}.brand span{display:block;margin-top:2px;font-size:8pt;font-weight:bold;letter-spacing:.6px;color:#66595d}
+      h1{color:#a3113a;margin:0;font-size:17pt}p{margin:5px 0;font-size:9pt}
+      table{border-collapse:collapse;width:100%;margin-top:9px;table-layout:fixed;font-size:8.5pt}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}
+      th,td{border:1px solid #d6cecb;padding:5px 6px;text-align:left;vertical-align:top;white-space:normal;overflow-wrap:break-word}th{background:#f1e6e8;color:#4d3c41;font-size:8pt}tbody tr:nth-child(even){background:#faf7f6}td:nth-child(1){font-weight:600}td:nth-child(5),td:nth-child(6){text-align:center}
+      @media screen{body{max-width:1400px;margin:24px auto;padding:0 20px}}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header class="brand"><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><strong>CRA CARE</strong><span>CENTRO DE RINITE E ALERGIA</span></div></header><h1>Relatório de lotes</h1><p>Laboratório · Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${reportBatches.length} lote(s) · ${reportRows.length} registro(s)</p><table><colgroup><col style="width:9%"><col style="width:16%"><col style="width:13%"><col style="width:28%"><col style="width:7%"><col style="width:11%"><col style="width:16%"></colgroup><thead><tr><th>Lote</th><th>Nome</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Volume por frasco</th><th>Médico</th></tr></thead><tbody>${rows || '<tr><td colspan="7">Nenhum registro encontrado com os filtros selecionados.</td></tr>'}</tbody></table></body></html>`);
     reportWindow.document.close(); reportWindow.focus();
   }
 
@@ -351,30 +359,31 @@ export default function LaboratorioPage() {
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <title>Relatório do lote ${escapeReportHtml(batch.name ?? batch.code)}</title>
           <style>
-            @page { size: A4 landscape; margin: 8mm; }
+            @page { size: A4 landscape; margin: 9mm 8mm; }
             * { box-sizing: border-box; }
-            body { margin: 0; color: #34292d; font: 11px/1.4 Arial, sans-serif; }
-            .actions { margin-bottom: 8px; }
+            body { margin: 0; color: #34292d; font: 10pt/1.35 Arial, sans-serif; }
+            .actions { margin-bottom: 12px; }
             .actions button { padding: 9px 14px; border: 0; border-radius: 7px; color: #fff; background: #a3113a; font-weight: 700; cursor: pointer; }
-            header { display: flex; align-items: center; gap: 10px; padding-bottom: 6px; border-bottom: 2px solid #a3113a; }
-            header img { width: 40px; height: 40px; object-fit: contain; }
-            header strong { color: #8e1535; font-size: 16px; letter-spacing: .7px; }
-            header p { margin: 2px 0 0; color: #66595d; font-size: 8px; font-weight: 700; letter-spacing: .5px; }
-            h1 { margin: 9px 0 6px; color: #a3113a; font-size: 16px; }
-            .metadata { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 10px; margin: 7px 0 9px; font-size: 9px; }
+            header { display: flex; align-items: center; gap: 10px; padding-bottom: 7px; border-bottom: 2px solid #a3113a; }
+            header img { width: 38px; height: 38px; object-fit: contain; }
+            header strong { color: #8e1535; font-size: 15pt; letter-spacing: .7px; }
+            header p { margin: 2px 0 0; color: #66595d; font-size: 8pt; font-weight: 700; letter-spacing: .5px; }
+            h1 { margin: 9px 0 6px; color: #a3113a; font-size: 17pt; }
+            .metadata { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px 10px; margin: 7px 0 9px; font-size: 9pt; }
             .metadata p { margin: 0; }
-            table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9pt; }
             thead { display: table-header-group; }
             tr { break-inside: avoid; page-break-inside: avoid; }
-            th, td { padding: 5px 6px; border: 1px solid #d9d3d0; text-align: left; vertical-align: top; overflow-wrap: anywhere; white-space: normal; }
-            th { background: #eee9e7; font-size: 10px; }
+            th, td { padding: 5px 6px; border: 1px solid #d9d3d0; text-align: left; vertical-align: top; overflow-wrap: break-word; white-space: normal; }
+            th { background: #eee9e7; color: #4d3c41; font-size: 8.5pt; }
+            tbody tr:nth-child(even) { background: #faf7f6; }
             td:nth-child(2) { font-weight: 700; }
             td:nth-child(4), td:nth-child(5) { text-align: center; }
-            .totals { margin-top: 6px; font-weight: 700; }
-            .signoff { display: flex; justify-content: space-between; gap: 30px; margin-top: 20px; break-inside: avoid; }
+            .totals { margin-top: 7px; font-weight: 700; font-size: 9pt; }
+            .signoff { display: flex; justify-content: space-between; gap: 30px; margin-top: 18px; break-inside: avoid; page-break-inside: avoid; }
             .signoff div { width: 42%; padding-top: 7px; border-top: 1px solid #6f6568; text-align: center; }
-            .notes { margin-top: 8px; padding: 7px; border: 1px solid #e6dfdc; border-radius: 6px; white-space: pre-wrap; }
-            @media screen { body { max-width: 1200px; margin: 24px auto; } }
+            .notes { margin-top: 8px; padding: 7px; border: 1px solid #e6dfdc; border-radius: 6px; white-space: pre-wrap; break-inside: avoid; page-break-inside: avoid; }
+            @media screen { body { max-width: 1400px; margin: 24px auto; padding: 0 20px; } }
             @media print { .actions { display: none; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
           </style>
         </head>
@@ -396,7 +405,7 @@ export default function LaboratorioPage() {
             <p><strong>Produção concluída:</strong> ${escapeReportHtml(formatDate(batch.productionFinishedAt))}</p>
           </div>
           <table>
-            <colgroup><col style="width:18%"><col style="width:19%"><col style="width:28%"><col style="width:7%"><col style="width:10%"><col style="width:18%"></colgroup>
+            <colgroup><col style="width:18%"><col style="width:16%"><col style="width:26%"><col style="width:7%"><col style="width:11%"><col style="width:22%"></colgroup>
             <thead><tr><th>Nome</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Volume por frasco</th><th>Médico</th></tr></thead>
             <tbody>${rows || '<tr><td colspan="6">Este lote não possui itens.</td></tr>'}</tbody>
           </table>
