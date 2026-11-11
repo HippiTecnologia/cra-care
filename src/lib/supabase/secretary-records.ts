@@ -1200,6 +1200,63 @@ export async function saveSecretaryStockItem(context: SecretaryContext, item: De
   return { ...item, id, bottleNumber };
 }
 
+export async function saveSecretaryStockItems(
+  context: SecretaryContext,
+  item: DemoStockItem,
+  quantity: number,
+  previousBottleCount = 0,
+) {
+  if (!Number.isSafeInteger(quantity) || quantity < 1) {
+    throw new Error("Informe uma quantidade inteira de frascos maior que zero.");
+  }
+  if (!isUuid(item.patientId) || !isUuid(context.clinicId)) {
+    throw new Error("Não foi possível identificar o paciente para registrar os frascos.");
+  }
+
+  const supabase = getSupabaseClient();
+  const { data: latest, error: latestError } = await supabase.from("bottles")
+    .select("bottle_number")
+    .eq("patient_id", item.patientId)
+    .eq("clinic_id", context.clinicId)
+    .order("bottle_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latestError) throw latestError;
+
+  const firstBottleNumber = Math.max(number(latest?.bottle_number, 0), previousBottleCount) + 1;
+  const savedItems = Array.from({ length: quantity }, (_, index) => ({
+    ...item,
+    id: crypto.randomUUID(),
+    bottleNumber: firstBottleNumber + index,
+    bottles: 1,
+  }));
+  const { error } = await supabase.from("bottles").insert(savedItems.map((saved) => ({
+    id: saved.id,
+    clinic_id: context.clinicId,
+    patient_id: saved.patientId,
+    prescription_id: saved.prescriptionId && isUuid(saved.prescriptionId) ? saved.prescriptionId : null,
+    batch_id: saved.batchId && isUuid(saved.batchId) ? saved.batchId : null,
+    bottle_number: saved.bottleNumber,
+    received_at: saved.receivedAt ? saved.receivedAt.slice(0, 10) : null,
+    status: saved.status,
+    volume_ml: saved.bottleVolumeMl ?? null,
+    reserved_at: saved.reservedAt ?? null,
+    delivered_at: saved.deliveredAt ?? null,
+    checked_by: saved.checkedBy,
+    metadata: { ...saved, id: saved.id },
+  })));
+  if (error) throw error;
+
+  void audit(context, "create", "bottle", savedItems[0]?.id, {
+    patientId: item.patientId,
+    quantity,
+    firstBottleNumber,
+    lastBottleNumber: firstBottleNumber + quantity - 1,
+    source: "ADICIONADO MANUALMENTE",
+  });
+  return savedItems;
+}
+
 export async function updateSecretaryStockDelivery(
   context: SecretaryContext,
   bottleId: string,

@@ -42,7 +42,7 @@ import {
   saveSecretaryInvoice,
   createSecretaryPatientAccess,
   saveSecretaryBottleAdjustment,
-  saveSecretaryStockItem,
+  saveSecretaryStockItems,
   deleteSecretaryBottleHistoryEntry,
   saveSecretaryPatient,
   saveSecretaryPayment,
@@ -232,6 +232,7 @@ export default function PatientRecordsPage() {
   const [bottleDraft, setBottleDraft] = useState<{ receivedAt: string; startedAt: string; finishedAt: string; status: "recebido" | "em-uso" | "finalizado"; phase: string; bottleVolumeMl: BottleVolumeMl | ""; formulas: PrescriptionFormula[] }>({ receivedAt: "", startedAt: "", finishedAt: "", status: "recebido", phase: "", bottleVolumeMl: "", formulas: [] });
   const [addingBottle, setAddingBottle] = useState(false);
   const [newBottleTreatment, setNewBottleTreatment] = useState<TreatmentTrack>("Rinite");
+  const [newBottleQuantity, setNewBottleQuantity] = useState(1);
   const [newBottleVolume, setNewBottleVolume] = useState<BottleVolumeMl>(4);
   const [newBottlePhase, setNewBottlePhase] = useState("");
   const [newBottleFormulas, setNewBottleFormulas] = useState<PrescriptionFormula[]>([]);
@@ -859,6 +860,7 @@ export default function PatientRecordsPage() {
       .filter((item) => item.patientId === patient?.id && treatmentTrack(item.treatment) === initialTrack)
       .sort((first, second) => new Date(second.createdAt).getTime() - new Date(first.createdAt).getTime())[0];
     setNewBottleTreatment(initialTrack);
+    setNewBottleQuantity(1);
     setNewBottleVolume(initialTrack === "Imunobacteriana" ? 9 : latestPrescription?.bottleVolumeMl ?? 4);
     setNewBottlePhase(latestPrescription?.phase ?? "");
     setNewBottleFormulas((latestPrescription?.formulas ?? []).map((formula) => ({ ...formula })));
@@ -882,6 +884,10 @@ export default function PatientRecordsPage() {
 
   async function addBottleToHistory() {
     if (!patient || !context) return;
+    if (!Number.isSafeInteger(newBottleQuantity) || newBottleQuantity < 1) {
+      setMessage("Informe uma quantidade inteira de frascos maior que zero.");
+      return;
+    }
     if (!newBottleReceivedAt) { setMessage("Informe a data de recebimento do frasco."); return; }
     if (!newBottlePhase.trim()) { setMessage("Informe a fase do frasco."); return; }
     if (newBottleFormulas.length === 0 || newBottleFormulas.some((formula) => !formula.name.trim() || !Number.isFinite(formula.percentage) || formula.percentage <= 0)) {
@@ -893,7 +899,7 @@ export default function PatientRecordsPage() {
       setMessage(`Informe quantos frascos o pagamento cobre em Condições financeiras de ${newBottleTreatment} antes de registrar a entrega.`);
       return;
     }
-    if (bottlesBeyondCoverage(quota, 1) > 0) {
+    if (bottlesBeyondCoverage(quota, newBottleQuantity) > 0) {
       setMessage(`Limite de ${quota.coveredBottles} frasco(s) atingido. Registre uma nova cobrança na aba Financeiro e informe quantos frascos adicionais ela libera antes de registrar outra entrega.`);
       return;
     }
@@ -922,31 +928,33 @@ export default function PatientRecordsPage() {
       deliveredAt,
     };
     try {
-      const savedBottle = await saveSecretaryStockItem(context, item, patient.bottlesReceived ?? 0);
-      const bottleNumber = savedBottle.bottleNumber ?? bottleHistory.length + 1;
-      setStockRecords((current) => [savedBottle, ...current.filter((record) => record.id !== savedBottle.id)]);
+      const savedBottles = await saveSecretaryStockItems(context, item, newBottleQuantity, patient.bottlesReceived ?? 0);
+      const firstBottleNumber = savedBottles[0]?.bottleNumber ?? bottleHistory.length + 1;
+      const lastBottleNumber = savedBottles[savedBottles.length - 1]?.bottleNumber ?? firstBottleNumber + savedBottles.length - 1;
+      const savedBottleIds = new Set(savedBottles.map((bottle) => bottle.id));
+      setStockRecords((current) => [...savedBottles, ...current.filter((record) => !savedBottleIds.has(record.id))]);
       setPortals((current) => {
         const currentPortal = current[patient.id] ?? createDefaultPortalState(patient.id);
-        if (currentPortal.bottles.some((bottle) => bottle.id === savedBottle.id)) return current;
+        if (savedBottles.every((saved) => currentPortal.bottles.some((bottle) => bottle.id === saved.id))) return current;
         return {
           ...current,
           [patient.id]: {
             ...currentPortal,
-            bottles: [...currentPortal.bottles, {
-              id: savedBottle.id,
-              number: bottleNumber,
+            bottles: [...currentPortal.bottles, ...savedBottles.filter((saved) => !currentPortal.bottles.some((bottle) => bottle.id === saved.id)).map((saved) => ({
+              id: saved.id,
+              number: saved.bottleNumber ?? firstBottleNumber,
               treatment: item.treatment,
               receivedAt: newBottleReceivedAt,
               startedAt: "",
-              status: "recebido",
-            }],
+              status: "recebido" as const,
+            }))],
           },
         };
       });
       setAddingBottle(false);
-      setMessage(`Frasco ${bottleNumber} vinculado diretamente ao paciente e registrado como entregue.`);
+      setMessage(`Histórico atualizado com ${savedBottles.length} frasco(s), do nº ${firstBottleNumber} ao nº ${lastBottleNumber}.`);
     } catch {
-      setMessage("Não foi possível adicionar o frasco. Confira a conexão e a atualização do banco de dados.");
+      setMessage("Não foi possível adicionar os frascos. Nenhum frasco foi registrado; confira a conexão e tente novamente.");
     } finally {
       setSavingBottle(false);
     }
@@ -1083,6 +1091,7 @@ export default function PatientRecordsPage() {
                 </div>
                 {addingBottle && <div className="mt-4 grid gap-3 rounded-xl border border-[#eadfd9] bg-white p-4 sm:grid-cols-2 lg:grid-cols-4">
                   <Field label="Tratamento"><select value={newBottleTreatment} onChange={(event) => selectBottleTreatment(event.target.value as TreatmentTrack)} className={inputClass}><option value="Rinite">Rinite</option><option value="Imunobacteriana">Imunobacteriana</option></select></Field>
+                  <Field label="Quantidade de frascos"><input type="number" min={1} step={1} inputMode="numeric" value={newBottleQuantity} onChange={(event) => setNewBottleQuantity(Number(event.target.value))} className={inputClass} /></Field>
                   <Field label="Fase"><input value={newBottlePhase} onChange={(event) => setNewBottlePhase(event.target.value)} placeholder="Ex.: Fase 1:10" className={inputClass} /></Field>
                   <Field label="Volume por frasco">{newBottleTreatment === "Imunobacteriana" ? <div className={`${inputClass} flex items-center bg-[#f7f4f2]`}>9 mL · fixo</div> : <select value={newBottleVolume} onChange={(event) => setNewBottleVolume(Number(event.target.value) as BottleVolumeMl)} className={inputClass}>{bottleVolumeOptions.map((volume) => <option key={volume} value={volume}>{volume} mL</option>)}</select>}</Field>
                   <Field label="Data de recebimento"><input type="date" value={newBottleReceivedAt} onChange={(event) => setNewBottleReceivedAt(event.target.value)} className={inputClass} /></Field>
