@@ -17,6 +17,18 @@ function errorMessage(cause: unknown) {
   return cause instanceof Error ? cause.message.slice(0, 500) : "Falha ao entregar a notificação.";
 }
 
+function pushSetupError(cause: unknown) {
+  const statusCode = (cause as { statusCode?: number })?.statusCode;
+  if (statusCode === 401 || statusCode === 403) {
+    return `O serviço de push recusou a autenticação (HTTP ${statusCode}); confira se as chaves VAPID correspondem.`;
+  }
+  if (statusCode) return `Não foi possível preparar o push (HTTP ${statusCode}).`;
+  if (cause instanceof Error && /vapid|public key|private key|subject/i.test(cause.message)) {
+    return "As chaves ou a identificação VAPID estão inválidas na hospedagem.";
+  }
+  return "Falha inesperada ao iniciar o push; confira os logs do agendador.";
+}
+
 function chunks<T>(items: T[], size: number) {
   const result: T[][] = [];
   for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
@@ -34,6 +46,9 @@ export async function POST(request: NextRequest) {
     if (claimError) throw claimError;
     let delivered = 0;
     let failed = 0;
+    let pushAttemptedTotal = 0;
+    let pushSentTotal = 0;
+    let pushResultSaveFailures = 0;
 
     for (const job of jobs ?? []) {
       try {
@@ -58,40 +73,44 @@ export async function POST(request: NextRequest) {
         const pushFailureCodes: Record<string, number> = {};
         const pushWarnings: string[] = [];
         if (publicKey && privateKey && subject) {
-          webpush.setVapidDetails(subject, publicKey, privateKey);
-          const subscriptions: { id: string; subscription: webpush.PushSubscription }[] = [];
-          for (const patientIdChunk of chunks(patientIds, 200)) {
-            const { data, error: pushError } = await admin.from("push_subscriptions")
-              .select("id, subscription")
-              .eq("clinic_id", job.clinic_id)
-              .in("patient_id", patientIdChunk);
-            if (pushError) pushWarnings.push("Não foi possível consultar os dispositivos autorizados para push.");
-            else subscriptions.push(...(data ?? []));
-          }
-          pushAttempted = subscriptions.length;
-          if (!pushAttempted && !pushWarnings.length) pushWarnings.push("Nenhum dos pacientes selecionados tem dispositivo autorizado para push; o aviso ficou no sino do portal.");
-          const payload = JSON.stringify({ title: job.title, body: job.message, icon: job.icon || "📣", url: "/paciente" });
-          for (const batch of chunks(subscriptions, 20)) {
-            const results = await Promise.all(batch.map(async (row) => {
-              try {
-                await webpush.sendNotification(row.subscription, payload);
-                return { ok: true as const };
-              } catch (cause) {
-                const statusCode = (cause as { statusCode?: number }).statusCode;
-                if (statusCode === 404 || statusCode === 410) {
-                  await admin.from("push_subscriptions").delete().eq("id", row.id);
-                }
-                return { ok: false as const, statusCode };
-              }
-            }));
-            for (const result of results) {
-              if (result.ok) {
-                pushSent += 1;
-                continue;
-              }
-              const code = result.statusCode == null ? "unknown" : String(result.statusCode);
-              pushFailureCodes[code] = (pushFailureCodes[code] ?? 0) + 1;
+          try {
+            webpush.setVapidDetails(subject, publicKey, privateKey);
+            const subscriptions: { id: string; subscription: webpush.PushSubscription }[] = [];
+            for (const patientIdChunk of chunks(patientIds, 200)) {
+              const { data, error: pushError } = await admin.from("push_subscriptions")
+                .select("id, subscription")
+                .eq("clinic_id", job.clinic_id)
+                .in("patient_id", patientIdChunk);
+              if (pushError) pushWarnings.push("Não foi possível consultar os dispositivos autorizados para push.");
+              else subscriptions.push(...(data ?? []));
             }
+            pushAttempted = subscriptions.length;
+            if (!pushAttempted && !pushWarnings.length) pushWarnings.push("Nenhum dos pacientes selecionados tem dispositivo autorizado para push; o aviso ficou no sino do portal.");
+            const payload = JSON.stringify({ title: job.title, body: job.message, icon: job.icon || "📣", url: "/paciente" });
+            for (const batch of chunks(subscriptions, 20)) {
+              const results = await Promise.all(batch.map(async (row) => {
+                try {
+                  await webpush.sendNotification(row.subscription, payload);
+                  return { ok: true as const };
+                } catch (cause) {
+                  const statusCode = (cause as { statusCode?: number }).statusCode;
+                  if (statusCode === 404 || statusCode === 410) {
+                    await admin.from("push_subscriptions").delete().eq("id", row.id);
+                  }
+                  return { ok: false as const, statusCode };
+                }
+              }));
+              for (const result of results) {
+                if (result.ok) {
+                  pushSent += 1;
+                  continue;
+                }
+                const code = result.statusCode == null ? "unknown" : String(result.statusCode);
+                pushFailureCodes[code] = (pushFailureCodes[code] ?? 0) + 1;
+              }
+            }
+          } catch (cause) {
+            pushWarnings.push(pushSetupError(cause));
           }
           if (pushAttempted > pushSent) {
             const codes = Object.entries(pushFailureCodes).map(([code, count]) => `${code}: ${count}`).join(", ");
@@ -100,11 +119,17 @@ export async function POST(request: NextRequest) {
         } else {
           pushWarnings.push("As chaves de push não estão configuradas na hospedagem.");
         }
-        await admin.from("scheduled_patient_notifications").update({
+        pushAttemptedTotal += pushAttempted;
+        pushSentTotal += pushSent;
+        const { error: pushResultSaveError } = await admin.from("scheduled_patient_notifications").update({
           push_sent_count: pushSent,
           last_error: pushWarnings.length ? pushWarnings.join(" ").slice(0, 500) : null,
           updated_at: new Date().toISOString(),
-        }).eq("id", job.id);
+        }).eq("id", job.id).eq("status", "sent");
+        if (pushResultSaveError) {
+          pushResultSaveFailures += 1;
+          console.error("Failed to save scheduled push result", { jobId: job.id, code: pushResultSaveError.code });
+        }
       } catch (cause) {
         failed += 1;
         const retry = Number(job.attempts) < 5;
@@ -118,7 +143,15 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ claimed: (jobs ?? []).length, delivered, failed });
+    return NextResponse.json({
+      claimed: (jobs ?? []).length,
+      delivered,
+      failed,
+      pushAttempted: pushAttemptedTotal,
+      pushAccepted: pushSentTotal,
+      pushRejected: Math.max(pushAttemptedTotal - pushSentTotal, 0),
+      pushResultSaveFailures,
+    });
   } catch {
     return NextResponse.json({ error: "Não foi possível processar os agendamentos." }, { status: 500 });
   }
