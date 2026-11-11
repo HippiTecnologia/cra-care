@@ -249,6 +249,16 @@ export type DemoBatch = {
 
 export type DemoStockStatus = "disponivel" | "reservado" | "entregue";
 
+export type DemoStockDeliveryAddress = {
+  zipCode?: string;
+  street?: string;
+  number?: string;
+  complement?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
+};
+
 export type DemoStockItem = {
   id: string;
   bottleNumber?: number;
@@ -267,6 +277,8 @@ export type DemoStockItem = {
   bottleVolumeMl?: BottleVolumeMl;
   formulas: PrescriptionFormula[];
   delivery?: DemoPatientRecord["delivery"];
+  deliveryAddress?: DemoStockDeliveryAddress;
+  deliveryNotes?: string;
   laboratory: string;
   receivedAt: string;
   checkedBy: string;

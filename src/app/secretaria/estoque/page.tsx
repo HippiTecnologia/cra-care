@@ -7,6 +7,7 @@ import {
   DemoPatientRecord,
   DemoBatch,
   DemoPrescription,
+  DemoStockDeliveryAddress,
   DemoStockItem,
   DemoStockStatus,
 } from "../../medico/patient-store";
@@ -21,6 +22,7 @@ import {
   loadSecretaryStock,
   saveSecretaryPatient,
   saveSecretaryStockItem,
+  updateSecretaryStockDelivery,
   SecretaryContext,
 } from "../../../lib/supabase/secretary-records";
 
@@ -73,6 +75,107 @@ function indicationForTreatment(treatment: string): "rinite" | "bacteriana" {
 
 function escapeReportHtml(value: string | number | undefined) {
   return String(value ?? "—").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+}
+
+type StockDeliveryDetailsProps = {
+  item: DemoStockItem;
+  patient: DemoPatientRecord;
+  context: SecretaryContext | null;
+  onSaved: (details: {
+    method: NonNullable<DemoPatientRecord["delivery"]>;
+    address: DemoStockDeliveryAddress;
+    notes: string;
+    saveAsDefault: boolean;
+  }) => void;
+};
+
+function StockDeliveryDetails({ item, patient, context, onSaved }: StockDeliveryDetailsProps) {
+  const [method, setMethod] = useState<NonNullable<DemoPatientRecord["delivery"]>>(
+    () => item.delivery ?? patient.delivery ?? "Retirada",
+  );
+  const [address, setAddress] = useState<DemoStockDeliveryAddress>(() => ({
+    zipCode: item.deliveryAddress?.zipCode ?? patient.zipCode ?? "",
+    street: item.deliveryAddress?.street ?? patient.street ?? patient.address ?? "",
+    number: item.deliveryAddress?.number ?? patient.addressNumber ?? "",
+    complement: item.deliveryAddress?.complement ?? patient.addressComplement ?? "",
+    neighborhood: item.deliveryAddress?.neighborhood ?? patient.neighborhood ?? "",
+    city: item.deliveryAddress?.city ?? patient.city ?? "",
+    state: item.deliveryAddress?.state ?? patient.state ?? "",
+  }));
+  const [notes, setNotes] = useState(() => item.deliveryNotes ?? patient.deliveryNotes ?? patient.notes ?? "");
+  const [saveAsDefault, setSaveAsDefault] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  function updateAddress(field: keyof DemoStockDeliveryAddress, value: string) {
+    setAddress((current) => ({ ...current, [field]: value }));
+  }
+
+  async function saveDetails() {
+    if (!context || item.status === "entregue") return;
+    setSaving(true);
+    setFeedback(null);
+    const cleanedAddress = Object.fromEntries(
+      Object.entries(address).map(([key, value]) => [key, value?.trim() ?? ""]),
+    ) as DemoStockDeliveryAddress;
+    const cleanedNotes = notes.trim();
+    try {
+      await updateSecretaryStockDelivery(context, item.id, method, cleanedAddress, cleanedNotes, saveAsDefault);
+      onSaved({ method, address: cleanedAddress, notes: cleanedNotes, saveAsDefault });
+      setFeedback({ kind: "success", text: "Dados da entrega salvos com sucesso." });
+    } catch (cause) {
+      setFeedback({ kind: "error", text: cause instanceof Error ? cause.message : "Não foi possível salvar os dados da entrega." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-6 rounded-2xl border border-[#eee5e0] bg-[#fcfaf8] p-4">
+      <p className="text-sm font-bold text-[#433438]">Endereço e recebimento da entrega</p>
+      {item.status === "entregue" ? (
+        <div className="mt-4 grid gap-3 text-xs text-[#66595d] sm:grid-cols-2">
+          <p><strong>CEP:</strong> {item.deliveryAddress?.zipCode ?? patient.zipCode ?? "Não informado"}</p>
+          <p><strong>Rua:</strong> {item.deliveryAddress?.street ?? patient.street ?? patient.address ?? "Não informada"}</p>
+          <p><strong>Número:</strong> {item.deliveryAddress?.number ?? patient.addressNumber ?? "Não informado"}</p>
+          <p><strong>Complemento:</strong> {item.deliveryAddress?.complement ?? patient.addressComplement ?? "Não informado"}</p>
+          <p><strong>Bairro:</strong> {item.deliveryAddress?.neighborhood ?? patient.neighborhood ?? "Não informado"}</p>
+          <p><strong>Cidade:</strong> {item.deliveryAddress?.city ?? patient.city ?? "Não informada"}</p>
+          <p><strong>Estado:</strong> {item.deliveryAddress?.state ?? patient.state ?? "Não informado"}</p>
+          <p><strong>Método:</strong> {item.delivery ?? patient.delivery ?? "A definir"}</p>
+          <p className="sm:col-span-2"><strong>Observações:</strong> {item.deliveryNotes ?? patient.deliveryNotes ?? patient.notes ?? "Nenhuma observação cadastrada."}</p>
+        </div>
+      ) : (
+        <>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {([
+              ["zipCode", "CEP"], ["street", "Rua"], ["number", "Número"], ["complement", "Complemento"],
+              ["neighborhood", "Bairro"], ["city", "Cidade"], ["state", "Estado"],
+            ] as Array<[keyof DemoStockDeliveryAddress, string]>).map(([field, label]) => (
+              <label key={field} className="text-xs font-semibold text-[#66595d]">{label}
+                <input maxLength={250} value={address[field] ?? ""} onChange={(event) => updateAddress(field, event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]" />
+              </label>
+            ))}
+            <label className="text-xs font-semibold text-[#66595d]">Método de recebimento
+              <select value={method} onChange={(event) => setMethod(event.target.value as NonNullable<DemoPatientRecord["delivery"]>)} className="mt-1.5 h-10 w-full rounded-lg border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
+                {["Motoboy", "Retirada", "Sedex", "Aéreo"].map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            </label>
+          </div>
+          <fieldset className="mt-4 rounded-xl border border-[#eee5e0] bg-white p-3">
+            <legend className="px-1 text-xs font-semibold text-[#66595d]">Aplicar método</legend>
+            <label className="flex items-start gap-2 py-1 text-xs text-[#433438]"><input type="radio" name={`delivery-scope-${item.id}`} checked={!saveAsDefault} onChange={() => setSaveAsDefault(false)} className="mt-0.5 accent-[#a3113a]" /><span>Somente para esta entrega</span></label>
+            <label className="flex items-start gap-2 py-1 text-xs text-[#433438]"><input type="radio" name={`delivery-scope-${item.id}`} checked={saveAsDefault} onChange={() => setSaveAsDefault(true)} className="mt-0.5 accent-[#a3113a]" /><span>Salvar como padrão para as próximas entregas</span></label>
+          </fieldset>
+          <label className="mt-4 block text-xs font-semibold text-[#66595d]">Observações da entrega
+            <textarea rows={3} maxLength={2000} value={notes} onChange={(event) => setNotes(event.target.value)} className="mt-1.5 w-full rounded-lg border border-[#e9dfda] bg-white px-3 py-2 text-sm font-normal outline-none focus:border-[#b91142]" placeholder="Instruções para esta entrega" />
+          </label>
+          {feedback && <p role="status" className={`mt-3 rounded-lg px-3 py-2 text-xs ${feedback.kind === "success" ? "bg-[#edf8f3] text-[#187157]" : "bg-[#fff1f3] text-[#a3113a]"}`}>{feedback.text}</p>}
+          <button type="button" onClick={() => void saveDetails()} disabled={saving || !context} className="mt-4 w-full rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{saving ? "Salvando entrega..." : "Salvar dados da entrega"}</button>
+        </>
+      )}
+    </div>
+  );
 }
 
 export default function SecretariaEstoquePage() {
@@ -676,22 +779,22 @@ export default function SecretariaEstoquePage() {
                     )}
                   </div>
 
-                  {selectedPatient && (
-                    <div className="mt-6 rounded-2xl border border-[#eee5e0] bg-[#fcfaf8] p-4">
-                      <p className="text-sm font-bold text-[#433438]">Endereço completo para entrega</p>
-                      <div className="mt-4 grid gap-3 text-xs text-[#66595d] sm:grid-cols-2">
-                        <p><strong>CEP:</strong> {selectedPatient.zipCode ?? "Não informado"}</p>
-                        <p><strong>Rua:</strong> {selectedPatient.street ?? selectedPatient.address ?? "Não informada"}</p>
-                        <p><strong>Número:</strong> {selectedPatient.addressNumber ?? "Não informado"}</p>
-                        <p><strong>Complemento:</strong> {selectedPatient.addressComplement ?? "Não informado"}</p>
-                        <p><strong>Bairro:</strong> {selectedPatient.neighborhood ?? "Não informado"}</p>
-                        <p><strong>Cidade:</strong> {selectedPatient.city ?? "Não informada"}</p>
-                        <p><strong>Estado:</strong> {selectedPatient.state ?? "Não informado"}</p>
-                        <p><strong>Forma de envio:</strong> {selectedItem.delivery ?? "A definir"}</p>
-                      </div>
-                      <div className="mt-4 rounded-xl bg-white p-3 text-xs leading-5 text-[#66595d]"><strong>Observações:</strong> {selectedPatient.deliveryNotes ?? selectedPatient.notes ?? "Nenhuma observação cadastrada."}</div>
-                    </div>
-                  )}
+                  {selectedPatient && <StockDeliveryDetails
+                    key={`${selectedItem.id}:${selectedPatient.id}`}
+                    item={selectedItem}
+                    patient={selectedPatient}
+                    context={context}
+                    onSaved={({ method, address, notes, saveAsDefault }) => {
+                      setStock((current) => current.map((item) => item.id === selectedItem.id
+                        ? { ...item, delivery: method, deliveryAddress: address, deliveryNotes: notes }
+                        : item));
+                      if (saveAsDefault) {
+                        setPatients((current) => current.map((patient) => patient.id === selectedPatient.id
+                          ? { ...patient, delivery: method }
+                          : patient));
+                      }
+                    }}
+                  />}
 
                   <div className="mt-6 rounded-2xl bg-[#fbf5f2] p-4">
                     <p className="text-sm font-bold text-[#433438]">Composição da vacina</p>

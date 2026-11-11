@@ -17,6 +17,7 @@ import { patientUsername } from "../../lib/auth/credentials";
 import { normalizeBirthDate } from "../../lib/birth-date";
 import { formatCpfInput, normalizeCpf } from "../../lib/cpf";
 import { NO_CHARGE_METHOD_NAME, isNoChargeMethod } from "../adm/admin-store";
+import { isBirthdayToday, secretaryDashboardStatusOptions, type SecretaryPatientStatus } from "./patient-status";
 import {
   createSecretaryPatientAccess,
   loadSecretaryBottleRows,
@@ -30,17 +31,7 @@ import {
   type SecretaryContext,
 } from "../../lib/supabase/secretary-records";
 
-type PatientStatus =
-  | "com-pedido"
-  | "em-conversa"
-  | "ativo"
-  | "bacteriana"
-  | "tentar-novamente"
-  | "perdido"
-  | "em-alta"
-  | "concluido"
-  | "desistente"
-  | "laudo";
+type PatientStatus = SecretaryPatientStatus;
 
 type DeliveryMethod = "Motoboy" | "Retirada" | "Sedex" | "Aéreo";
 type AcquisitionMethod = string;
@@ -322,17 +313,6 @@ function formatCurrency(value: number) {
     style: "currency",
     currency: "BRL",
   }).format(value);
-}
-
-function isBirthdayToday(date: string) {
-  if (!date) return false;
-  const birthday = new Date(`${date}T12:00:00`);
-  const today = new Date();
-
-  return (
-    birthday.getDate() === today.getDate() &&
-    birthday.getMonth() === today.getMonth()
-  );
 }
 
 function hasAnyOrderInProgress(patientId: string, stock: DemoStockItem[], batches: DemoBatch[]) {
@@ -985,9 +965,7 @@ export default function SecretariaPage() {
             </Link>
 
             <button type="button" onClick={() => setKanbanMenuOpen((open) => !open)} className="flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10"><span>Kanban de pacientes</span><span>{kanbanMenuOpen ? "⌃" : "⌄"}</span></button>
-            {kanbanMenuOpen && <div className="ml-3 space-y-1 border-l border-white/20 pl-3">{([
-              ["todos", "Visão geral"], ["com-pedido", "Com pedido"], ["em-conversa", "Em conversa"], ["ativo", "Ativos"], ["bacteriana", "Bacteriana"], ["perdido", "Tratamento não contratado"], ["desistente", "Desistentes"], ["em-alta", "Pacientes com alta"], ["concluido", "Concluídos"],
-            ] as [PatientStatus | "todos", string][]).map(([status, label]) => <button key={status} type="button" onClick={() => openKanbanFilter(status)} className={`block w-full rounded-xl px-3 py-2 text-left text-xs ${kanbanStatusFilter === status ? "bg-white/15 font-semibold text-white" : "text-white/70 hover:bg-white/10"}`}>{label}</button>)}</div>}
+            {kanbanMenuOpen && <div className="ml-3 space-y-1 border-l border-white/20 pl-3">{([ ["todos", "Visão geral"], ...secretaryDashboardStatusOptions ] as [PatientStatus | "todos", string][]).map(([status, label]) => <button key={status} type="button" onClick={() => openKanbanFilter(status)} className={`block w-full rounded-xl px-3 py-2 text-left text-xs ${kanbanStatusFilter === status ? "bg-white/15 font-semibold text-white" : "text-white/70 hover:bg-white/10"}`}>{label}</button>)}</div>}
 
             <Link href="/secretaria/lotes" className="block w-full rounded-2xl px-4 py-3 text-left text-sm text-white/80 hover:bg-white/10">
               Lotes

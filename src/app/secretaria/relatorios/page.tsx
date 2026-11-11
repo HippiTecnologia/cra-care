@@ -7,6 +7,7 @@ import type { DemoBatch, DemoPatientRecord, DemoPrescription, DemoStockItem } fr
 import { buildBottleHistory } from "../../paciente/bottle-history";
 import { createDefaultPortalState } from "../../paciente/patient-portal-store";
 import { getNextOrderReminders, hasNextOrderDue, hasNextOrderInProgress } from "../next-order";
+import { isBirthdayToday, secretaryDashboardStatusOptions, secretaryPatientStatusLabels } from "../patient-status";
 import {
   loadSecretaryBatches,
   loadSecretaryBottleRows,
@@ -31,20 +32,7 @@ type ContactReportPatient = {
   hasPendingNextOrder: boolean;
 };
 
-const statusLabels: Record<PatientStatus, string> = {
-  "com-pedido": "Paciente com pedido",
-  "em-conversa": "Paciente em conversa",
-  ativo: "Paciente ativo",
-  bacteriana: "Paciente bacteriana",
-  "tentar-novamente": "Tentar novamente",
-  perdido: "Tratamento não contratado",
-  "em-alta": "Pacientes com alta",
-  concluido: "Paciente concluído",
-  desistente: "Paciente desistente",
-  laudo: "Laudo",
-};
-
-const statuses = Object.entries(statusLabels) as Array<[PatientStatus, string]>;
+const statusLabels = secretaryPatientStatusLabels;
 
 function normalizeSearch(value: string) {
   return value.toLocaleLowerCase("pt-BR")
@@ -180,13 +168,11 @@ export default function SecretariaRelatoriosPage() {
 
   const filteredPatients = useMemo(() => {
     const normalizedSearch = normalizeSearch(search);
-    const today = new Date();
-    const todayMonthDay = `${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
     return patients.filter((patient) => {
       const matchesSearch = !normalizedSearch || normalizeSearch(`${patient.name} ${patient.phone}`).includes(normalizedSearch);
       const matchesDoctor = doctorFilter === "todos" || patient.doctor === doctorFilter;
       const matchesFilter = statusFilter === "todos"
-        || (statusFilter === "aniversariantes" && patient.birthDate.slice(5, 10) === todayMonthDay)
+        || (statusFilter === "aniversariantes" && isBirthdayToday(patient.birthDate))
         || (statusFilter === "proximo-pedido" && patient.hasPendingNextOrder)
         || (statusFilter !== "aniversariantes" && statusFilter !== "proximo-pedido" && patient.status === statusFilter);
       return matchesSearch && matchesDoctor && matchesFilter;
@@ -270,7 +256,7 @@ export default function SecretariaRelatoriosPage() {
                   <option value="todos">Todos os pacientes</option>
                   <option value="aniversariantes">Aniversariantes de hoje</option>
                   <option value="proximo-pedido">Com próximo pedido pendente</option>
-                  {statuses.map(([status, label]) => <option key={status} value={status}>{label}</option>)}
+                  {secretaryDashboardStatusOptions.map(([status, label]) => <option key={status} value={status}>{label}</option>)}
                 </select>
               </label>
               <label className="text-xs font-semibold text-[#66595d]">Médico

@@ -5,6 +5,7 @@ import type {
   DemoInvoice,
   DemoPatientRecord,
   DemoPrescription,
+  DemoStockDeliveryAddress,
   DemoStockItem,
   PatientPaymentRecord,
   PrescriptionFormula,
@@ -1199,6 +1200,24 @@ export async function saveSecretaryStockItem(context: SecretaryContext, item: De
   return { ...item, id, bottleNumber };
 }
 
+export async function updateSecretaryStockDelivery(
+  context: SecretaryContext,
+  bottleId: string,
+  method: NonNullable<DemoPatientRecord["delivery"]>,
+  address: DemoStockDeliveryAddress,
+  notes: string,
+  saveAsDefault: boolean,
+) {
+  const { error } = await getSupabaseClient().rpc("secretary_update_stock_delivery", {
+    p_bottle_id: bottleId,
+    p_method: method,
+    p_address: address,
+    p_notes: notes,
+    p_save_as_default: saveAsDefault,
+  });
+  if (error) throw error;
+}
+
 export async function deleteSecretaryBottleHistoryEntry(
   context: SecretaryContext,
   patientId: string,
@@ -1488,6 +1507,18 @@ export async function restoreSecretaryPatient(context: SecretaryContext, patient
   const { error } = await getSupabaseClient().rpc("secretary_restore_patient", { p_patient_id: patientId });
   if (error) throw error;
   await audit(context, "restore", "patient", patientId);
+}
+
+export async function mergeSecretaryDuplicatePatients(
+  context: SecretaryContext,
+  primaryPatientId: string,
+  duplicatePatientId: string,
+) {
+  const { error } = await getSupabaseClient().rpc("secretary_merge_duplicate_patients", {
+    p_primary_patient_id: primaryPatientId,
+    p_duplicate_patient_id: duplicatePatientId,
+  });
+  if (error) throw new Error(error.message);
 }
 
 export async function permanentlyDeleteSecretaryPatient(patientId: string, confirmation: string) {
