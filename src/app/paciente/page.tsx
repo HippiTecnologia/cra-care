@@ -37,6 +37,28 @@ function treatmentTrackLabel(track: TreatmentTrack) {
   return track === "imunobacteriana" ? "Imunobacteriana" : "Rinite";
 }
 
+function isAppleMobileDevice() {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function isStandaloneApp() {
+  return window.matchMedia("(display-mode: standalone)").matches
+    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
+async function savePushSubscription(subscription: PushSubscription) {
+  const { data: { session } } = await getSupabaseClient().auth.getSession();
+  if (!session) throw new Error("Sua sessão expirou. Entre novamente para autorizar este dispositivo.");
+  const response = await fetch("/api/push/subscription", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify(subscription.toJSON()),
+  });
+  const result = await response.json().catch(() => ({})) as { error?: string };
+  if (!response.ok) throw new Error(result.error || "Não foi possível autorizar este dispositivo.");
+}
+
 const navigation: { id: PatientSection; icon: string; label: string; short: string }[] = [
   { id: "inicio", icon: "⌂", label: "Página inicial", short: "Início" },
   { id: "frasco", icon: "◉", label: "Frasco", short: "Frasco" },
@@ -311,6 +333,8 @@ export default function PatientPortalPage() {
   });
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">("default");
   const [pushEnabled, setPushEnabled] = useState(false);
+  const [requiresHomeScreenInstall, setRequiresHomeScreenInstall] = useState(false);
+  const [pushSetupMessage, setPushSetupMessage] = useState("");
   const [savingPush, setSavingPush] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const current = new Date();
@@ -353,19 +377,43 @@ export default function PatientPortalPage() {
   }, []);
 
   useEffect(() => {
-    queueMicrotask(() => {
-      setPermission("Notification" in window ? Notification.permission : "unsupported");
-    });
-  }, []);
-
-  useEffect(() => {
     let active = true;
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
-    void navigator.serviceWorker.getRegistration().then(async (registration) => {
+    const appleMobile = isAppleMobileDevice();
+    const standalone = isStandaloneApp();
+    const needsHomeScreenInstall = appleMobile && !standalone;
+    setRequiresHomeScreenInstall(needsHomeScreenInstall);
+
+    const supported = "Notification" in window && "serviceWorker" in navigator && "PushManager" in window;
+    if (!supported) {
+      setPermission("unsupported");
+      setPushEnabled(false);
+      return () => { active = false; };
+    }
+
+    const currentPermission = Notification.permission;
+    setPermission(currentPermission);
+    if (needsHomeScreenInstall || currentPermission !== "granted") {
+      setPushEnabled(false);
+      return () => { active = false; };
+    }
+
+    void (async () => {
+      const registration = await navigator.serviceWorker.getRegistration();
       const subscription = await registration?.pushManager.getSubscription();
-      if (active) setPushEnabled(Boolean(subscription) && "Notification" in window && Notification.permission === "granted");
-    }).catch(() => {
-      if (active) setPushEnabled(false);
+      if (!subscription) {
+        if (active) setPushEnabled(false);
+        return;
+      }
+      await savePushSubscription(subscription);
+      if (active) {
+        setPushEnabled(true);
+        setPushSetupMessage("");
+      }
+    })().catch(() => {
+      if (active) {
+        setPushEnabled(false);
+        setPushSetupMessage("Não foi possível confirmar o cadastro deste aparelho. Toque em ativar para tentar novamente.");
+      }
     });
     return () => { active = false; };
   }, []);
@@ -717,7 +765,11 @@ export default function PatientPortalPage() {
 
   async function ensurePushSubscription() {
     if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
-      throw new Error("Este navegador não permite notificações. Abra o CRA Care pelo navegador normal ou pelo ícone instalado no celular.");
+      throw new Error("Este navegador não permite push. Atualize o iOS/Android e abra o CRA Care no Safari ou Chrome compatível.");
+    }
+    if (isAppleMobileDevice() && !isStandaloneApp()) {
+      setRequiresHomeScreenInstall(true);
+      throw new Error("No iPhone/iPad, adicione o CRA Care à Tela de Início e abra pelo ícone. O push exige iOS/iPadOS 16.4 ou posterior.");
     }
 
     let notificationPermission = Notification.permission;
@@ -750,26 +802,21 @@ export default function PatientPortalPage() {
       subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
     }
 
-    const { data: { session } } = await getSupabaseClient().auth.getSession();
-    if (!session) throw new Error("Sua sessão expirou. Entre novamente para autorizar este dispositivo.");
-    const response = await fetch("/api/push/subscription", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-      body: JSON.stringify(subscription.toJSON()),
-    });
-    const result = await response.json().catch(() => ({})) as { error?: string };
-    if (!response.ok) throw new Error(result.error || "Não foi possível autorizar este dispositivo.");
+    await savePushSubscription(subscription);
     setPermission("granted");
     setPushEnabled(true);
   }
 
   async function enablePushNotifications() {
     setSavingPush(true);
+    setPushSetupMessage("");
     try {
       await ensurePushSubscription();
       setMessage("Avisos da Secretaria ativados neste dispositivo, mesmo com o portal fechado.");
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "Não foi possível ativar as notificações neste dispositivo.");
+      const error = cause instanceof Error ? cause.message : "Não foi possível ativar as notificações neste dispositivo.";
+      setPushSetupMessage(error);
+      setMessage(error);
     } finally {
       setSavingPush(false);
     }
@@ -1144,11 +1191,13 @@ export default function PatientPortalPage() {
                 <h3 className="mt-7 text-sm font-bold text-[#433438]">Dias da semana</h3><div className="mt-3 flex flex-wrap gap-2">{weekdays.map((day) => { const selected = reminderDraft.weekdays.includes(day.value); return <button key={day.value} type="button" onClick={() => setReminderDraft((current) => ({ ...current, weekdays: selected ? current.weekdays.filter((item) => item !== day.value) : [...current.weekdays, day.value].sort((first, second) => first - second) }))} className={`rounded-xl px-3 py-3 text-xs font-semibold ${selected ? "bg-[#a3113a] text-white" : "bg-[#f5efec] text-[#65585c]"}`}>{day.short}</button>; })}</div>
                 <label className="mt-7 block min-w-0 text-sm font-bold text-[#433438]">Horário do lembrete<span className="mt-2 block w-full max-w-full overflow-hidden rounded-xl border border-[#e9dfda] bg-white sm:max-w-48"><input type="time" value={reminderDraft.time} onChange={(event) => setReminderDraft((current) => ({ ...current, time: event.target.value }))} className="block h-12 w-full min-w-0 max-w-full border-0 bg-transparent px-4 font-normal outline-none" /></span></label>
                 <button type="button" onClick={() => void saveReminders()} className="mt-7 w-full rounded-2xl bg-[#a3113a] px-4 py-3.5 text-sm font-semibold text-white sm:w-auto sm:px-7">Salvar meus alertas</button>
-                <div className="mt-6 rounded-2xl bg-[#fff7ea] p-4 text-xs leading-6 text-[#806238]"><strong>Avisos da Secretaria fora do portal:</strong> ative as notificações neste dispositivo para receber mensagens mesmo com o CRA Care fechado. Isso é separado dos lembretes diários do tratamento.
-                  <button type="button" onClick={() => void enablePushNotifications()} disabled={savingPush || pushEnabled || permission === "unsupported"} className="mt-3 block rounded-xl bg-[#187157] px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">{savingPush ? "Ativando..." : pushEnabled ? "Avisos ativados neste dispositivo" : "Ativar avisos no celular"}</button>
+                <div className="mt-6 rounded-2xl bg-[#fff7ea] p-4 text-xs leading-6 text-[#806238]"><strong>Avisos da Secretaria fora do portal:</strong> ative os avisos em cada aparelho que deve recebê-los. No iPhone/iPad, use iOS/iPadOS 16.4 ou posterior, adicione o CRA Care à Tela de Início e abra pelo ícone; no Android, use Chrome atualizado ou o app instalado. Isso é separado dos lembretes diários do tratamento. A autorização vale para avisos futuros; os já enviados ficam no portal e não são reenviados.
+                  {requiresHomeScreenInstall && <p className="mt-2 font-semibold text-[#a3113a]">Este iPhone/iPad está no Safari do navegador. Toque em Compartilhar → Adicionar à Tela de Início, abra o novo ícone e ative os avisos lá.</p>}
+                  <button type="button" onClick={() => void enablePushNotifications()} disabled={savingPush || pushEnabled || permission === "unsupported" || requiresHomeScreenInstall} className="mt-3 block rounded-xl bg-[#187157] px-4 py-2.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">{savingPush ? "Ativando..." : pushEnabled ? "Avisos ativados neste dispositivo" : requiresHomeScreenInstall ? "Instale pela Tela de Início" : "Ativar avisos no celular"}</button>
                   {permission === "granted" && pushEnabled && <p className="mt-2 font-semibold text-[#187157]">Este dispositivo está cadastrado para receber avisos.</p>}
+                  {pushSetupMessage && <p role="status" className="mt-2 font-semibold text-[#a3113a]">{pushSetupMessage}</p>}
                   {permission === "denied" && <p className="mt-2 font-semibold text-[#a3113a]">As notificações estão bloqueadas neste navegador. Abra as permissões do site e permita notificações.</p>}
-                  {permission === "unsupported" && <p className="mt-2 font-semibold text-[#a3113a]">Este navegador não permite notificações. Abra pelo navegador normal ou pelo ícone instalado no celular.</p>}
+                  {permission === "unsupported" && !requiresHomeScreenInstall && <p className="mt-2 font-semibold text-[#a3113a]">Este navegador/sistema não permite push. Atualize o iOS/Android e tente no Safari instalado na Tela de Início (iPhone/iPad) ou no Chrome atualizado (Android).</p>}
                 </div>
               </article>
             )}
