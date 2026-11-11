@@ -50,6 +50,7 @@ export type PatientReminderSettings = {
   enabled: boolean;
   weekdays: number[];
   time: string;
+  timeZone?: string;
 };
 
 export type PatientTreatmentReminders = Partial<Record<"rinite" | "imunobacteriana", PatientReminderSettings>>;

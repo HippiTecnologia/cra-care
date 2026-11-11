@@ -73,6 +73,7 @@ function validReminderSettings(value: unknown): PatientReminderSettings {
     enabled: record.enabled === true,
     weekdays: Array.from(new Set(weekdays)).sort((first, second) => first - second),
     time: /^\d{2}:\d{2}$/.test(text(record.time)) ? text(record.time) : "09:00",
+    timeZone: text(record.timeZone) || undefined,
   };
 }
 

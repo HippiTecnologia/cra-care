@@ -526,53 +526,6 @@ export default function PatientPortalPage() {
     return notes;
   }, [patient, prescriptions, treatmentTracks]);
 
-  useEffect(() => {
-    if (
-      !patient ||
-      !portal?.signedAt ||
-      !activeReminders.enabled ||
-      !currentBottle ||
-      permission !== "granted"
-    ) {
-      return;
-    }
-
-    let sendingReminder = false;
-    const checkReminder = async () => {
-      const current = new Date();
-      const time = `${String(current.getHours()).padStart(2, "0")}:${String(current.getMinutes()).padStart(2, "0")}`;
-      const notifiedKey = `cra-care-reminder-${patient.id}-${dateKey(current)}-${time}`;
-
-      if (
-        !activeReminders.weekdays.includes(current.getDay()) ||
-        activeReminders.time !== time ||
-        window.sessionStorage.getItem(notifiedKey) ||
-        sendingReminder
-      ) {
-        return;
-      }
-
-      sendingReminder = true;
-      try {
-        const registration = await navigator.serviceWorker.ready;
-        await registration.showNotification("CRA Care · Hora do seu tratamento", {
-          body: `Olá, ${patient.name.split(" ")[0]}! Este é um lembrete gentil para registrar o uso do seu frasco.`,
-          icon: "/logo-cra.png",
-          badge: "/logo-cra.png",
-          data: { url: "/paciente" },
-        });
-        window.sessionStorage.setItem(notifiedKey, "sent");
-      } finally {
-        sendingReminder = false;
-      }
-    };
-
-    void checkReminder();
-    const interval = window.setInterval(() => void checkReminder(), 15_000);
-
-    return () => window.clearInterval(interval);
-  }, [activeReminders, currentBottle, patient, permission, portal]);
-
   function updatePortal(next: PatientPortalState) {
     setPortal(next);
     void savePatientPortalState(next).catch(() => setMessage("Não foi possível salvar esta alteração no Supabase."));
@@ -839,14 +792,28 @@ export default function PatientPortalPage() {
       }
     }
 
-    updatePortal({
+    let timeZone = "America/Sao_Paulo";
+    try {
+      timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || timeZone;
+    } catch {
+      // Keep the clinic's Brazilian timezone when the browser does not expose one.
+    }
+    const savedReminder = { ...reminderDraft, timeZone };
+    const nextPortal = {
       ...portal,
-      reminders: reminderDraft,
-      treatmentReminders: { ...portal.treatmentReminders, [activeTreatment]: reminderDraft },
-    });
-    setMessage(reminderDraft.enabled
-      ? "Lembretes do tratamento ativados neste dispositivo."
-      : "Lembretes do tratamento desativados. Os avisos da Secretaria continuam ativos se você autorizou notificações no celular.");
+      reminders: savedReminder,
+      treatmentReminders: { ...portal.treatmentReminders, [activeTreatment]: savedReminder },
+    };
+    setPortal(nextPortal);
+    try {
+      await savePatientPortalState(nextPortal);
+      setMessage(savedReminder.enabled
+        ? "Lembretes salvos. Os aparelhos com avisos ativados receberão uma notificação no horário, mesmo com o CRA Care fechado."
+        : "Lembretes do tratamento desativados. Os avisos da Secretaria continuam ativos se você autorizou notificações no celular.");
+    } catch {
+      setPortal(portal);
+      setMessage("Não foi possível salvar os lembretes. Confira sua conexão e tente novamente.");
+    }
   }
 
   function downloadTerm() {
