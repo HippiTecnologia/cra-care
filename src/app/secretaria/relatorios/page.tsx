@@ -256,6 +256,7 @@ export default function SecretariaRelatoriosPage() {
                   <option value="todos">Todos os pacientes</option>
                   <option value="aniversariantes">Aniversariantes de hoje</option>
                   <option value="proximo-pedido">Com próximo pedido pendente</option>
+                  <option value="laudo">Somente pacientes de laudo</option>
                   {secretaryDashboardStatusOptions.map(([status, label]) => <option key={status} value={status}>{label}</option>)}
                 </select>
               </label>
