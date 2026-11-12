@@ -205,6 +205,9 @@ export type DemoBatchItem = {
   bottles: number;
   bottleVolumeMl?: BottleVolumeMl;
   formulas: PrescriptionFormula[];
+  delivery?: DemoPatientRecord["delivery"];
+  deliveryAddress?: DemoStockDeliveryAddress;
+  deliveryNotes?: string;
   acquisitionMethod?: DemoPatientRecord["acquisitionMethod"];
   paymentMethod?: DemoPatientRecord["paymentMethod"];
   billingBottleNumber?: number;

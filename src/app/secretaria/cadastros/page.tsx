@@ -192,6 +192,7 @@ export default function PatientRecordsPage() {
   const [draft, setDraft] = useState<DemoPatientRecord | null>(null);
   const [editing, setEditing] = useState(false);
   const [message, setMessage] = useState("");
+  const [returnHref, setReturnHref] = useState("/secretaria");
   const [financialFeedback, setFinancialFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [savingFinancial, setSavingFinancial] = useState(false);
   const [savingPayment, setSavingPayment] = useState(false);
@@ -241,6 +242,17 @@ export default function PatientRecordsPage() {
   const [referenceNow] = useState(() => new Date());
 
   useEffect(() => {
+    const requestedReturn = new URLSearchParams(window.location.search).get("returnTo");
+    if (requestedReturn) {
+      try {
+        const returnUrl = new URL(requestedReturn, window.location.origin);
+        if (returnUrl.origin === window.location.origin && returnUrl.pathname === "/secretaria/estoque") {
+          setReturnHref(`${returnUrl.pathname}${returnUrl.search}${returnUrl.hash}`);
+        }
+      } catch {
+        setReturnHref("/secretaria");
+      }
+    }
     let active = true;
     void (async () => {
       try {
@@ -1018,7 +1030,7 @@ export default function PatientRecordsPage() {
       <div className="mx-auto max-w-[1500px]">
         <header className="flex flex-wrap items-center justify-between gap-4">
           <div><p className="text-xs font-bold uppercase tracking-[.15em] text-[#a3113a]">Secretaria</p><h1 className="mt-2 text-3xl font-bold">Cadastros completos</h1><p className="mt-2 text-sm text-[#817578]">Dados pessoais, tratamento e financeiro em um único lugar.</p></div>
-          <Link href="/secretaria" className="rounded-xl border border-[#e6dbd6] bg-white px-4 py-3 text-sm font-semibold text-[#a3113a]">← Voltar</Link>
+          <Link href={returnHref} className="rounded-xl border border-[#e6dbd6] bg-white px-4 py-3 text-sm font-semibold text-[#a3113a]">{returnHref.startsWith("/secretaria/estoque") ? "← Voltar às vacinas em estoque" : "← Voltar"}</Link>
         </header>
 
         {financialFeedback && tab === "financeiro" && <div role={financialFeedback.kind === "error" ? "alert" : "status"} className={`fixed bottom-4 right-4 z-50 flex max-w-[min(460px,calc(100vw-2rem))] items-start gap-3 rounded-2xl border p-4 text-sm font-semibold shadow-xl ${financialFeedback.kind === "error" ? "border-[#efb8c4] bg-[#fff1f3] text-[#8b1734]" : "border-[#cfe9de] bg-[#edf8f3] text-[#187157]"}`}><span>{financialFeedback.text}</span><button type="button" onClick={() => setFinancialFeedback(null)} aria-label="Fechar mensagem financeira">×</button></div>}

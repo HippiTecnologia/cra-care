@@ -21,6 +21,7 @@ import {
   loadSecretaryPrescriptions,
   loadSecretaryStock,
   saveSecretaryPatient,
+  saveSecretaryBatch,
   saveSecretaryStockItem,
   updateSecretaryStockDelivery,
   SecretaryContext,
@@ -191,6 +192,99 @@ function StockDeliveryDetails({ item, patient, context, onSaved }: StockDelivery
   );
 }
 
+type PendingDeliveryDetailsProps = {
+  batch: DemoBatch;
+  item: DemoBatch["items"][number];
+  patient: DemoPatientRecord;
+  context: SecretaryContext | null;
+  onSaved: (details: { batch?: DemoBatch; patient?: DemoPatientRecord }) => void;
+};
+
+function PendingDeliveryDetails({ batch, item, patient, context, onSaved }: PendingDeliveryDetailsProps) {
+  const [method, setMethod] = useState<NonNullable<DemoPatientRecord["delivery"]>>(
+    () => item.delivery ?? patient.delivery ?? "Retirada",
+  );
+  const [address, setAddress] = useState<DemoStockDeliveryAddress>(() => ({
+    zipCode: item.deliveryAddress?.zipCode ?? patient.zipCode ?? "",
+    street: item.deliveryAddress?.street ?? patient.street ?? patient.address ?? "",
+    number: item.deliveryAddress?.number ?? patient.addressNumber ?? "",
+    complement: item.deliveryAddress?.complement ?? patient.addressComplement ?? "",
+    neighborhood: item.deliveryAddress?.neighborhood ?? patient.neighborhood ?? "",
+    city: item.deliveryAddress?.city ?? patient.city ?? "",
+    state: item.deliveryAddress?.state ?? patient.state ?? "",
+  }));
+  const [notes, setNotes] = useState(() => item.deliveryNotes ?? patient.deliveryNotes ?? patient.notes ?? "");
+  const [saveAsDefault, setSaveAsDefault] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  function updateAddress(field: keyof DemoStockDeliveryAddress, value: string) {
+    setAddress((current) => ({ ...current, [field]: value }));
+  }
+
+  async function saveDetails() {
+    if (!context) return;
+    setSaving(true);
+    setFeedback(null);
+    const cleanedAddress = Object.fromEntries(
+      Object.entries(address).map(([key, value]) => [key, value?.trim() ?? ""]),
+    ) as DemoStockDeliveryAddress;
+    const cleanedNotes = notes.trim();
+    const updatedItem = { ...item, delivery: method, deliveryAddress: cleanedAddress, deliveryNotes: cleanedNotes };
+    const updatedPatient = { ...patient, delivery: method };
+    try {
+      const updatedBatch = await saveSecretaryBatch(context, {
+        ...batch,
+        items: batch.items.map((current) => current.prescriptionId === item.prescriptionId && current.patientId === item.patientId ? updatedItem : current),
+      });
+      onSaved({ batch: updatedBatch });
+      if (saveAsDefault) {
+        try {
+          await saveSecretaryPatient(context, updatedPatient);
+          onSaved({ patient: updatedPatient });
+        } catch {
+          setFeedback({ kind: "error", text: "Os dados desta entrega foram salvos, mas não foi possível atualizar o método padrão do cadastro. Tente salvar novamente." });
+          return;
+        }
+      }
+      setFeedback({ kind: "success", text: "Dados da entrega salvos nesta página." });
+    } catch (cause) {
+      setFeedback({ kind: "error", text: cause instanceof Error ? cause.message : "Não foi possível salvar os dados da entrega." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <details className="mt-6 rounded-2xl border border-[#eee5e0] bg-[#fcfaf8] p-4">
+      <summary className="cursor-pointer list-none text-sm font-bold text-[#a3113a]">Editar dados da entrega nesta página</summary>
+      <p className="mt-2 text-xs leading-5 text-[#817578]">Ajuste a entrega sem sair da lista. Endereço e observações ficam neste pedido.</p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {([ ["zipCode", "CEP"], ["street", "Rua"], ["number", "Número"], ["complement", "Complemento"], ["neighborhood", "Bairro"], ["city", "Cidade"], ["state", "Estado"] ] as Array<[keyof DemoStockDeliveryAddress, string]>).map(([field, label]) => (
+          <label key={field} className="text-xs font-semibold text-[#66595d]">{label}
+            <input maxLength={250} value={address[field] ?? ""} onChange={(event) => updateAddress(field, event.target.value)} className="mt-1.5 h-10 w-full rounded-lg border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]" />
+          </label>
+        ))}
+        <label className="text-xs font-semibold text-[#66595d]">Método de recebimento
+          <select value={method} onChange={(event) => setMethod(event.target.value as NonNullable<DemoPatientRecord["delivery"]>)} className="mt-1.5 h-10 w-full rounded-lg border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
+            {(["Motoboy", "Retirada", "Sedex", "Aéreo"] as NonNullable<DemoPatientRecord["delivery"]>[]).map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </label>
+      </div>
+      <fieldset className="mt-4 rounded-xl border border-[#eee5e0] bg-white p-3">
+        <legend className="px-1 text-xs font-semibold text-[#66595d]">Aplicar método</legend>
+        <label className="flex items-start gap-2 py-1 text-xs text-[#433438]"><input type="radio" name={`pending-delivery-scope-${batch.id}-${item.prescriptionId}`} checked={!saveAsDefault} onChange={() => setSaveAsDefault(false)} className="mt-0.5 accent-[#a3113a]" /><span>Somente para esta entrega</span></label>
+        <label className="flex items-start gap-2 py-1 text-xs text-[#433438]"><input type="radio" name={`pending-delivery-scope-${batch.id}-${item.prescriptionId}`} checked={saveAsDefault} onChange={() => setSaveAsDefault(true)} className="mt-0.5 accent-[#a3113a]" /><span>Salvar como padrão para as próximas entregas</span></label>
+      </fieldset>
+      <label className="mt-4 block text-xs font-semibold text-[#66595d]">Observações da entrega
+        <textarea rows={3} maxLength={2000} value={notes} onChange={(event) => setNotes(event.target.value)} className="mt-1.5 w-full rounded-lg border border-[#e9dfda] bg-white px-3 py-2 text-sm font-normal outline-none focus:border-[#b91142]" placeholder="Instruções para esta entrega" />
+      </label>
+      {feedback && <p role={feedback.kind === "error" ? "alert" : "status"} className={`mt-3 rounded-lg px-3 py-2 text-xs ${feedback.kind === "success" ? "bg-[#edf8f3] text-[#187157]" : "bg-[#fff1f3] text-[#a3113a]"}`}>{feedback.text}</p>}
+      <button type="button" onClick={() => void saveDetails()} disabled={saving || !context} className="mt-4 w-full rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{saving ? "Salvando entrega..." : "Salvar dados da entrega"}</button>
+    </details>
+  );
+}
+
 export default function SecretariaEstoquePage() {
   const [stock, setStock] = useState<DemoStockItem[]>([]);
   const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
@@ -215,6 +309,24 @@ export default function SecretariaEstoquePage() {
   const [batchNames, setBatchNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedView = params.get("view");
+    if (requestedView === "a-receber" || requestedView === "todos" || requestedView === "pedido-paciente" || requestedView === "pronta-entrega") {
+      setOriginFilter(requestedView);
+    }
+    const requestedDelivery = params.get("delivery");
+    if (requestedDelivery === "Motoboy" || requestedDelivery === "Retirada" || requestedDelivery === "Sedex" || requestedDelivery === "Aéreo") {
+      setDeliveryFilter(requestedDelivery);
+    }
+    const requestedTreatment = params.get("treatment");
+    if (requestedTreatment === "rinite" || requestedTreatment === "bacteriana") setTreatmentFilter(requestedTreatment);
+    const requestedBatch = params.get("batch");
+    if (requestedBatch) setBatchFilter(requestedBatch);
+    const requestedSearch = params.get("search");
+    if (requestedSearch !== null) setSearch(requestedSearch);
+    const requestedSelection = params.get("selected");
+    if (requestedSelection) setSelectedItemId(requestedSelection);
+
     let active = true;
     void (async () => {
       try {
@@ -334,7 +446,7 @@ export default function SecretariaEstoquePage() {
     const normalized = normalizeSearch(search);
     return receivingItems.filter(({ batch, item, patient }) => {
       if (treatmentFilter !== "todos" && indicationForTreatment(item.treatment) !== treatmentFilter) return false;
-      if (deliveryFilter !== "todas" && patient?.delivery !== deliveryFilter) return false;
+      if (deliveryFilter !== "todas" && (item.delivery ?? patient?.delivery) !== deliveryFilter) return false;
       if (batchFilter !== "todos" && batch.id !== batchFilter) return false;
       if (!normalized) return true;
       return normalizeSearch(`${item.patientName} ${item.patientCpf} ${item.doctor} ${item.treatment} ${batch.code} ${batch.name ?? ""} ${batch.laboratory}`).includes(normalized);
@@ -352,6 +464,15 @@ export default function SecretariaEstoquePage() {
   const receivingWhatsappPhone = receivingPhoneDigits.length >= 10
     ? (receivingPhoneDigits.startsWith("55") ? receivingPhoneDigits : `55${receivingPhoneDigits}`)
     : "";
+  const receivingReturnParams = new URLSearchParams({
+    view: "a-receber",
+    batch: batchFilter,
+    delivery: deliveryFilter,
+    treatment: treatmentFilter,
+    search,
+    selected: selectedReceivingItem?.id ?? "",
+  });
+  const receivingReturnUrl = `/secretaria/estoque?${receivingReturnParams.toString()}`;
   const assignmentPatient = patients.find((patient) => patient.id === assignmentPatientId);
   const assignmentPrescriptionOptions = assignmentPatient
     ? prescriptions.filter((prescription) => prescription.patientId === assignmentPatient.id && indicationForTreatment(prescription.treatment) === indicationForTreatment(selectedItem?.treatment ?? ""))
@@ -744,7 +865,7 @@ export default function SecretariaEstoquePage() {
                       <div className="mt-4 grid gap-2 text-xs text-[#6e6165] sm:grid-cols-3">
                         <span><strong>Lote:</strong> {entry.batch.name ?? entry.batch.code}</span>
                         <span><strong>Frascos:</strong> {entry.item.bottles}</span>
-                        <span><strong>Entrega planejada:</strong> {entry.patient?.delivery ?? "A definir"}</span>
+                        <span><strong>Entrega planejada:</strong> {entry.item.delivery ?? entry.patient?.delivery ?? "A definir"}</span>
                       </div>
                       <p className="mt-3 text-xs text-[#766a6d]"><strong>Tratamento:</strong> {entry.item.treatment} · <strong>Fase:</strong> {entry.item.phase}</p>
                     </button>;
@@ -819,7 +940,7 @@ export default function SecretariaEstoquePage() {
 
                   <div className="mt-6 grid grid-cols-2 gap-3">
                     <div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Quantidade prevista</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{selectedReceivingItem.item.bottles}</p><p className="mt-1 text-xs text-[#817578]">frasco(s)</p></div>
-                    <div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Entrega planejada</p><p className="mt-3 text-sm font-bold text-[#a3113a]">{selectedReceivingItem.patient?.delivery ?? "A definir"}</p></div>
+                    <div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Entrega planejada</p><p className="mt-3 text-sm font-bold text-[#a3113a]">{selectedReceivingItem.item.delivery ?? selectedReceivingItem.patient?.delivery ?? "A definir"}</p></div>
                   </div>
 
                   <div className="mt-6 space-y-4 border-t border-[#eee5e0] pt-5 text-sm">
@@ -833,9 +954,20 @@ export default function SecretariaEstoquePage() {
                   <div className="mt-6 rounded-2xl border border-[#eadfd9] bg-[#fcfaf8] p-4 text-xs leading-5 text-[#66595d]">
                     Este pedido ainda não está no estoque. Após a devolução e a conferência do lote em <strong>Lotes</strong>, ele sai desta lista e entra em <strong>Pedidos de pacientes</strong> ou <strong>Pronta entrega</strong>, com a quantidade liberada.
                   </div>
+                  {selectedReceivingItem.patient && <PendingDeliveryDetails
+                    key={`${selectedReceivingItem.batch.id}:${selectedReceivingItem.item.prescriptionId}:${selectedReceivingItem.patient.id}`}
+                    batch={selectedReceivingItem.batch}
+                    item={selectedReceivingItem.item}
+                    patient={selectedReceivingItem.patient}
+                    context={context}
+                    onSaved={({ batch, patient }) => {
+                      if (batch) setBatches((current) => current.map((record) => record.id === batch.id ? batch : record));
+                      if (patient) setPatients((current) => current.map((record) => record.id === patient.id ? patient : record));
+                    }}
+                  />}
                   <div className="mt-4 flex flex-wrap gap-2">
                     {receivingWhatsappPhone && <a href={`https://wa.me/${receivingWhatsappPhone}`} target="_blank" rel="noreferrer" className="inline-flex rounded-xl bg-[#187157] px-4 py-3 text-sm font-semibold text-white">Abrir WhatsApp</a>}
-                    {selectedReceivingItem.patient && <Link href={`/secretaria/cadastros#${selectedReceivingItem.patient.id}`} className="inline-flex rounded-xl border border-[#eadfd9] px-4 py-3 text-sm font-semibold text-[#a3113a]">Abrir cadastro</Link>}
+                    {selectedReceivingItem.patient && <Link href={`/secretaria/cadastros?returnTo=${encodeURIComponent(receivingReturnUrl)}#${selectedReceivingItem.patient.id}`} className="inline-flex rounded-xl border border-[#eadfd9] px-4 py-3 text-sm font-semibold text-[#a3113a]">Cadastro completo</Link>}
                   </div>
                 </>
               ) : (
