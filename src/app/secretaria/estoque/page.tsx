@@ -27,9 +27,22 @@ import {
 } from "../../../lib/supabase/secretary-records";
 
 type StockFilter = "todos" | DemoStockStatus;
-type StockOriginFilter = "todos" | "pedido-paciente" | "pronta-entrega";
+type StockOriginFilter = "todos" | "pedido-paciente" | "pronta-entrega" | "a-receber";
 type StockTreatmentFilter = "todos" | "rinite" | "bacteriana";
 type DeliveryFilter = "todas" | NonNullable<DemoPatientRecord["delivery"]>;
+type PendingReceivingItem = {
+  id: string;
+  batch: DemoBatch;
+  item: DemoBatch["items"][number];
+  orderType: "pedido-paciente" | "pronta-entrega";
+  patient?: DemoPatientRecord;
+};
+
+const pendingLabStatusLabels: Partial<Record<DemoBatch["status"], string>> = {
+  enviado: "Enviado ao laboratório",
+  "em-producao": "Em produção",
+  pronto: "Pronto para conferência",
+};
 
 const stockStatuses: Record<
   DemoStockStatus,
@@ -299,8 +312,46 @@ export default function SecretariaEstoquePage() {
     });
   }, [batchFilter, batchNames, deliveredRetentionCutoff, deliveryFilter, filter, originFilter, search, stock, treatmentFilter]);
 
-  const selectedItem =
-    filteredStock.find((item) => item.id === selectedItemId) ?? filteredStock[0];
+  const receivingItems = useMemo(() => batches.flatMap((batch): PendingReceivingItem[] => {
+    if (batch.archivedAt || !pendingLabStatusLabels[batch.status]) return [];
+    return batch.items.flatMap((item) => {
+      const orderType = item.orderType ?? batch.orderType ?? (item.patientId ? "pedido-paciente" : "pronta-entrega");
+      const alreadyInStock = stock.some((record) => record.batchId === batch.id
+        && record.patientId === item.patientId
+        && record.prescriptionId === item.prescriptionId);
+      if (alreadyInStock) return [];
+      return [{
+        id: `a-receber:${batch.id}:${item.prescriptionId}:${item.patientId || "pronta-entrega"}`,
+        batch,
+        item,
+        orderType,
+        patient: patients.find((record) => record.id === item.patientId),
+      }];
+    });
+  }), [batches, patients, stock]);
+
+  const filteredReceivingItems = useMemo(() => {
+    const normalized = normalizeSearch(search);
+    return receivingItems.filter(({ batch, item, patient }) => {
+      if (treatmentFilter !== "todos" && indicationForTreatment(item.treatment) !== treatmentFilter) return false;
+      if (deliveryFilter !== "todas" && patient?.delivery !== deliveryFilter) return false;
+      if (batchFilter !== "todos" && batch.id !== batchFilter) return false;
+      if (!normalized) return true;
+      return normalizeSearch(`${item.patientName} ${item.patientCpf} ${item.doctor} ${item.treatment} ${batch.code} ${batch.name ?? ""} ${batch.laboratory}`).includes(normalized);
+    });
+  }, [batchFilter, deliveryFilter, receivingItems, search, treatmentFilter]);
+
+  const selectedItem = originFilter === "a-receber"
+    ? undefined
+    : filteredStock.find((item) => item.id === selectedItemId) ?? filteredStock[0];
+  const selectedReceivingItem = originFilter === "a-receber"
+    ? filteredReceivingItems.find((item) => item.id === selectedItemId) ?? filteredReceivingItems[0]
+    : undefined;
+  const receivingBottleCount = receivingItems.reduce((total, entry) => total + Math.max(0, entry.item.bottles), 0);
+  const receivingPhoneDigits = selectedReceivingItem?.patient?.phone?.replace(/\D/g, "") ?? "";
+  const receivingWhatsappPhone = receivingPhoneDigits.length >= 10
+    ? (receivingPhoneDigits.startsWith("55") ? receivingPhoneDigits : `55${receivingPhoneDigits}`)
+    : "";
   const assignmentPatient = patients.find((patient) => patient.id === assignmentPatientId);
   const assignmentPrescriptionOptions = assignmentPatient
     ? prescriptions.filter((prescription) => prescription.patientId === assignmentPatient.id && indicationForTreatment(prescription.treatment) === indicationForTreatment(selectedItem?.treatment ?? ""))
@@ -309,7 +360,10 @@ export default function SecretariaEstoquePage() {
     ?? assignmentPrescriptionOptions[0];
   const assignmentBilling = assignmentPatient && assignmentPrescription ? getBillingRequirement(assignmentPatient, assignmentPrescription, 1) : undefined;
   const selectedPatient = selectedItem?.patientId ? patients.find((patient) => patient.id === selectedItem.patientId) : undefined;
-  const availableBatches = Array.from(new Map(stock.map((item) => [item.batchId, batchNames[item.batchId] ?? item.batchCode])).entries());
+  const availableBatches = Array.from(new Map([
+    ...stock.map((item) => [item.batchId, batchNames[item.batchId] ?? item.batchCode] as const),
+    ...receivingItems.map(({ batch }) => [batch.id, batch.name ?? batch.code] as const),
+  ]).entries());
 
   function printStockReport() {
     const rows = filteredStock.map((item) => `<tr><td>${escapeReportHtml(item.patientId ? item.patientName : "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf)}</td><td>${escapeReportHtml(batchNames[item.batchId] ?? item.batchCode)}</td><td>${escapeReportHtml(item.origin === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente")}</td><td>${escapeReportHtml(item.doctor)}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase)}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(stockStatuses[item.status].label)}</td><td>${escapeReportHtml(item.delivery)}</td><td>${escapeReportHtml(item.laboratory)}</td><td>${escapeReportHtml(formatDate(item.receivedAt))}</td><td>${escapeReportHtml(formatDate(item.reservedAt))}</td><td>${escapeReportHtml(formatDate(item.deliveredAt))}</td><td>${escapeReportHtml(item.checkedBy)}</td><td>${escapeReportHtml(item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · "))}</td></tr>`).join("");
@@ -429,6 +483,15 @@ export default function SecretariaEstoquePage() {
 
   function selectStockItem(item: DemoStockItem) {
     setSelectedItemId(item.id);
+    setAssignmentPatientId("");
+    setAssignmentPrescriptionId("");
+    setAssignmentAsaasConfirmed(false);
+    setAssignmentError("");
+  }
+
+  function selectReceivingItem(item: PendingReceivingItem) {
+    setSelectedItemId(item.id);
+    setSelectedStockIds([]);
     setAssignmentPatientId("");
     setAssignmentPrescriptionId("");
     setAssignmentAsaasConfirmed(false);
@@ -607,23 +670,24 @@ export default function SecretariaEstoquePage() {
 
           <div className="mt-7 grid gap-6 2xl:grid-cols-[minmax(0,1.1fr)_440px]">
             <section className="self-start rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-7">
-              <div className="mb-5 grid gap-2 rounded-2xl bg-[#f8f2ef] p-2 sm:grid-cols-3">
+              <div className="mb-5 grid gap-2 rounded-2xl bg-[#f8f2ef] p-2 sm:grid-cols-2 xl:grid-cols-4">
                 {([
                   { value: "todos", label: "Todos os frascos" },
                   { value: "pedido-paciente", label: "Pedidos de pacientes" },
                   { value: "pronta-entrega", label: "Pronta entrega" },
+                  { value: "a-receber", label: `A receber (${receivingBottleCount})` },
                 ] as const).map((option) => (
-                  <button key={option.value} type="button" onClick={() => { setOriginFilter(option.value); setAssignmentError(""); }} className={`rounded-xl px-3 py-2.5 text-xs font-semibold ${originFilter === option.value ? "bg-white text-[#a3113a] shadow-sm" : "text-[#766b6e]"}`}>{option.label}</button>
+                  <button key={option.value} type="button" onClick={() => { setOriginFilter(option.value); setAssignmentError(""); setSelectedStockIds([]); setSelectedItemId(null); }} className={`rounded-xl px-3 py-2.5 text-xs font-semibold ${originFilter === option.value ? "bg-white text-[#a3113a] shadow-sm" : "text-[#766b6e]"}`}>{option.label}</button>
                 ))}
               </div>
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                  <h2 className="text-xl font-bold text-[#433438]">Frascos por paciente</h2>
+                  <h2 className="text-xl font-bold text-[#433438]">{originFilter === "a-receber" ? "Pedidos aguardando retorno do laboratório" : "Frascos por paciente"}</h2>
                   <p className="mt-1 text-sm text-[#817578]">
-                    Entradas geradas após conferência dos lotes.
+                    {originFilter === "a-receber" ? "Confira os pacientes e alinhe a entrega antes da chegada. Esses frascos não contam como estoque disponível." : "Entradas geradas após conferência dos lotes."}
                   </p>
                 </div>
-                <select
+                {originFilter !== "a-receber" && <select
                   value={filter}
                   onChange={(event) => setFilter(event.target.value as StockFilter)}
                   className="h-11 rounded-xl border border-[#e9dfda] bg-white px-4 text-sm outline-none focus:border-[#b91142]"
@@ -632,7 +696,7 @@ export default function SecretariaEstoquePage() {
                   {Object.entries(stockStatuses).map(([value, status]) => (
                     <option key={value} value={value}>{status.label}</option>
                   ))}
-                </select>
+                </select>}
               </div>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -646,8 +710,8 @@ export default function SecretariaEstoquePage() {
                 <select value={treatmentFilter} onChange={(event) => { setTreatmentFilter(event.target.value as StockTreatmentFilter); setSelectedStockIds([]); setAssignmentError(""); }} className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]">
                   <option value="todos">Todos os tratamentos</option><option value="rinite">Rinite</option><option value="bacteriana">Imunobacteriana</option>
                 </select>
-                <button type="button" onClick={selectAllFiltered} className="h-11 rounded-xl border border-[#eadfd9] px-3 text-sm font-semibold text-[#a3113a]">Selecionar todos do filtro</button>
-                <button type="button" onClick={printStockReport} className="h-11 rounded-xl border border-[#eadfd9] px-3 text-sm font-semibold text-[#a3113a]">Gerar relatório</button>
+                {originFilter !== "a-receber" && <button type="button" onClick={selectAllFiltered} className="h-11 rounded-xl border border-[#eadfd9] px-3 text-sm font-semibold text-[#a3113a]">Selecionar todos do filtro</button>}
+                {originFilter !== "a-receber" && <button type="button" onClick={printStockReport} className="h-11 rounded-xl border border-[#eadfd9] px-3 text-sm font-semibold text-[#a3113a]">Gerar relatório</button>}
               </div>
               {selectedStockIds.length > 0 && <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-[#fff4e4] px-4 py-3 text-xs text-[#806238]"><strong>{selectedStockIds.length} envio(s) selecionado(s)</strong><button type="button" onClick={reserveSelected} className="rounded-lg bg-[#a3113a] px-3 py-2 font-semibold text-white">Reservar selecionados</button></div>}
 
@@ -659,7 +723,33 @@ export default function SecretariaEstoquePage() {
               />
 
               <div className="mt-6 space-y-3">
-                {filteredStock.length === 0 ? (
+                {originFilter === "a-receber" ? filteredReceivingItems.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-6 py-14 text-center">
+                    <p className="font-semibold text-[#53454a]">Nenhum pedido aguardando retorno do laboratório</p>
+                    <p className="mx-auto mt-2 max-w-md text-sm text-[#817578]">Quando um lote for enviado ou entrar em produção, os itens aparecem aqui para a Secretaria alinhar a entrega. Eles só entram no estoque depois do recebimento e da conferência.</p>
+                    <Link href="/secretaria/lotes" className="mt-5 inline-flex rounded-xl bg-[#a3113a] px-4 py-3 text-xs font-semibold text-white">Acompanhar lotes</Link>
+                  </div>
+                ) : (
+                  filteredReceivingItems.map((entry) => {
+                    const active = selectedReceivingItem?.id === entry.id;
+                    const label = pendingLabStatusLabels[entry.batch.status] ?? "Aguardando laboratório";
+                    return <button key={entry.id} type="button" onClick={() => selectReceivingItem(entry)} className={`w-full rounded-2xl border p-4 text-left transition sm:p-5 ${active ? "border-[#b91142] bg-[#fff5f7]" : "border-[#eee6e2] bg-[#fdfbf9] hover:border-[#dcb8c1]"}`}>
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <h3 className="text-sm font-bold text-[#433438]">{entry.patient?.name || entry.item.patientName || (entry.orderType === "pronta-entrega" ? "Pronta entrega · sem paciente" : "Paciente")}</h3>
+                          <p className="mt-1 text-xs text-[#817578]">{entry.orderType === "pedido-paciente" ? `CPF ${entry.patient?.cpf || entry.item.patientCpf || "não informado"} · ${entry.item.doctor || "Médico não informado"}` : `${entry.batch.laboratory} · aguardando vinculação`}</p>
+                        </div>
+                        <span className="self-start rounded-full bg-[#eef3ff] px-3 py-1 text-xs font-semibold text-[#3c5da0]">{label}</span>
+                      </div>
+                      <div className="mt-4 grid gap-2 text-xs text-[#6e6165] sm:grid-cols-3">
+                        <span><strong>Lote:</strong> {entry.batch.name ?? entry.batch.code}</span>
+                        <span><strong>Frascos:</strong> {entry.item.bottles}</span>
+                        <span><strong>Entrega planejada:</strong> {entry.patient?.delivery ?? "A definir"}</span>
+                      </div>
+                      <p className="mt-3 text-xs text-[#766a6d]"><strong>Tratamento:</strong> {entry.item.treatment} · <strong>Fase:</strong> {entry.item.phase}</p>
+                    </button>;
+                  })
+                ) : filteredStock.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-6 py-14 text-center">
                     <p className="font-semibold text-[#53454a]">Nenhuma vacina encontrada no estoque</p>
                     <p className="mx-auto mt-2 max-w-md text-sm text-[#817578]">
@@ -720,7 +810,40 @@ export default function SecretariaEstoquePage() {
             </section>
 
             <section className="self-start rounded-[28px] border border-[#eee5e0] bg-white p-6 shadow-sm sm:p-7">
-              {!selectedItem ? (
+              {originFilter === "a-receber" ? selectedReceivingItem ? (
+                <>
+                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#4965a2]">Aguardando retorno do laboratório</p>
+                  <h2 className="mt-2 text-xl font-bold text-[#433438]">{selectedReceivingItem.patient?.name || selectedReceivingItem.item.patientName || (selectedReceivingItem.orderType === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente")}</h2>
+                  <p className="mt-1 text-sm text-[#817578]">{selectedReceivingItem.orderType === "pedido-paciente" ? `CPF ${selectedReceivingItem.patient?.cpf || selectedReceivingItem.item.patientCpf || "não informado"}` : "Lote sem paciente definido"}</p>
+                  <span className="mt-4 inline-flex rounded-full bg-[#eef3ff] px-3 py-1.5 text-xs font-semibold text-[#3c5da0]">{pendingLabStatusLabels[selectedReceivingItem.batch.status]}</span>
+
+                  <div className="mt-6 grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Quantidade prevista</p><p className="mt-2 text-2xl font-bold text-[#a3113a]">{selectedReceivingItem.item.bottles}</p><p className="mt-1 text-xs text-[#817578]">frasco(s)</p></div>
+                    <div className="rounded-2xl bg-[#fbf5f2] p-4"><p className="text-xs text-[#817578]">Entrega planejada</p><p className="mt-3 text-sm font-bold text-[#a3113a]">{selectedReceivingItem.patient?.delivery ?? "A definir"}</p></div>
+                  </div>
+
+                  <div className="mt-6 space-y-4 border-t border-[#eee5e0] pt-5 text-sm">
+                    <div><p className="text-xs text-[#817578]">Lote e laboratório</p><p className="mt-1 font-semibold text-[#433438]">{selectedReceivingItem.batch.name ?? selectedReceivingItem.batch.code} · {selectedReceivingItem.batch.laboratory}</p></div>
+                    <div><p className="text-xs text-[#817578]">Tipo de pedido</p><p className="mt-1 font-semibold text-[#433438]">{selectedReceivingItem.orderType === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente"}</p></div>
+                    <div><p className="text-xs text-[#817578]">Tratamento e fase</p><p className="mt-1 font-semibold text-[#433438]">{selectedReceivingItem.item.treatment} · {selectedReceivingItem.item.phase}</p></div>
+                    {selectedReceivingItem.patient?.phone && <div><p className="text-xs text-[#817578]">Contato do paciente</p><p className="mt-1 font-semibold text-[#433438]">{selectedReceivingItem.patient.phone}</p></div>}
+                    {selectedReceivingItem.item.formulas.length > 0 && <div><p className="text-xs text-[#817578]">Composição</p><p className="mt-1 font-semibold text-[#433438]">{selectedReceivingItem.item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · ")}</p></div>}
+                  </div>
+
+                  <div className="mt-6 rounded-2xl border border-[#eadfd9] bg-[#fcfaf8] p-4 text-xs leading-5 text-[#66595d]">
+                    Este pedido ainda não está no estoque. Após a devolução e a conferência do lote em <strong>Lotes</strong>, ele sai desta lista e entra em <strong>Pedidos de pacientes</strong> ou <strong>Pronta entrega</strong>, com a quantidade liberada.
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {receivingWhatsappPhone && <a href={`https://wa.me/${receivingWhatsappPhone}`} target="_blank" rel="noreferrer" className="inline-flex rounded-xl bg-[#187157] px-4 py-3 text-sm font-semibold text-white">Abrir WhatsApp</a>}
+                    {selectedReceivingItem.patient && <Link href={`/secretaria/cadastros#${selectedReceivingItem.patient.id}`} className="inline-flex rounded-xl border border-[#eadfd9] px-4 py-3 text-sm font-semibold text-[#a3113a]">Abrir cadastro</Link>}
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-14 text-center">
+                  <p className="font-semibold text-[#53454a]">Nenhum pedido aguardando o laboratório</p>
+                  <p className="mt-2 text-sm text-[#817578]">Quando houver itens em produção, os dados para alinhar a entrega aparecerão aqui.</p>
+                </div>
+              ) : !selectedItem ? (
                 <div className="rounded-2xl border border-dashed border-[#e8dcd6] bg-[#fcfaf8] px-5 py-14 text-center">
                   <p className="font-semibold text-[#53454a]">Selecione um item do estoque</p>
                   <p className="mt-2 text-sm text-[#817578]">

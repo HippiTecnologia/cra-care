@@ -29,6 +29,7 @@ import {
 
 type BatchFilter = "todos" | DemoBatchStatus;
 type BatchIndication = "rinite" | "bacteriana";
+type BatchReportOrderType = "todos" | "pedido-paciente" | "pronta-entrega";
 
 const technicalDoctor = {
   name: "Dr. Sérgio Fabricio Maniglia",
@@ -144,6 +145,13 @@ export default function SecretariaLotesPage() {
   const [batchHistorySearch, setBatchHistorySearch] = useState("");
   const [batchHistoryIndication, setBatchHistoryIndication] = useState<"todos" | BatchIndication>("todos");
   const [batchHistoryMonth, setBatchHistoryMonth] = useState("");
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportStatus, setReportStatus] = useState<BatchFilter>("todos");
+  const [reportOrderType, setReportOrderType] = useState<BatchReportOrderType>("todos");
+  const [reportIndication, setReportIndication] = useState<"todos" | BatchIndication>("todos");
+  const [reportStartDate, setReportStartDate] = useState("");
+  const [reportEndDate, setReportEndDate] = useState("");
+  const [reportSearch, setReportSearch] = useState("");
   const [externalReceivedDate, setExternalReceivedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [externalLaboratory, setExternalLaboratory] = useState("Laboratório externo");
   const [paymentConfirmations, setPaymentConfirmations] = useState<Record<string, { asaas: boolean }>>({});
@@ -374,6 +382,27 @@ export default function SecretariaLotesPage() {
     const searchValue = normalizeSearch(`${batch.name ?? ""} ${batch.code} ${batch.laboratory} ${batch.items.map((item) => `${item.patientName} ${item.patientCpf} ${item.doctor} ${item.treatment}`).join(" ")}`);
     return !batchHistorySearch.trim() || searchValue.includes(normalizeSearch(batchHistorySearch));
   });
+
+  const normalizedReportSearch = normalizeSearch(reportSearch);
+  const reportRows = batches.flatMap((batch) => {
+    if (batch.archivedAt) return [];
+    if (reportStatus !== "todos" && batch.status !== reportStatus) return [];
+    const createdDate = batch.createdAt.slice(0, 10);
+    if (reportStartDate && createdDate < reportStartDate) return [];
+    if (reportEndDate && createdDate > reportEndDate) return [];
+    const batchMatchesSearch = normalizedReportSearch.length > 0 && normalizeSearch(`${batch.name ?? ""} ${batch.code} ${batch.laboratory}`).includes(normalizedReportSearch);
+    return batch.items
+      .filter((item) => {
+        const itemOrderType = item.orderType ?? batch.orderType ?? (item.patientId ? "pedido-paciente" : "pronta-entrega");
+        if (reportOrderType !== "todos" && itemOrderType !== reportOrderType) return false;
+        if (reportIndication !== "todos" && indicationForTreatment(item.treatment) !== reportIndication) return false;
+        if (!normalizedReportSearch || batchMatchesSearch) return true;
+        return normalizeSearch(`${item.patientName} ${item.patientCpf} ${item.doctor} ${item.treatment}`).includes(normalizedReportSearch);
+      })
+      .map((item) => ({ batch, item }));
+  });
+  const reportLotCount = new Set(reportRows.map(({ batch }) => batch.id)).size;
+  const reportBottleCount = reportRows.reduce((total, { item }) => total + Math.max(0, item.bottles), 0);
 
   function togglePrescription(prescription: DemoPrescription) {
     const patient = patientById.get(prescription.patientId);
@@ -800,12 +829,13 @@ export default function SecretariaLotesPage() {
   ];
 
   function printBatchReport() {
-    const rows = filteredBatches.flatMap((batch) => batch.items.map((item) => `<tr><td>${escapeReportHtml(batch.name ?? batch.code)}</td><td>${escapeReportHtml(batch.orderType === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente")}</td><td>${escapeReportHtml(batchStatuses[batch.status].label)}</td><td>${escapeReportHtml(item.patientName || "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf || "—")}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase)}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(item.bottleVolumeMl ? `${item.bottleVolumeMl} mL` : "Não informado")}</td><td>${escapeReportHtml(item.doctor || "—")}</td><td>${escapeReportHtml(formatDate(batch.createdAt))}</td></tr>`)).join("");
+    const rows = reportRows.map(({ batch, item }) => `<tr><td>${escapeReportHtml(batch.name ?? batch.code)}</td><td>${escapeReportHtml((item.orderType ?? batch.orderType ?? (item.patientId ? "pedido-paciente" : "pronta-entrega")) === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente")}</td><td>${escapeReportHtml(batchStatuses[batch.status].label)}</td><td>${escapeReportHtml(item.patientName || "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf || "—")}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase)}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(item.bottleVolumeMl ? `${item.bottleVolumeMl} mL` : "Não informado")}</td><td>${escapeReportHtml(item.doctor || "—")}</td><td>${escapeReportHtml(formatDate(batch.createdAt))}</td></tr>`).join("");
     const reportWindow = window.open("", "_blank");
     if (!reportWindow) { setError("Permita a abertura de janelas para gerar o relatório."); return; }
-    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de lotes</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:10px;line-height:1.35}.actions{margin-bottom:8px}.actions button{border:0;border-radius:7px;background:#a3113a;color:#fff;padding:8px 12px;font-weight:bold}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:8px;margin-bottom:10px}.brand img{width:42px;height:42px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:16px;letter-spacing:.8px}.brand span{display:block;font-size:8px;font-weight:bold;letter-spacing:.6px;color:#66595d}h1{color:#a3113a;margin:0;font-size:17px}p{margin:5px 0}table{border-collapse:collapse;width:100%;margin-top:12px;table-layout:fixed}th,td{border:1px solid #ddd;padding:5px;text-align:left;vertical-align:top;word-break:break-word}th{background:#f1e6e8;font-size:9px}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header class="brand"><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><strong>CRA CARE</strong><span>CENTRO DE RINITE E ALERGIA</span></div></header><h1>Relatório de lotes</h1><p>Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${filteredBatches.length} lote(s)</p><table><thead><tr><th>Lote</th><th>Tipo</th><th>Status</th><th>Paciente / origem</th><th>CPF</th><th>Tratamento</th><th>Fase</th><th>Frascos</th><th>Volume</th><th>Médico</th><th>Criação</th></tr></thead><tbody>${rows || '<tr><td colspan="11">Nenhum lote no filtro atual.</td></tr>'}</tbody></table></body></html>`);
+    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de lotes</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:10px;line-height:1.35}.actions{margin-bottom:8px}.actions button{border:0;border-radius:7px;background:#a3113a;color:#fff;padding:8px 12px;font-weight:bold}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:8px;margin-bottom:10px}.brand img{width:42px;height:42px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:16px;letter-spacing:.8px}.brand span{display:block;font-size:8px;font-weight:bold;letter-spacing:.6px;color:#66595d}h1{color:#a3113a;margin:0;font-size:17px}p{margin:5px 0}table{border-collapse:collapse;width:100%;margin-top:12px;table-layout:fixed}th,td{border:1px solid #ddd;padding:5px;text-align:left;vertical-align:top;word-break:break-word}th{background:#f1e6e8;font-size:9px}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header class="brand"><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><strong>CRA CARE</strong><span>CENTRO DE RINITE E ALERGIA</span></div></header><h1>Relatório de lotes</h1><p>Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${reportLotCount} lote(s) · ${reportRows.length} item(ns) · ${reportBottleCount} frasco(s)</p><table><thead><tr><th>Lote</th><th>Tipo</th><th>Status</th><th>Paciente / origem</th><th>CPF</th><th>Tratamento</th><th>Fase</th><th>Frascos</th><th>Volume</th><th>Médico</th><th>Criação</th></tr></thead><tbody>${rows || '<tr><td colspan="11">Nenhum lote encontrado com esses filtros.</td></tr>'}</tbody></table></body></html>`);
     reportWindow.document.close();
     reportWindow.focus();
+    setReportOpen(false);
   }
 
   return (
@@ -885,7 +915,7 @@ export default function SecretariaLotesPage() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-3 self-start">
-              <button type="button" onClick={printBatchReport} className="rounded-2xl border border-[#eadfd9] bg-white px-5 py-3 text-sm font-semibold text-[#a3113a] shadow-sm hover:bg-[#fff8f8]">Gerar relatório</button>
+              <button type="button" onClick={() => setReportOpen(true)} className="rounded-2xl border border-[#eadfd9] bg-white px-5 py-3 text-sm font-semibold text-[#a3113a] shadow-sm hover:bg-[#fff8f8]">Gerar relatório</button>
               <Link
                 href="/secretaria"
                 className="rounded-2xl border border-[#eadfd9] bg-white px-5 py-3 text-sm font-semibold text-[#a3113a] shadow-sm hover:bg-[#fff8f8]"
@@ -1246,7 +1276,7 @@ export default function SecretariaLotesPage() {
               <input value={batchHistorySearch} onChange={(event) => setBatchHistorySearch(event.target.value)} placeholder="Paciente, CPF, lote, médico..." className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]" />
               <select value={batchHistoryIndication} onChange={(event) => setBatchHistoryIndication(event.target.value as "todos" | BatchIndication)} className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]"><option value="todos">Todas as indicações</option><option value="rinite">Rinite</option><option value="bacteriana">Imunobacteriana</option></select>
               <input type="month" value={batchHistoryMonth} onChange={(event) => setBatchHistoryMonth(event.target.value)} className="h-11 rounded-xl border border-[#e9dfda] bg-white px-3 text-sm outline-none focus:border-[#b91142]" />
-              <button type="button" onClick={printBatchReport} className="rounded-xl border border-[#eadfd9] px-4 py-3 text-xs font-semibold text-[#a3113a]">Gerar relatório filtrado</button>
+              <button type="button" onClick={() => setReportOpen(true)} className="rounded-xl border border-[#eadfd9] px-4 py-3 text-xs font-semibold text-[#a3113a]">Filtros do relatório</button>
             </div>
 
             <div className="mt-6 space-y-4">
@@ -1511,6 +1541,58 @@ export default function SecretariaLotesPage() {
           </section>
         </section>
       </div>
+      {reportOpen && <div className="fixed inset-0 z-[100] flex items-end justify-center bg-[#29151b]/55 p-3 sm:items-center">
+        <section role="dialog" aria-modal="true" aria-labelledby="batch-report-title" className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl sm:p-7">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[.15em] text-[#a3113a]">Gestão de lotes</p>
+              <h2 id="batch-report-title" className="mt-1 text-xl font-bold text-[#433438]">Filtros do relatório</h2>
+              <p className="mt-1 text-sm text-[#817578]">Escolha quais lotes e itens devem entrar na impressão.</p>
+            </div>
+            <button type="button" onClick={() => setReportOpen(false)} aria-label="Fechar filtros do relatório" className="rounded-full bg-[#f7f1ee] px-3 py-2 text-lg leading-none">×</button>
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <label className="block text-xs font-semibold text-[#66595d]">Status do lote
+              <select value={reportStatus} onChange={(event) => setReportStatus(event.target.value as BatchFilter)} className="mt-1.5 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
+                <option value="todos">Todos os status</option>
+                {Object.entries(batchStatuses).map(([value, status]) => <option key={value} value={value}>{status.label}</option>)}
+              </select>
+            </label>
+            <label className="block text-xs font-semibold text-[#66595d]">Tipo de pedido
+              <select value={reportOrderType} onChange={(event) => setReportOrderType(event.target.value as BatchReportOrderType)} className="mt-1.5 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
+                <option value="todos">Pedidos de pacientes e pronta entrega</option>
+                <option value="pedido-paciente">Pedidos de pacientes</option>
+                <option value="pronta-entrega">Pronta entrega</option>
+              </select>
+            </label>
+            <label className="block text-xs font-semibold text-[#66595d]">Tratamento
+              <select value={reportIndication} onChange={(event) => setReportIndication(event.target.value as "todos" | BatchIndication)} className="mt-1.5 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]">
+                <option value="todos">Rinite e Imunobacteriana</option>
+                <option value="rinite">Rinite</option>
+                <option value="bacteriana">Imunobacteriana</option>
+              </select>
+            </label>
+            <label className="block text-xs font-semibold text-[#66595d]">Buscar paciente, CPF, lote ou médico
+              <input value={reportSearch} onChange={(event) => setReportSearch(event.target.value)} placeholder="Digite para localizar" className="mt-1.5 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]" />
+            </label>
+            <label className="block text-xs font-semibold text-[#66595d]">Data inicial
+              <input type="date" value={reportStartDate} onChange={(event) => setReportStartDate(event.target.value)} className="mt-1.5 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]" />
+            </label>
+            <label className="block text-xs font-semibold text-[#66595d]">Data final
+              <input type="date" value={reportEndDate} onChange={(event) => setReportEndDate(event.target.value)} className="mt-1.5 h-11 w-full rounded-xl border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]" />
+            </label>
+          </div>
+          {reportStartDate && reportEndDate && reportStartDate > reportEndDate && <p role="alert" className="mt-3 rounded-xl bg-[#fff1f3] px-3 py-2 text-xs text-[#a3113a]">A data inicial precisa ser anterior à data final.</p>}
+          <p className="mt-4 rounded-xl bg-[#f8f5f2] px-4 py-3 text-sm text-[#66595d]">Resultado: <strong>{reportLotCount} lote(s)</strong>, <strong>{reportRows.length} item(ns)</strong> e <strong>{reportBottleCount} frasco(s)</strong>.</p>
+          <div className="mt-5 flex flex-wrap justify-between gap-2">
+            <button type="button" onClick={() => { setReportStatus("todos"); setReportOrderType("todos"); setReportIndication("todos"); setReportStartDate(""); setReportEndDate(""); setReportSearch(""); }} className="rounded-xl border border-[#e5d9d4] px-4 py-3 text-sm font-semibold text-[#66595d]">Limpar filtros</button>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => setReportOpen(false)} className="rounded-xl border border-[#e5d9d4] px-4 py-3 text-sm font-semibold text-[#66595d]">Cancelar</button>
+              <button type="button" onClick={printBatchReport} disabled={Boolean(reportStartDate && reportEndDate && reportStartDate > reportEndDate)} className="rounded-xl bg-[#a3113a] px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Gerar relatório</button>
+            </div>
+          </div>
+        </section>
+      </div>}
     </main>
   );
 }
