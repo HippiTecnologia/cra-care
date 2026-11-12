@@ -359,32 +359,41 @@ export default function LaboratorioPage() {
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <title>Relatório do lote ${escapeReportHtml(batch.name ?? batch.code)}</title>
           <style>
-            @page { size: A4 landscape; margin: 9mm 8mm; }
+            @page { size: A4 landscape; margin: 7mm; }
             * { box-sizing: border-box; }
-            body { margin: 0; color: #34292d; font: 10pt/1.35 Arial, sans-serif; }
+            body { margin: 0; color: #34292d; font: 9pt/1.25 Arial, sans-serif; }
             .actions { margin-bottom: 12px; }
             .actions button { padding: 9px 14px; border: 0; border-radius: 7px; color: #fff; background: #a3113a; font-weight: 700; cursor: pointer; }
             header { display: flex; align-items: center; gap: 10px; padding-bottom: 7px; border-bottom: 2px solid #a3113a; }
             header img { width: 38px; height: 38px; object-fit: contain; }
             header strong { color: #8e1535; font-size: 15pt; letter-spacing: .7px; }
             header p { margin: 2px 0 0; color: #66595d; font-size: 8pt; font-weight: 700; letter-spacing: .5px; }
-            h1 { margin: 9px 0 6px; color: #a3113a; font-size: 17pt; }
-            .metadata { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px 10px; margin: 7px 0 9px; font-size: 9pt; }
-            .metadata p { margin: 0; }
-            table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9pt; }
+            h1 { margin: 7px 0 4px; color: #a3113a; font-size: 15pt; }
+            .metadata { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 8px; margin: 5px 0 7px; font-size: 8pt; }
+            .metadata p { margin: 0; overflow-wrap: anywhere; }
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8pt; }
             thead { display: table-header-group; }
             tr { break-inside: avoid; page-break-inside: avoid; }
-            th, td { padding: 5px 6px; border: 1px solid #d9d3d0; text-align: left; vertical-align: top; overflow-wrap: break-word; white-space: normal; }
-            th { background: #eee9e7; color: #4d3c41; font-size: 8.5pt; }
+            th, td { padding: 3px 4px; border: 1px solid #d9d3d0; text-align: left; vertical-align: top; overflow-wrap: anywhere; word-break: normal; white-space: normal; }
+            th { background: #eee9e7; color: #4d3c41; font-size: 7.5pt; }
             tbody tr:nth-child(even) { background: #faf7f6; }
             td:nth-child(2) { font-weight: 700; }
             td:nth-child(4), td:nth-child(5) { text-align: center; }
-            .totals { margin-top: 7px; font-weight: 700; font-size: 9pt; }
-            .signoff { display: flex; justify-content: space-between; gap: 30px; margin-top: 18px; break-inside: avoid; page-break-inside: avoid; }
+            .totals { margin-top: 5px; font-weight: 700; font-size: 8pt; }
+            .signoff { display: flex; justify-content: space-between; gap: 30px; margin-top: 12px; break-inside: avoid; page-break-inside: avoid; }
             .signoff div { width: 42%; padding-top: 7px; border-top: 1px solid #6f6568; text-align: center; }
-            .notes { margin-top: 8px; padding: 7px; border: 1px solid #e6dfdc; border-radius: 6px; white-space: pre-wrap; break-inside: avoid; page-break-inside: avoid; }
+            .notes { margin-top: 6px; padding: 5px; border: 1px solid #e6dfdc; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; break-inside: auto; page-break-inside: auto; }
             @media screen { body { max-width: 1400px; margin: 24px auto; padding: 0 20px; } }
-            @media print { .actions { display: none; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+            @media print {
+              html, body { width: 100%; min-height: 0; overflow: visible; }
+              body { font-size: 8pt; line-height: 1.2; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .actions { display: none; }
+              header, h1, .metadata { break-inside: avoid; page-break-inside: avoid; }
+              .metadata { gap: 3px 7px; margin: 4px 0 6px; }
+              table { font-size: 7.5pt; }
+              th, td { padding: 3px 4px; }
+              .signoff { margin-top: 10px; }
+            }
           </style>
         </head>
         <body>
@@ -405,7 +414,7 @@ export default function LaboratorioPage() {
             <p><strong>Produção concluída:</strong> ${escapeReportHtml(formatDate(batch.productionFinishedAt))}</p>
           </div>
           <table>
-            <colgroup><col style="width:18%"><col style="width:16%"><col style="width:26%"><col style="width:7%"><col style="width:11%"><col style="width:22%"></colgroup>
+            <colgroup><col style="width:16%"><col style="width:12%"><col style="width:34%"><col style="width:6%"><col style="width:10%"><col style="width:22%"></colgroup>
             <thead><tr><th>Nome</th><th>Fase</th><th>Composição</th><th>Frascos</th><th>Volume por frasco</th><th>Médico</th></tr></thead>
             <tbody>${rows || '<tr><td colspan="6">Este lote não possui itens.</td></tr>'}</tbody>
           </table>
