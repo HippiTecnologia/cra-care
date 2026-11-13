@@ -15,7 +15,9 @@ export function isEligibleForNextOrderReminder(status?: string) {
 
 export function nextOrderIntervalDays(treatment: string | undefined, volumeMl?: number) {
   if (/bacteriana|imunobacteriana/i.test(treatment ?? "")) return 60;
-  return volumeMl === 8 ? 30 : 60;
+  if (volumeMl === 8) return 30;
+  if (volumeMl === 4) return 45;
+  return 60;
 }
 
 function trackForTreatment(treatment?: string) {
@@ -37,8 +39,8 @@ function addDays(date: Date, days: number) {
 }
 
 /**
- * Uses each treatment's newest bottle. The timer starts at receipt, not at the
- * first use recorded in the portal. A finished newest bottle is due immediately.
+ * Uses each treatment's newest bottle. The timer starts on the first-use date,
+ * falling back to receipt when the start date was not recorded.
  */
 export type NextOrderReminder = {
   treatment: "rinite" | "imunobacteriana";
@@ -82,16 +84,17 @@ export function getNextOrderReminders(
   for (const [track, trackBottles] of bottlesByTrack) {
     const latestBottle = trackBottles.slice().sort((first, second) => second.number - first.number)[0];
     if (!latestBottle) continue;
-    if (latestBottle.status === "finalizado") {
-      reminders.push({ treatment: track as NextOrderReminder["treatment"], date: parseLocalDate(latestBottle.finishedAt) ?? now });
-      continue;
-    }
-    const receivedAt = parseLocalDate(latestBottle.receivedAt)
-      ?? parseLocalDate(latestBottle.startedAt);
-    if (!receivedAt) continue;
+    const timerStartedAt = parseLocalDate(latestBottle.startedAt)
+      ?? parseLocalDate(latestBottle.receivedAt);
+    const reminderDate = timerStartedAt
+      ? addDays(timerStartedAt, nextOrderIntervalDays(latestBottle.treatment, latestBottle.bottleVolumeMl))
+      : latestBottle.status === "finalizado"
+        ? parseLocalDate(latestBottle.finishedAt) ?? now
+        : null;
+    if (!reminderDate) continue;
     reminders.push({
       treatment: track as NextOrderReminder["treatment"],
-      date: addDays(receivedAt, nextOrderIntervalDays(latestBottle.treatment, latestBottle.bottleVolumeMl)),
+      date: reminderDate,
     });
   }
 
