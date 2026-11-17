@@ -15,7 +15,7 @@ import type {
   PrescriptionFormula,
 } from "../../medico/patient-store";
 import { buildBottleHistory } from "../../paciente/bottle-history";
-import { getNextOrderReminders, hasNextOrderDue, hasNextOrderInProgress } from "../next-order";
+import { getNextOrderReminders, hasNextOrderDue, hasNextOrderInProgress, nextOrderIntervalDays } from "../next-order";
 import {
   PatientPortalState,
   createDefaultPortalState,
@@ -328,6 +328,22 @@ export default function PatientRecordsPage() {
   const visibleTreatmentTracks: TreatmentTrack[] = treatmentTracks.length
     ? treatmentTracks
     : patient?.treatment ? [treatmentTrack(patient.treatment)] : [];
+  const nextOrderTimingByTrack = visibleTreatmentTracks.map((track) => {
+    const latestBottle = bottleHistory
+      .filter((item) => treatmentTrack(item.treatment) === track)
+      .sort((first, second) => second.number - first.number)[0];
+    const latestPrescription = prescriptions
+      .filter((item) => treatmentTrack(item.treatment) === track)
+      .sort((first, second) => second.createdAt.localeCompare(first.createdAt))[0];
+    const treatment = latestBottle?.treatment ?? latestPrescription?.treatment ?? track;
+    const volume = latestBottle?.bottleVolumeMl ?? latestPrescription?.bottleVolumeMl;
+
+    return {
+      track,
+      volume,
+      intervalDays: nextOrderIntervalDays(treatment, volume),
+    };
+  });
   const activeFinancialTrack = visibleTreatmentTracks.includes(financialTrack)
     ? financialTrack
     : visibleTreatmentTracks[0] ?? "Rinite";
@@ -1075,6 +1091,16 @@ export default function PatientRecordsPage() {
               <Field label="Tipo de documento"><select value={draft.billingDocumentType ?? "cpf"} onChange={(event) => updateDraft("billingDocumentType", event.target.value as "cpf" | "cnpj")} className={inputClass}><option value="cpf">CPF</option><option value="cnpj">CNPJ</option></select></Field>
               <Field label={`${draft.billingDocumentType === "cnpj" ? "CNPJ" : "CPF"} para nota fiscal`}><input inputMode="numeric" maxLength={draft.billingDocumentType === "cnpj" ? 18 : 14} value={draft.billingCpf ?? ""} onChange={(event) => updateDraft("billingCpf", formatBillingDocument(event.target.value, draft.billingDocumentType ?? "cpf"))} placeholder={draft.billingDocumentType === "cnpj" ? "00.000.000/0000-00" : "000.000.000-00"} className={inputClass} /></Field>
               <Field label="Situação do cadastro"><select value={draft.registrationStatus} onChange={(event) => updateDraft("registrationStatus", event.target.value as DemoPatientRecord["registrationStatus"])} className={inputClass}><option value="pending-secretary">Pendente da secretaria</option><option value="completed">Completo</option></select></Field>
+              <Field label="Aviso do próximo pedido">
+                <div className="mt-2 min-h-11 rounded-xl border border-[#e9dfda] bg-[#fbf7f5] px-3 py-2.5 text-sm">
+                  {nextOrderTimingByTrack.length > 0 ? <div className="space-y-1.5">
+                    {nextOrderTimingByTrack.map(({ track, volume, intervalDays }) => <p key={track} className="font-semibold text-[#544449]">
+                      {track} · {volume ? `${volume} mL` : "volume não informado"} · {intervalDays} dias após o início
+                    </p>)}
+                  </div> : <p className="font-semibold text-[#544449]">Sem tratamento registrado</p>}
+                  <p className="mt-2 text-xs leading-5 text-[#817578]">O prazo é calculado automaticamente pelo volume. A contagem começa na data de início; se ela não estiver registrada, usa a data de recebimento quando disponível.</p>
+                </div>
+              </Field>
               <Field label="Observações de entrega" wide><textarea rows={3} value={draft.deliveryNotes ?? ""} onChange={(event) => updateDraft("deliveryNotes", event.target.value)} className={textareaClass} /></Field>
               <Field label="Observações da secretaria" wide><textarea rows={4} value={draft.notes ?? ""} onChange={(event) => updateDraft("notes", event.target.value)} className={textareaClass} /></Field>
               <div className="flex justify-end sm:col-span-2"><button type="button" onClick={() => saveDraft("Dados pessoais")} className={primaryButtonClass}>Salvar dados pessoais</button></div>
