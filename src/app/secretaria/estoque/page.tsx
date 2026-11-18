@@ -91,6 +91,12 @@ function escapeReportHtml(value: string | number | undefined) {
   return String(value ?? "—").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 
+function formatBirthDate(value?: string) {
+  if (!value) return "Não informado";
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : "Não informado";
+}
+
 type StockDeliveryDetailsProps = {
   item: DemoStockItem;
   patient: DemoPatientRecord;
@@ -487,10 +493,29 @@ export default function SecretariaEstoquePage() {
   ]).entries());
 
   function printStockReport() {
-    const rows = filteredStock.map((item) => `<tr><td>${escapeReportHtml(item.patientId ? item.patientName : "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf)}</td><td>${escapeReportHtml(batchNames[item.batchId] ?? item.batchCode)}</td><td>${escapeReportHtml(item.origin === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente")}</td><td>${escapeReportHtml(item.doctor)}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase)}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(stockStatuses[item.status].label)}</td><td>${escapeReportHtml(item.delivery)}</td><td>${escapeReportHtml(item.laboratory)}</td><td>${escapeReportHtml(formatDate(item.receivedAt))}</td><td>${escapeReportHtml(formatDate(item.reservedAt))}</td><td>${escapeReportHtml(formatDate(item.deliveredAt))}</td><td>${escapeReportHtml(item.checkedBy)}</td><td>${escapeReportHtml(item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · "))}</td></tr>`).join("");
+    const patientsById = new Map(patients.map((patient) => [patient.id, patient]));
+    const rows = filteredStock.map((item) => {
+      const patient = item.patientId ? patientsById.get(item.patientId) : undefined;
+      const address = item.deliveryAddress;
+      const locality = [address?.neighborhood || patient?.neighborhood, address?.city || patient?.city, address?.state || patient?.state]
+        .filter(Boolean)
+        .join(" / ");
+      const fullAddress = [
+        address?.street || patient?.street || patient?.address,
+        (address?.number || patient?.addressNumber) ? `nº ${address?.number || patient?.addressNumber}` : undefined,
+        address?.complement || patient?.addressComplement,
+        locality || undefined,
+        (address?.zipCode || patient?.zipCode) ? `CEP ${address?.zipCode || patient?.zipCode}` : undefined,
+      ].filter(Boolean).join(" · ") || "Não informado";
+      const patientDetails = patient
+        ? `<div><strong>Dados do paciente</strong><br>Nome: ${escapeReportHtml(patient.name || item.patientName)}<br>CPF: ${escapeReportHtml(patient.cpf || item.patientCpf)}<br>Data de nascimento: ${escapeReportHtml(formatBirthDate(patient.birthDate))}</div><div><strong>Telefone:</strong><br>${escapeReportHtml(patient.phone || "Não informado")}</div><div><strong>Endereço completo:</strong><br>${escapeReportHtml(fullAddress)}</div>`
+        : `<div><strong>Dados do paciente</strong><br>Pronta entrega — sem paciente vinculado.</div><div><strong>Telefone:</strong><br>Não se aplica</div><div><strong>Endereço completo:</strong><br>Não se aplica</div>`;
+      const stockDetails = `<tr><td>${escapeReportHtml(item.patientId ? item.patientName : "Pronta entrega")}</td><td>${escapeReportHtml(item.patientCpf)}</td><td>${escapeReportHtml(batchNames[item.batchId] ?? item.batchCode)}</td><td>${escapeReportHtml(item.origin === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente")}</td><td>${escapeReportHtml(item.doctor)}</td><td>${escapeReportHtml(item.treatment)}</td><td>${escapeReportHtml(item.phase)}</td><td>${escapeReportHtml(item.bottles)}</td><td>${escapeReportHtml(stockStatuses[item.status].label)}</td><td>${escapeReportHtml(item.delivery)}</td><td>${escapeReportHtml(item.laboratory)}</td><td>${escapeReportHtml(formatDate(item.receivedAt))}</td><td>${escapeReportHtml(formatDate(item.reservedAt))}</td><td>${escapeReportHtml(formatDate(item.deliveredAt))}</td><td>${escapeReportHtml(item.checkedBy)}</td><td>${escapeReportHtml(item.formulas.map((formula) => `${formula.name} ${formula.percentage}%`).join(" · "))}</td></tr>`;
+      return `${stockDetails}<tr class="patient-extra"><td colspan="16"><div class="patient-extra-grid">${patientDetails}</div></td></tr>`;
+    }).join("");
     const reportWindow = window.open("", "_blank");
     if (!reportWindow) { setMessage("Permita a abertura de janelas no navegador para gerar o relatório."); return; }
-    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de estoque</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:9px;line-height:1.3}.actions{margin-bottom:8px}.actions button{border:0;border-radius:7px;background:#a3113a;color:#fff;padding:8px 12px;font-weight:bold}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:8px;margin-bottom:10px}.brand img{width:42px;height:42px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:16px;letter-spacing:.8px}.brand span{display:block;font-size:8px;font-weight:bold;letter-spacing:.6px;color:#66595d}h1{color:#a3113a;margin:0;font-size:17px}p{margin:5px 0}table{border-collapse:collapse;width:100%;margin-top:12px;table-layout:fixed}th,td{border:1px solid #ddd;padding:4px;text-align:left;vertical-align:top;word-break:break-word}th{background:#f1e6e8;font-size:8px}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header class="brand"><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><strong>CRA CARE</strong><span>CENTRO DE RINITE E ALERGIA</span></div></header><h1>Relatório de vacinas em estoque</h1><p>Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${filteredStock.length} registro(s)</p><table><thead><tr><th>Paciente/origem</th><th>CPF</th><th>Lote</th><th>Tipo</th><th>Médico</th><th>Tratamento</th><th>Fase</th><th>Frascos</th><th>Status</th><th>Entrega</th><th>Laboratório</th><th>Entrada</th><th>Reserva</th><th>Saída</th><th>Conferido por</th><th>Fórmula</th></tr></thead><tbody>${rows || "<tr><td colspan=\"16\">Nenhum registro no filtro atual.</td></tr>"}</tbody></table></body></html>`);
+    reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de estoque</title><style>@page{size:A4 landscape;margin:10mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:9px;line-height:1.3}.actions{margin-bottom:8px}.actions button{border:0;border-radius:7px;background:#a3113a;color:#fff;padding:8px 12px;font-weight:bold}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:8px;margin-bottom:10px}.brand img{width:42px;height:42px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:16px;letter-spacing:.8px}.brand span{display:block;font-size:8px;font-weight:bold;letter-spacing:.6px;color:#66595d}h1{color:#a3113a;margin:0;font-size:17px}p{margin:5px 0}table{border-collapse:collapse;width:100%;margin-top:12px;table-layout:fixed}th,td{border:1px solid #ddd;padding:4px;text-align:left;vertical-align:top;word-break:break-word}th{background:#f1e6e8;font-size:8px}.patient-extra td{background:#fbf7f5;border-top:0;padding:6px}.patient-extra-grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,.8fr) minmax(0,2fr);gap:10px;font-size:8px;line-height:1.45}.patient-extra-grid strong{color:#86203b}@media print{.actions{display:none}body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header class="brand"><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><strong>CRA CARE</strong><span>CENTRO DE RINITE E ALERGIA</span></div></header><h1>Relatório de vacinas em estoque</h1><p>Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))} · ${filteredStock.length} registro(s)</p><table><thead><tr><th>Paciente/origem</th><th>CPF</th><th>Lote</th><th>Tipo</th><th>Médico</th><th>Tratamento</th><th>Fase</th><th>Frascos</th><th>Status</th><th>Entrega</th><th>Laboratório</th><th>Entrada</th><th>Reserva</th><th>Saída</th><th>Conferido por</th><th>Fórmula</th></tr></thead><tbody>${rows || "<tr><td colspan=\"16\">Nenhum registro no filtro atual.</td></tr>"}</tbody></table></body></html>`);
     reportWindow.document.close();
     reportWindow.focus();
   }
