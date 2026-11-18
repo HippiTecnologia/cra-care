@@ -39,6 +39,8 @@ type PendingReceivingItem = {
   patient?: DemoPatientRecord;
 };
 
+const alphabeticalCollator = new Intl.Collator("pt-BR", { sensitivity: "base", numeric: true, ignorePunctuation: true });
+
 const pendingLabStatusLabels: Partial<Record<DemoBatch["status"], string>> = {
   enviado: "Enviado ao laboratório",
   "em-producao": "Em produção",
@@ -414,6 +416,7 @@ export default function SecretariaEstoquePage() {
 
   const filteredStock = useMemo(() => {
     const normalized = normalizeSearch(search);
+    const patientsById = new Map(patients.map((patient) => [patient.id, patient]));
 
     return stock.filter((item) => {
       if (item.status === "entregue" && item.deliveredAt && deliveredRetentionCutoff > 0 && new Date(item.deliveredAt).getTime() < deliveredRetentionCutoff) return false;
@@ -427,8 +430,15 @@ export default function SecretariaEstoquePage() {
       return normalizeSearch(
         `${item.patientName} ${item.patientCpf} ${item.batchCode} ${batchNames[item.batchId] ?? ""} ${item.doctor} ${item.treatment}`,
       ).includes(normalized);
+    }).sort((first, second) => {
+      const firstName = first.patientId ? patientsById.get(first.patientId)?.name || first.patientName || "Paciente" : "Pronta entrega";
+      const secondName = second.patientId ? patientsById.get(second.patientId)?.name || second.patientName || "Paciente" : "Pronta entrega";
+      return alphabeticalCollator.compare(firstName, secondName)
+        || alphabeticalCollator.compare(batchNames[first.batchId] ?? first.batchCode, batchNames[second.batchId] ?? second.batchCode)
+        || alphabeticalCollator.compare(first.treatment, second.treatment)
+        || first.id.localeCompare(second.id);
     });
-  }, [batchFilter, batchNames, deliveredRetentionCutoff, deliveryFilter, filter, originFilter, search, stock, treatmentFilter]);
+  }, [batchFilter, batchNames, deliveredRetentionCutoff, deliveryFilter, filter, originFilter, patients, search, stock, treatmentFilter]);
 
   const receivingItems = useMemo(() => batches.flatMap((batch): PendingReceivingItem[] => {
     if (batch.archivedAt || !pendingLabStatusLabels[batch.status]) return [];
@@ -456,6 +466,12 @@ export default function SecretariaEstoquePage() {
       if (batchFilter !== "todos" && batch.id !== batchFilter) return false;
       if (!normalized) return true;
       return normalizeSearch(`${item.patientName} ${item.patientCpf} ${item.doctor} ${item.treatment} ${batch.code} ${batch.name ?? ""} ${batch.laboratory}`).includes(normalized);
+    }).sort((first, second) => {
+      const firstName = first.patient?.name || first.item.patientName || (first.orderType === "pronta-entrega" ? "Pronta entrega" : "Paciente");
+      const secondName = second.patient?.name || second.item.patientName || (second.orderType === "pronta-entrega" ? "Pronta entrega" : "Paciente");
+      return alphabeticalCollator.compare(firstName, secondName)
+        || alphabeticalCollator.compare(first.batch.name ?? first.batch.code, second.batch.name ?? second.batch.code)
+        || first.id.localeCompare(second.id);
     });
   }, [batchFilter, deliveryFilter, receivingItems, search, treatmentFilter]);
 
@@ -490,7 +506,7 @@ export default function SecretariaEstoquePage() {
   const availableBatches = Array.from(new Map([
     ...stock.map((item) => [item.batchId, batchNames[item.batchId] ?? item.batchCode] as const),
     ...receivingItems.map(({ batch }) => [batch.id, batch.name ?? batch.code] as const),
-  ]).entries());
+  ]).entries()).sort((first, second) => alphabeticalCollator.compare(first[1], second[1]));
 
   function printStockReport() {
     const patientsById = new Map(patients.map((patient) => [patient.id, patient]));
