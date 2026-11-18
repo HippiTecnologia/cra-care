@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DemoBatch,
   DemoBatchItem,
@@ -150,6 +150,7 @@ function indicationLabel(indication?: DemoBatch["indication"]) {
 }
 
 export default function SecretariaLotesPage() {
+  const confirmingBatchIds = useRef(new Set<string>());
   const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
   const [prescriptions, setPrescriptions] = useState<DemoPrescription[]>([]);
   const [stockRecords, setStockRecords] = useState<DemoStockItem[]>([]);
@@ -191,6 +192,7 @@ export default function SecretariaLotesPage() {
   const [readyBottles, setReadyBottles] = useState(1);
   const [readyBottleVolumeMl, setReadyBottleVolumeMl] = useState<BottleVolumeMl>(4);
   const [context, setContext] = useState<SecretaryContext | null>(null);
+  const [pendingConfirmations, setPendingConfirmations] = useState<string[]>([]);
 
   const effectiveReadyFormulas = batchIndication === "bacteriana" ? immunobacterialReadyFormulas : readyFormulas;
   const readyFormulaTotal = useMemo(
@@ -802,7 +804,7 @@ export default function SecretariaLotesPage() {
   }
 
   async function toggleCheckedItem(batch: DemoBatch, prescriptionId: string) {
-    if (batch.status !== "pronto") return;
+    if (batch.status !== "pronto" || confirmingBatchIds.current.has(batch.id)) return;
 
     const current = batch.checkedPrescriptionIds ?? [];
     const checkedPrescriptionIds = current.includes(prescriptionId)
@@ -814,6 +816,9 @@ export default function SecretariaLotesPage() {
   }
 
   async function approveBatch(batch: DemoBatch) {
+    if (confirmingBatchIds.current.has(batch.id)) return;
+    confirmingBatchIds.current.add(batch.id);
+    setPendingConfirmations((current) => current.includes(batch.id) ? current : [...current, batch.id]);
     try {
       if (!context) throw new Error("A sessão da Secretaria ainda não foi carregada.");
       const stockItems = await confirmSecretaryBatch(
@@ -835,7 +840,7 @@ export default function SecretariaLotesPage() {
       setError("");
       setConferenceNotes("");
       setMessage(
-        `Lote ${batch.code} conferido! ${bottleCount} frasco(s) ${batch.orderType === "pronta-entrega" ? "de pronta entrega" : `de ${stockItems.length} paciente(s)`} entraram no estoque.`,
+        `Lote ${batch.code} conferido! ${bottleCount} frasco(s) ${batch.orderType === "pronta-entrega" ? "de pronta entrega" : `de ${stockItems.length} paciente(s)`} constam no estoque.`,
       );
     } catch (cause) {
       setError(
@@ -843,6 +848,9 @@ export default function SecretariaLotesPage() {
           ? cause.message
           : "Não foi possível concluir a conferência do lote.",
       );
+    } finally {
+      confirmingBatchIds.current.delete(batch.id);
+      setPendingConfirmations((current) => current.filter((id) => id !== batch.id));
     }
   }
 
@@ -1477,6 +1485,7 @@ export default function SecretariaLotesPage() {
                                   <button
                                     type="button"
                                     onClick={() => toggleCheckedItem(batch, item.prescriptionId)}
+                                    disabled={pendingConfirmations.includes(batch.id)}
                                     className={`mt-3 rounded-lg px-3 py-2 text-xs font-semibold ${checked ? "bg-[#e5f5ed] text-[#187157]" : "bg-[#f5efec] text-[#67595d]"}`}
                                   >
                                     {checked ? "✓ Item e frascos conferidos" : item.patientId ? "○ Conferir paciente, composição e frascos" : "○ Conferir fórmula, fase e frascos"}
@@ -1551,10 +1560,10 @@ export default function SecretariaLotesPage() {
                               <button
                                 type="button"
                                 onClick={() => approveBatch(batch)}
-                                disabled={(batch.indication === "bacteriana" ? !batch.externalReceivedAt : !batch.laboratoryOkAt) || (batch.checkedPrescriptionIds ?? []).length !== batch.items.length}
+                                disabled={pendingConfirmations.includes(batch.id) || (batch.indication === "bacteriana" ? !batch.externalReceivedAt : !batch.laboratoryOkAt) || (batch.checkedPrescriptionIds ?? []).length !== batch.items.length}
                                 className="mt-4 w-full rounded-xl bg-[#187157] px-4 py-3 text-sm font-semibold text-white hover:bg-[#115842] disabled:cursor-not-allowed disabled:opacity-45"
                               >
-                                {batch.indication === "bacteriana" ? (batch.externalReceivedAt ? "Aprovar conferência e lançar no estoque" : "Aguardando recebimento externo") : batch.laboratoryOkAt ? "Aprovar conferência e lançar no estoque" : "Aguardando OK do laboratório"}
+                                {pendingConfirmations.includes(batch.id) ? "Conferindo lote..." : batch.indication === "bacteriana" ? (batch.externalReceivedAt ? "Aprovar conferência e lançar no estoque" : "Aguardando recebimento externo") : batch.laboratoryOkAt ? "Aprovar conferência e lançar no estoque" : "Aguardando OK do laboratório"}
                               </button>
                             </div>
                           )}

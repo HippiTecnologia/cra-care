@@ -1036,6 +1036,45 @@ function batchItemFromRow(row: Record<string, unknown>): DemoBatchItem {
   };
 }
 
+const BATCH_STATUS_ORDER: Record<DemoBatch["status"], number> = {
+  rascunho: 0,
+  enviado: 1,
+  "em-producao": 2,
+  pronto: 3,
+  conferido: 4,
+};
+
+function batchFromRow(row: Record<string, unknown>, items: DemoBatchItem[] = []): DemoBatch {
+  const metadata = objectValue(row.metadata);
+  return {
+    ...(metadata as unknown as Partial<DemoBatch>),
+    id: text(row.id),
+    code: text(row.code, text(metadata.code, `CRA-${new Date(text(row.created_at)).getFullYear()}`)),
+    name: text(row.name),
+    createdAt: text(row.created_at),
+    status: text(row.status, "rascunho") as DemoBatch["status"],
+    laboratory: text(row.laboratory),
+    notes: text(metadata.notes),
+    items,
+  };
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([first], [second]) => first.localeCompare(second));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function batchItemKey(row: Record<string, unknown>) {
+  const metadata = objectValue(row.metadata);
+  return text(row.prescription_id) || text(metadata.prescriptionId);
+}
+
 export async function loadSecretaryBatches(context?: SecretaryContext) {
   const current = context ?? await loadSecretaryContext();
   const supabase = getSupabaseClient();
@@ -1050,20 +1089,8 @@ export async function loadSecretaryBatches(context?: SecretaryContext) {
     const batchId = text(row.batch_id);
     itemsByBatch.set(batchId, [...(itemsByBatch.get(batchId) ?? []), batchItemFromRow(row)]);
   }
-  return ((batchResult.data ?? []) as unknown as Record<string, unknown>[]).map((row): DemoBatch => {
-    const metadata = objectValue(row.metadata);
-    return {
-      ...(metadata as unknown as Partial<DemoBatch>),
-      id: text(row.id),
-      code: text(row.code, text(metadata.code, `CRA-${new Date(text(row.created_at)).getFullYear()}`)),
-      name: text(row.name),
-      createdAt: text(row.created_at),
-      status: text(row.status, "rascunho") as DemoBatch["status"],
-      laboratory: text(row.laboratory),
-      notes: text(metadata.notes),
-      items: itemsByBatch.get(text(row.id)) ?? [],
-    };
-  });
+  return ((batchResult.data ?? []) as unknown as Record<string, unknown>[]).map((row) =>
+    batchFromRow(row, itemsByBatch.get(text(row.id)) ?? []));
 }
 
 export async function saveSecretaryBatch(context: SecretaryContext, batch: DemoBatch) {
@@ -1091,28 +1118,109 @@ export async function saveSecretaryBatch(context: SecretaryContext, batch: DemoB
     orderType: savedBatch.orderType,
     indication: savedBatch.indication,
   };
-  const { error } = await supabase.from("batches").upsert({
-    id: batchId,
-    clinic_id: context.clinicId,
-    code: savedBatch.code,
-    name: savedBatch.name ?? savedBatch.code,
-    status: savedBatch.status,
-    laboratory: savedBatch.laboratory,
-    metadata,
-  });
-  if (error) throw error;
-  const { error: deleteError } = await supabase.from("batch_items").delete().eq("batch_id", batchId);
-  if (deleteError) throw deleteError;
-  if (savedBatch.items.length) {
-    const { error: itemError } = await supabase.from("batch_items").insert(savedBatch.items.map((item) => ({
+  const existingBatchResult = await supabase.from("batches")
+    .select("id, clinic_id, code, name, status, laboratory, created_at, metadata")
+    .eq("id", batchId)
+    .eq("clinic_id", context.clinicId)
+    .maybeSingle();
+  if (existingBatchResult.error) throw existingBatchResult.error;
+
+  const existingBatch = existingBatchResult.data as unknown as Record<string, unknown> | null;
+  let currentBatchRow: Record<string, unknown>;
+  if (!existingBatch) {
+    const { data, error } = await supabase.from("batches").insert({
+      id: batchId,
+      clinic_id: context.clinicId,
+      code: savedBatch.code,
+      name: savedBatch.name ?? savedBatch.code,
+      status: savedBatch.status,
+      laboratory: savedBatch.laboratory,
+      metadata,
+    }).select("id, clinic_id, code, name, status, laboratory, created_at, metadata").single();
+    if (error) throw error;
+    currentBatchRow = data as unknown as Record<string, unknown>;
+  } else {
+    const currentStatus = text(existingBatch.status, "rascunho") as DemoBatch["status"];
+    const requestedStatus = savedBatch.status;
+    if ((BATCH_STATUS_ORDER[currentStatus] ?? 0) > (BATCH_STATUS_ORDER[requestedStatus] ?? 0)) {
+      const itemsResult = await supabase.from("batch_items").select("*").eq("batch_id", batchId);
+      if (itemsResult.error) throw itemsResult.error;
+      const currentItems = ((itemsResult.data ?? []) as unknown as Record<string, unknown>[]).map(batchItemFromRow);
+      return batchFromRow(existingBatch, currentItems);
+    }
+
+    const { data, error } = await supabase.from("batches").update({
+      code: savedBatch.code,
+      name: savedBatch.name ?? savedBatch.code,
+      status: requestedStatus,
+      laboratory: savedBatch.laboratory,
+      metadata,
+    })
+      .eq("id", batchId)
+      .eq("clinic_id", context.clinicId)
+      .eq("status", currentStatus)
+      .select("id, clinic_id, code, name, status, laboratory, created_at, metadata")
+      .maybeSingle();
+    if (error) throw error;
+    if (data) {
+      currentBatchRow = data as unknown as Record<string, unknown>;
+    } else {
+      const latestResult = await supabase.from("batches")
+        .select("id, clinic_id, code, name, status, laboratory, created_at, metadata")
+        .eq("id", batchId)
+        .eq("clinic_id", context.clinicId)
+        .maybeSingle();
+      if (latestResult.error) throw latestResult.error;
+      const latest = latestResult.data as unknown as Record<string, unknown> | null;
+      if (!latest) throw new Error("O lote não foi encontrado para salvar.");
+      const latestStatus = text(latest.status, "rascunho") as DemoBatch["status"];
+      if ((BATCH_STATUS_ORDER[latestStatus] ?? 0) > (BATCH_STATUS_ORDER[requestedStatus] ?? 0)) {
+        const itemsResult = await supabase.from("batch_items").select("*").eq("batch_id", batchId);
+        if (itemsResult.error) throw itemsResult.error;
+        const currentItems = ((itemsResult.data ?? []) as unknown as Record<string, unknown>[]).map(batchItemFromRow);
+        return batchFromRow(latest, currentItems);
+      }
+      currentBatchRow = latest;
+    }
+  }
+
+  // Keep batch item identities stable. Rewriting every row on each checkbox
+  // change both caused unnecessary writes and let stale saves race with receipt.
+  const currentItemsResult = await supabase.from("batch_items").select("*").eq("batch_id", batchId);
+  if (currentItemsResult.error) throw currentItemsResult.error;
+  const existingRows = (currentItemsResult.data ?? []) as unknown as Record<string, unknown>[];
+  const existingByKey = new Map(existingRows.map((row) => [batchItemKey(row), row]));
+  const savedKeys = new Set<string>();
+  for (const item of savedBatch.items) {
+    const key = item.prescriptionId;
+    savedKeys.add(key);
+    const row = existingByKey.get(key);
+    const payload = {
       batch_id: batchId,
       patient_id: item.patientId && isUuid(item.patientId) ? item.patientId : null,
-      prescription_id: item.prescriptionId && isUuid(item.prescriptionId) ? item.prescriptionId : null,
+      prescription_id: isUuid(item.prescriptionId) ? item.prescriptionId : null,
       bottles: item.bottles,
       bottle_volume_ml: item.bottleVolumeMl ?? null,
       metadata: item,
-    })));
-    if (itemError) throw itemError;
+    };
+    const isUnchanged = row
+      && text(row.patient_id) === text(payload.patient_id)
+      && text(row.prescription_id) === text(payload.prescription_id)
+      && number(row.bottles) === payload.bottles
+      && (bottleVolume(row.bottle_volume_ml) ?? null) === (payload.bottle_volume_ml ?? null)
+      && stableJson(row.metadata) === stableJson(item);
+    if (isUnchanged) continue;
+    const write = row
+      ? await supabase.from("batch_items").update(payload).eq("id", text(row.id)).eq("batch_id", batchId)
+      : await supabase.from("batch_items").insert(payload);
+    if (write.error) throw write.error;
+  }
+  if (text(currentBatchRow.status) === "rascunho") {
+    const removedRows = existingRows.filter((row) => !savedKeys.has(batchItemKey(row)));
+    for (const row of removedRows) {
+      const { error } = await supabase.from("batch_items").delete().eq("id", text(row.id)).eq("batch_id", batchId);
+      if (error) throw error;
+    }
   }
   void audit(context, "upsert", "batch", batchId, { status: batch.status, items: batch.items.length });
   return savedBatch;
@@ -1304,6 +1412,26 @@ export async function deleteSecretaryBottleHistoryEntry(
   return { bottleNumber: number(data.bottle_number) };
 }
 
+async function deterministicBatchBottleId(batchId: string, prescriptionId: string) {
+  // UUID v5-shaped ID: retries and concurrent confirmations of the same batch
+  // item address the same bottle row instead of inserting new rows.
+  const namespace = "6ba7b8119dad11d180b400c04fd430c8";
+  const namespaceBytes = Uint8Array.from(namespace.match(/.{2}/g) ?? [], (part) => Number.parseInt(part, 16));
+  const nameBytes = new TextEncoder().encode(`${batchId}:${prescriptionId}`);
+  const input = new Uint8Array(namespaceBytes.length + nameBytes.length);
+  input.set(namespaceBytes);
+  input.set(nameBytes, namespaceBytes.length);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-1", input));
+  digest[6] = (digest[6] & 0x0f) | 0x50;
+  digest[8] = (digest[8] & 0x3f) | 0x80;
+  const hex = [...digest.slice(0, 16)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function stockPrescriptionKey(row: Record<string, unknown>) {
+  return text(row.prescription_id) || text(objectValue(row.metadata).prescriptionId);
+}
+
 export async function confirmSecretaryBatch(
   context: SecretaryContext,
   batch: DemoBatch,
@@ -1311,26 +1439,72 @@ export async function confirmSecretaryBatch(
   conferenceNotes: string,
   patients: DemoPatientRecord[],
 ) {
-  if (batch.status !== "pronto") throw new Error("Este lote já foi conferido ou ainda não está pronto.");
-  if (batch.indication === "bacteriana" && !batch.externalReceivedAt) {
+  if (!isUuid(batch.id)) throw new Error("Não foi possível identificar o lote para confirmar a entrada no estoque.");
+  const supabase = getSupabaseClient();
+  const batchResult = await supabase.from("batches")
+    .select("id, status, metadata")
+    .eq("id", batch.id)
+    .eq("clinic_id", context.clinicId)
+    .maybeSingle();
+  if (batchResult.error) throw batchResult.error;
+  if (!batchResult.data) throw new Error("O lote não foi encontrado para confirmar a entrada no estoque.");
+
+  const currentBatchStatus = text(batchResult.data.status, "rascunho") as DemoBatch["status"];
+  const batchMetadata = objectValue(batchResult.data.metadata);
+  const batchRows = await loadAllPages<Record<string, unknown>>((from, to) => supabase.from("bottles")
+    .select(SECRETARY_BOTTLE_COLUMNS)
+    .eq("clinic_id", context.clinicId)
+    .eq("batch_id", batch.id)
+    .order("id", { ascending: true })
+    .range(from, to));
+  const batchStock = batchRows
+    .filter((row) => objectValue(row.metadata).manuallyDeleted !== true)
+    .map(stockFromRow);
+  if (currentBatchStatus === "conferido") return batchStock;
+  if (currentBatchStatus !== "pronto") throw new Error("Este lote ainda não está pronto para conferência.");
+
+  const authoritativeBatch = {
+    ...batch,
+    status: currentBatchStatus,
+    indication: text(batchMetadata.indication, batch.indication ?? "rinite") as DemoBatch["indication"],
+    externalReceivedAt: text(batchMetadata.externalReceivedAt, batch.externalReceivedAt ?? "") || undefined,
+    externalLaboratory: text(batchMetadata.externalLaboratory, batch.externalLaboratory ?? "") || undefined,
+    laboratoryOkAt: text(batchMetadata.laboratoryOkAt, batch.laboratoryOkAt ?? "") || undefined,
+    laboratoryOkBy: text(batchMetadata.laboratoryOkBy, batch.laboratoryOkBy ?? "") || undefined,
+    checkedPrescriptionIds: Array.isArray(batchMetadata.checkedPrescriptionIds)
+      ? batchMetadata.checkedPrescriptionIds.map(String)
+      : batch.checkedPrescriptionIds,
+  };
+  if (authoritativeBatch.indication === "bacteriana" && !authoritativeBatch.externalReceivedAt) {
     throw new Error("Registre a data de recebimento do laboratório externo antes de lançar a Imunobacteriana no estoque.");
   }
-  if (batch.indication !== "bacteriana" && (!batch.laboratoryOkAt || !batch.laboratoryOkBy)) {
+  if (authoritativeBatch.indication !== "bacteriana" && (!authoritativeBatch.laboratoryOkAt || !authoritativeBatch.laboratoryOkBy)) {
     throw new Error("Aguarde o OK do laboratório antes de liberar o lote para estoque.");
   }
-  const checkedIds = new Set(batch.checkedPrescriptionIds ?? []);
+  const checkedIds = new Set(authoritativeBatch.checkedPrescriptionIds ?? []);
   if (!batch.items.length || batch.items.some((item) => !checkedIds.has(item.prescriptionId))) {
     throw new Error("Confira todos os itens antes de liberar o lote para estoque.");
   }
   if (!checkedBy.trim()) throw new Error("Informe o responsável pela conferência do lote.");
   // Para Imunobacteriana, registra a data real de chegada do laboratório
   // externo; nos demais fluxos vale o momento da conferência.
-  const receivedAt = batch.externalReceivedAt ?? new Date().toISOString();
+  const receivedAt = authoritativeBatch.externalReceivedAt ?? new Date().toISOString();
+  const rowsByPrescription = new Map<string, Record<string, unknown>[]>();
+  for (const row of batchRows) {
+    const key = stockPrescriptionKey(row);
+    if (!key) continue;
+    rowsByPrescription.set(key, [...(rowsByPrescription.get(key) ?? []), row]);
+  }
   const stockItems: DemoStockItem[] = [];
   for (const item of batch.items) {
+    const existing = rowsByPrescription.get(item.prescriptionId)?.[0];
+    if (existing) {
+      stockItems.push(stockFromRow(existing));
+      continue;
+    }
     const patient = patients.find((candidate) => candidate.id === item.patientId);
     const saved = await saveSecretaryStockItem(context, {
-      id: crypto.randomUUID(),
+      id: await deterministicBatchBottleId(batch.id, item.prescriptionId),
       batchId: batch.id,
       batchCode: batch.code,
       prescriptionId: item.prescriptionId,
@@ -1366,13 +1540,48 @@ export async function confirmSecretaryBatch(
     });
     stockItems.push(saved);
   }
-  await saveSecretaryBatch(context, {
-    ...batch,
-    status: "conferido",
+
+  // Re-check the persisted checklist just before finalizing. If another
+  // secretary changed it while this confirmation was running, leave the batch
+  // ready; the rows above are idempotent and can be reused on the next attempt.
+  const latestBatchResult = await supabase.from("batches")
+    .select("status, metadata")
+    .eq("id", batch.id)
+    .eq("clinic_id", context.clinicId)
+    .maybeSingle();
+  if (latestBatchResult.error) throw latestBatchResult.error;
+  const latestStatus = text(latestBatchResult.data?.status, "rascunho") as DemoBatch["status"];
+  if (latestStatus === "conferido") return stockItems;
+  const latestMetadata = objectValue(latestBatchResult.data?.metadata);
+  const latestCheckedIds = new Set(Array.isArray(latestMetadata.checkedPrescriptionIds)
+    ? latestMetadata.checkedPrescriptionIds.map(String)
+    : []);
+  if (latestStatus !== "pronto" || batch.items.some((item) => !latestCheckedIds.has(item.prescriptionId))) {
+    throw new Error("A conferência mudou durante a operação. Confira os itens novamente antes de liberar o lote.");
+  }
+
+  const finalMetadata = {
+    ...latestMetadata,
     checkedAt: receivedAt,
     checkedBy: checkedBy.trim(),
     conferenceNotes: conferenceNotes.trim(),
-  });
+  };
+  const { data: finalized, error: finalizeError } = await supabase.from("batches")
+    .update({ status: "conferido", metadata: finalMetadata })
+    .eq("id", batch.id)
+    .eq("clinic_id", context.clinicId)
+    .eq("status", "pronto")
+    .select("id")
+    .maybeSingle();
+  if (finalizeError) throw finalizeError;
+  if (!finalized) {
+    const finalState = await supabase.from("batches").select("status").eq("id", batch.id).eq("clinic_id", context.clinicId).maybeSingle();
+    if (finalState.error) throw finalState.error;
+    if (text(finalState.data?.status) !== "conferido") {
+      throw new Error("Não foi possível confirmar o lote. Os registros criados foram preservados e podem ser reutilizados ao tentar novamente.");
+    }
+  }
+  void audit(context, "confirm", "batch", batch.id, { status: "conferido", stockRows: stockItems.length });
   return stockItems;
 }
 
