@@ -89,6 +89,34 @@ const productionSteps = [
   "Liberado",
 ];
 
+const alphabeticalCollator = new Intl.Collator("pt-BR", {
+  sensitivity: "base",
+  numeric: true,
+  ignorePunctuation: true,
+});
+
+function comparePatientNames(first: string, second: string) {
+  return alphabeticalCollator.compare(first.trim(), second.trim());
+}
+
+function sortPatientBatchItems(items: DemoBatchItem[]) {
+  return [...items].sort((first, second) => {
+    const firstHasPatient = Boolean(first.patientId);
+    const secondHasPatient = Boolean(second.patientId);
+    if (firstHasPatient !== secondHasPatient) return firstHasPatient ? -1 : 1;
+
+    return comparePatientNames(first.patientName || "", second.patientName || "")
+      || comparePatientNames(first.patientCpf || "", second.patientCpf || "")
+      || comparePatientNames(first.prescriptionId, second.prescriptionId);
+  });
+}
+
+function orderedBatchItems(batch: DemoBatch) {
+  return batch.orderType === "pronta-entrega"
+    ? batch.items
+    : sortPatientBatchItems(batch.items);
+}
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat("pt-BR", {
     dateStyle: "short",
@@ -238,7 +266,8 @@ export default function SecretariaLotesPage() {
 
   async function persistBatch(batch: DemoBatch) {
     if (!context) throw new Error("A sessão da Secretaria ainda não foi carregada.");
-    const saved = await saveSecretaryBatch(context, batch);
+    const batchToSave = { ...batch, items: orderedBatchItems(batch) };
+    const saved = await saveSecretaryBatch(context, batchToSave);
     setBatches((current) => {
       const exists = current.some((item) => item.id === saved.id);
       return exists ? current.map((item) => item.id === saved.id ? saved : item) : [saved, ...current];
@@ -324,9 +353,17 @@ export default function SecretariaLotesPage() {
     return new Set([...latestByPatient.values()].map((prescription) => prescription.id));
   }, [batchIndication, patientById, prescriptions]);
 
-  const availablePrescriptions = useMemo(() => prescriptions.filter((prescription) =>
-    latestPrescriptionIds.has(prescription.id) && !includedPrescriptionIds.has(prescription.id),
-  ), [includedPrescriptionIds, latestPrescriptionIds, prescriptions]);
+  const availablePrescriptions = useMemo(() => prescriptions
+    .filter((prescription) =>
+      latestPrescriptionIds.has(prescription.id) && !includedPrescriptionIds.has(prescription.id),
+    )
+    .sort((first, second) => {
+      const firstName = patientById.get(first.patientId)?.name ?? "";
+      const secondName = patientById.get(second.patientId)?.name ?? "";
+      return comparePatientNames(firstName, secondName)
+        || comparePatientNames(first.patientId, second.patientId)
+        || comparePatientNames(first.id, second.id);
+    }), [includedPrescriptionIds, latestPrescriptionIds, patientById, prescriptions]);
 
   const filteredPrescriptions = useMemo(() => {
     const normalized = normalizeSearch(search);
@@ -347,8 +384,12 @@ export default function SecretariaLotesPage() {
     const recent = recentPrescriptionIds
       .map((id) => availablePrescriptions.find((prescription) => prescription.id === id))
       .filter((prescription): prescription is DemoPrescription => Boolean(prescription));
-    return recent.length ? recent : availablePrescriptions.slice(0, 5);
-  }, [availablePrescriptions, filteredPrescriptions, recentPrescriptionIds, search]);
+    return [...(recent.length ? recent : availablePrescriptions.slice(0, 5))]
+      .sort((first, second) => comparePatientNames(
+        patientById.get(first.patientId)?.name ?? "",
+        patientById.get(second.patientId)?.name ?? "",
+      ));
+  }, [availablePrescriptions, filteredPrescriptions, patientById, recentPrescriptionIds, search]);
 
   const selectedPrescriptions = availablePrescriptions.filter((prescription) =>
     selectedIds.includes(prescription.id),
@@ -391,7 +432,7 @@ export default function SecretariaLotesPage() {
     if (reportStartDate && createdDate < reportStartDate) return [];
     if (reportEndDate && createdDate > reportEndDate) return [];
     const batchMatchesSearch = normalizedReportSearch.length > 0 && normalizeSearch(`${batch.name ?? ""} ${batch.code} ${batch.laboratory}`).includes(normalizedReportSearch);
-    return batch.items
+    return orderedBatchItems(batch)
       .filter((item) => {
         const itemOrderType = item.orderType ?? batch.orderType ?? (item.patientId ? "pedido-paciente" : "pronta-entrega");
         if (reportOrderType !== "todos" && itemOrderType !== reportOrderType) return false;
@@ -400,6 +441,12 @@ export default function SecretariaLotesPage() {
         return normalizeSearch(`${item.patientName} ${item.patientCpf} ${item.doctor} ${item.treatment}`).includes(normalizedReportSearch);
       })
       .map((item) => ({ batch, item }));
+  }).sort((first, second) => {
+    const firstIsPatient = Boolean(first.item.patientId);
+    const secondIsPatient = Boolean(second.item.patientId);
+    if (firstIsPatient !== secondIsPatient) return firstIsPatient ? -1 : 1;
+    return comparePatientNames(first.item.patientName || "", second.item.patientName || "")
+      || comparePatientNames(first.batch.name ?? first.batch.code, second.batch.name ?? second.batch.code);
   });
   const reportLotCount = new Set(reportRows.map(({ batch }) => batch.id)).size;
   const reportBottleCount = reportRows.reduce((total, { item }) => total + Math.max(0, item.bottles), 0);
@@ -1393,7 +1440,7 @@ export default function SecretariaLotesPage() {
                                 Este lote ainda está vazio. Pesquise e adicione os pacientes antes do envio.
                               </p>
                             )}
-                            {batch.items.map((item) => {
+                            {orderedBatchItems(batch).map((item) => {
                               const checked = (batch.checkedPrescriptionIds ?? []).includes(item.prescriptionId);
 
                               return (
