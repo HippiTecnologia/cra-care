@@ -621,6 +621,25 @@ export async function saveSecretaryPatient(
   return { patient, hasPatientAccess: Boolean((existing as unknown as MedicalPatientRow).auth_user_id) };
 }
 
+export async function updateSecretaryPatientPhone(
+  context: SecretaryContext,
+  patientId: string,
+  phone: string,
+) {
+  if (!isUuid(patientId)) throw new Error("Não foi possível identificar o paciente.");
+  const cleanedPhone = phone.trim();
+  const { data, error } = await getSupabaseClient().from("patients")
+    .update({ phone: cleanedPhone || null, updated_at: new Date().toISOString() })
+    .eq("id", patientId)
+    .eq("clinic_id", context.clinicId)
+    .select("id, phone")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Paciente não encontrado para atualizar o telefone.");
+  void audit(context, "update", "patient", patientId, { fields: ["phone"], source: "estoque_secretaria" });
+  return text(data.phone);
+}
+
 export async function saveSecretaryPayment(
   context: SecretaryContext,
   patientId: string,

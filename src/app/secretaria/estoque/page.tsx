@@ -21,6 +21,7 @@ import {
   loadSecretaryPrescriptions,
   loadSecretaryStock,
   saveSecretaryPatient,
+  updateSecretaryPatientPhone,
   saveSecretaryBatch,
   saveSecretaryStockItem,
   updateSecretaryStockDelivery,
@@ -293,6 +294,77 @@ function PendingDeliveryDetails({ batch, item, patient, context, onSaved }: Pend
   );
 }
 
+type StockPatientPhoneEditorProps = {
+  patient: DemoPatientRecord;
+  context: SecretaryContext | null;
+  onSaved: (phone: string) => void;
+};
+
+function StockPatientPhoneEditor({ patient, context, onSaved }: StockPatientPhoneEditorProps) {
+  const [editing, setEditing] = useState(false);
+  const [phone, setPhone] = useState(patient.phone ?? "");
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+
+  async function savePhone() {
+    if (!context) return;
+    setSaving(true);
+    setFeedback(null);
+    try {
+      const savedPhone = await updateSecretaryPatientPhone(context, patient.id, phone);
+      setPhone(savedPhone);
+      setEditing(false);
+      setFeedback({ kind: "success", text: "Telefone atualizado no cadastro do paciente." });
+      onSaved(savedPhone);
+    } catch (cause) {
+      setFeedback({ kind: "error", text: cause instanceof Error ? cause.message : "Não foi possível atualizar o telefone." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl bg-[#fcfaf8] p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs text-[#817578]">Contato do paciente</p>
+          <p className="mt-1 break-words font-semibold text-[#433438]">{patient.phone || "Não informado"}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => { setEditing((current) => !current); setPhone(patient.phone ?? ""); setFeedback(null); }}
+          className="shrink-0 rounded-lg border border-[#eadfd9] bg-white px-3 py-2 text-xs font-semibold text-[#a3113a]"
+        >
+          {editing ? "Fechar" : "Editar telefone"}
+        </button>
+      </div>
+      {editing && (
+        <div className="mt-3">
+          <label className="block text-xs font-semibold text-[#66595d]">
+            Telefone / WhatsApp
+            <input
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              maxLength={30}
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              className="mt-1.5 h-10 w-full rounded-lg border border-[#e9dfda] bg-white px-3 text-sm font-normal outline-none focus:border-[#b91142]"
+              placeholder="Digite o telefone do paciente"
+            />
+          </label>
+          {feedback && <p role={feedback.kind === "error" ? "alert" : "status"} className={`mt-2 rounded-lg px-3 py-2 text-xs ${feedback.kind === "success" ? "bg-[#edf8f3] text-[#187157]" : "bg-[#fff1f3] text-[#a3113a]"}`}>{feedback.text}</p>}
+          <div className="mt-3 flex gap-2">
+            <button type="button" onClick={() => { setEditing(false); setPhone(patient.phone ?? ""); setFeedback(null); }} disabled={saving} className="flex-1 rounded-lg border border-[#eadfd9] bg-white px-3 py-2 text-xs font-semibold text-[#66595d] disabled:opacity-50">Cancelar</button>
+            <button type="button" onClick={() => void savePhone()} disabled={saving || !context} className="flex-1 rounded-lg bg-[#a3113a] px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{saving ? "Salvando..." : "Salvar telefone"}</button>
+          </div>
+        </div>
+      )}
+      {!editing && feedback && <p role="status" className="mt-2 rounded-lg bg-[#edf8f3] px-3 py-2 text-xs text-[#187157]">{feedback.text}</p>}
+    </div>
+  );
+}
+
 export default function SecretariaEstoquePage() {
   const [stock, setStock] = useState<DemoStockItem[]>([]);
   const [patients, setPatients] = useState<DemoPatientRecord[]>([]);
@@ -524,32 +596,38 @@ export default function SecretariaEstoquePage() {
         (address?.zipCode || patient?.zipCode) ? `CEP ${address?.zipCode || patient?.zipCode}` : undefined,
       ].filter(Boolean).join(" · ") || "Não informado";
       const patientName = patient?.name || item.patientName || "Pronta entrega";
-      const patientData = patient
-        ? `<div class="field"><span>CPF</span><strong>${escapeReportHtml(patient.cpf || item.patientCpf || "Não informado")}</strong></div><div class="field"><span>Data de nascimento</span><strong>${escapeReportHtml(formatBirthDate(patient.birthDate))}</strong></div><div class="field"><span>Telefone</span><strong>${escapeReportHtml(patient.phone || "Não informado")}</strong></div><div class="field address"><span>Endereço completo</span><strong>${escapeReportHtml(fullAddress)}</strong></div>`
-        : `<div class="field no-patient"><span>Dados do paciente</span><strong>Pronta entrega — sem paciente vinculado</strong></div>`;
-      const stockFields = [
-        ["Lote", batchNames[item.batchId] ?? item.batchCode],
-        ["Tipo", item.origin === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente"],
-        ["Médico", item.doctor],
-        ["Tratamento", item.treatment],
-        ["Fase", item.phase],
-        ["Frascos", String(item.bottles)],
-        ["Status", stockStatuses[item.status].label],
-        ["Entrega", item.delivery],
-        ["Laboratório", item.laboratory],
-        ["Entrada", formatDate(item.receivedAt)],
-        ["Reserva", formatDate(item.reservedAt)],
-        ["Saída", formatDate(item.deliveredAt)],
-        ["Conferido por", item.checkedBy],
-      ].map(([label, value]) => `<div class="field"><span>${label}</span><strong>${escapeReportHtml(value)}</strong></div>`).join("");
-      const formula = item.formulas.map((entry) => `${entry.name} ${entry.percentage}%`).join(" · ") || "Não informada";
-      const statusClass = item.status === "disponivel" ? "available" : item.status === "reservado" ? "reserved" : "delivered";
-      return `<article class="record"><header class="record-header"><div><h2>${escapeReportHtml(patientName)}</h2><p>${escapeReportHtml(item.origin === "pronta-entrega" ? "Pronta entrega" : "Pedido de paciente")} · ${escapeReportHtml(item.treatment)}</p></div><span class="status ${statusClass}">${escapeReportHtml(stockStatuses[item.status].label)}</span></header><section class="record-section"><h3>Dados do paciente</h3><div class="patient-grid">${patientData}</div></section><section class="record-section stock-section"><h3>Dados do estoque</h3><div class="stock-grid">${stockFields}<div class="field formula"><span>Fórmula</span><strong>${escapeReportHtml(formula)}</strong></div></div></section></article>`;
+      const patientData = item.patientId
+        ? `<div class="patient-layout"><div class="patient-main"><div class="field"><span>Paciente</span><strong>${escapeReportHtml(patientName)}</strong></div><div class="field"><span>Telefone</span><strong>${escapeReportHtml(patient?.phone || item.patientPhone || "Não informado")}</strong></div><div class="field"><span>Endereço completo</span><strong>${escapeReportHtml(fullAddress)}</strong></div></div><div class="patient-side"><div class="field"><span>Data de nascimento</span><strong>${escapeReportHtml(patient?.birthDate ? formatBirthDate(patient.birthDate) : "Não informado")}</strong></div><div class="field"><span>CPF</span><strong>${escapeReportHtml(patient?.cpf || item.patientCpf || "Não informado")}</strong></div></div></div>`
+        : `<div class="patient-layout"><div class="patient-main"><div class="field no-patient"><span>Paciente</span><strong>Pronta entrega — sem paciente vinculado</strong></div></div></div>`;
+      return `<article class="record">${patientData}</article>`;
     }).join("");
     const reportWindow = window.open("", "_blank");
     if (!reportWindow) { setMessage("Permita a abertura de janelas no navegador para gerar o relatório."); return; }
     reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Relatório de estoque</title><style>
-      @page{size:A4 landscape;margin:9mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:9px;line-height:1.35;-webkit-print-color-adjust:exact;print-color-adjust:exact}.actions{display:flex;justify-content:flex-end;margin-bottom:12px}.actions button{border:0;border-radius:8px;background:#a3113a;color:#fff;padding:9px 14px;font-weight:bold}.brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:8px;margin-bottom:10px}.brand img{width:38px;height:38px;object-fit:contain}.brand strong{display:block;color:#8e1535;font-size:15px;letter-spacing:.8px}.brand span{display:block;font-size:8px;font-weight:bold;letter-spacing:.6px;color:#66595d}.report-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:12px}.report-heading h1{color:#a3113a;margin:0;font-size:18px}.report-heading p{margin:4px 0 0;color:#786b6f;font-size:8px}.report-count{white-space:nowrap;border:1px solid #ead7dd;border-radius:8px;background:#fff7f9;padding:7px 10px;color:#86203b;font-weight:bold}.records{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:8px}.record{min-width:0;border:1px solid #e6dce0;border-radius:9px;overflow:hidden;background:#fff;break-inside:avoid;page-break-inside:avoid}.record-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;padding:7px 9px;background:#fbf1f4;border-bottom:1px solid #f0e2e6}.record-header h2{margin:0;color:#86203b;font-size:10px;line-height:1.3}.record-header p{margin:3px 0 0;color:#77696d;font-size:7px}.status{flex:none;border-radius:99px;padding:3px 7px;font-size:7px;font-weight:bold}.status.available{background:#eaf8f3;color:#187157}.status.reserved{background:#fff4df;color:#966419}.status.delivered{background:#eef3ff;color:#3c5da0}.record-section{padding:6px 8px}.record-section h3{margin:0 0 5px;color:#a3113a;font-size:6.5px;text-transform:uppercase;letter-spacing:.1em}.stock-section{border-top:1px solid #f0e8e8;background:#fdfbfa}.patient-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px 8px}.stock-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px 8px}.field{min-width:0;overflow-wrap:anywhere}.field span{display:block;margin-bottom:2px;color:#817578;font-size:6px;font-weight:bold;text-transform:uppercase;letter-spacing:.04em}.field strong{display:block;color:#433438;font-size:7.5px;font-weight:600;line-height:1.35}.field.address,.field.formula,.field.no-patient{grid-column:1/-1}.field.no-patient strong{color:#66595d}@media print{.actions{display:none}a{color:inherit;text-decoration:none}}
+      @page{size:A4 landscape;margin:9mm}
+      *{box-sizing:border-box}
+      body{margin:0;font-family:Arial,sans-serif;color:#34292d;font-size:9px;line-height:1.35;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      .actions{display:flex;justify-content:flex-end;margin-bottom:12px}
+      .actions button{border:0;border-radius:8px;background:#a3113a;color:#fff;padding:9px 14px;font-weight:bold}
+      .brand{display:flex;align-items:center;gap:10px;border-bottom:2px solid #a3113a;padding-bottom:8px;margin-bottom:10px}
+      .brand img{width:38px;height:38px;object-fit:contain}
+      .brand strong{display:block;color:#8e1535;font-size:15px;letter-spacing:.8px}
+      .brand span{display:block;font-size:8px;font-weight:bold;letter-spacing:.6px;color:#66595d}
+      .report-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:12px}
+      .report-heading h1{color:#a3113a;margin:0;font-size:18px}
+      .report-heading p{margin:4px 0 0;color:#786b6f;font-size:8px}
+      .report-count{white-space:nowrap;border:1px solid #ead7dd;border-radius:8px;background:#fff7f9;padding:7px 10px;color:#86203b;font-weight:bold}
+      .records{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:7px}
+      .record{min-width:0;border:1px solid #e6dce0;border-radius:8px;background:#fff;padding:8px 9px;break-inside:avoid;page-break-inside:avoid}
+      .patient-layout{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(120px,.8fr);gap:10px;align-items:start}
+      .patient-main{display:grid;gap:5px;min-width:0}
+      .patient-side{display:grid;gap:7px;border-left:1px solid #f0e2e6;padding-left:10px;min-width:0}
+      .field{min-width:0;overflow-wrap:anywhere}
+      .field span{display:block;margin-bottom:2px;color:#817578;font-size:6px;font-weight:bold;text-transform:uppercase;letter-spacing:.04em}
+      .field strong{display:block;color:#433438;font-size:8px;font-weight:600;line-height:1.35}
+      .field.no-patient strong{color:#66595d}
+      @media screen and (max-width:800px){.records{grid-template-columns:1fr}}
+      @media print{.actions{display:none}a{color:inherit;text-decoration:none}}
     </style></head><body><div class="actions"><button onclick="window.print()">Imprimir / salvar em PDF</button></div><header class="brand"><img src="${window.location.origin}/logo-cra.png" alt="CRA Care"><div><strong>CRA CARE</strong><span>CENTRO DE RINITE E ALERGIA</span></div></header><div class="report-heading"><div><h1>Relatório de vacinas em estoque</h1><p>Gerado em ${escapeReportHtml(new Date().toLocaleString("pt-BR"))}</p></div><div class="report-count">${filteredStock.length} registro(s)</div></div><main class="records">${records || "<p>Nenhum registro encontrado nos filtros atuais.</p>"}</main></body></html>`);
     reportWindow.document.close();
     reportWindow.focus();
@@ -1084,7 +1162,18 @@ export default function SecretariaEstoquePage() {
                       <p className="text-xs text-[#817578]">Médico responsável</p>
                       <p className="mt-1 font-semibold text-[#433438]">{selectedItem.doctor}</p>
                     </div>
-                    {selectedItem.patientPhone && (
+                    {selectedPatient && selectedItem.patientId ? (
+                      <StockPatientPhoneEditor
+                        key={selectedPatient.id}
+                        patient={selectedPatient}
+                        context={context}
+                        onSaved={(phone) => {
+                          setPatients((current) => current.map((patient) => patient.id === selectedPatient.id ? { ...patient, phone } : patient));
+                          setStock((current) => current.map((item) => item.patientId === selectedPatient.id ? { ...item, patientPhone: phone } : item));
+                          setMessage("Telefone do paciente atualizado no cadastro.");
+                        }}
+                      />
+                    ) : selectedItem.patientPhone && (
                       <div>
                         <p className="text-xs text-[#817578]">Contato do paciente</p>
                         <p className="mt-1 font-semibold text-[#433438]">
