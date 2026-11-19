@@ -22,6 +22,7 @@ export type PrescriptionForSignature = {
   treatment: string;
   phase?: string;
   bottles: number;
+  bottleVolumeMl?: number;
   drops: number;
   frequency: string;
   posology: string;
@@ -179,9 +180,10 @@ export async function buildPrescriptionPdf(prescription: PrescriptionForSignatur
 
   page.drawText(prescription.treatment.toUpperCase(), { x: left, y: 628, size: 9.5, font: bold, color: burgundy });
   page.drawText(`Frascos: ${prescription.bottles}`, { x: left, y: 610, size: 8.6, font: bold, color: ink });
-  if (prescription.phase) page.drawText(`Fase: ${prescription.phase}`, { x: left, y: 593, size: 8.6, font: bold, color: ink });
+  page.drawText(`Volume por frasco: ${prescription.bottleVolumeMl ? `${prescription.bottleVolumeMl} mL` : "Não informado"}`, { x: left, y: 593, size: 8.6, font: bold, color: ink });
+  if (prescription.phase) page.drawText(`Fase: ${prescription.phase}`, { x: left, y: 576, size: 8.6, font: bold, color: ink });
 
-  let y = prescription.phase ? 562 : 578;
+  let y = prescription.phase ? 545 : 562;
   const section = (title: string) => {
     page.drawText(title, { x: left, y, size: 12, font: bold, color: burgundy });
     y -= 12;

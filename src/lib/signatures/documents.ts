@@ -11,16 +11,20 @@ function record(value: unknown): Record<string, unknown> {
 export async function loadPrescriptionDocument(clinicId: string, documentId: string) {
   const admin = getSupabaseAdminClient();
   const { data: rawPrescription } = await (admin.from("prescriptions") as any)
-    .select("id, clinic_id, patient_id, doctor_profile_id, content, created_at")
+    .select("id, clinic_id, patient_id, doctor_profile_id, content, bottle_volume_ml, created_at")
     .eq("id", documentId).eq("clinic_id", clinicId).maybeSingle();
   if (!rawPrescription) throw new Error("Documento não encontrado nesta clínica.");
-  const prescription = rawPrescription as { id: string; patient_id: string; doctor_profile_id: string; content: unknown; created_at: string };
+  const prescription = rawPrescription as { id: string; patient_id: string; doctor_profile_id: string; content: unknown; bottle_volume_ml: number | null; created_at: string };
   const [{ data: rawPatient }, { data: rawDoctor }] = await Promise.all([
     (admin.from("patients") as any).select("id, full_name, cpf").eq("id", prescription.patient_id).eq("clinic_id", clinicId).is("archived_at", null).maybeSingle(),
     admin.from("profiles").select("id, full_name, crm").eq("id", prescription.doctor_profile_id).eq("clinic_id", clinicId).maybeSingle(),
   ]);
   if (!rawPatient || !rawDoctor) throw new Error("Paciente ou médico do documento não encontrado.");
   const content = record(prescription.content);
+  const rawBottleVolume = prescription.bottle_volume_ml ?? content.bottleVolumeMl;
+  const bottleVolumeMl = typeof rawBottleVolume === "number" && Number.isFinite(rawBottleVolume) && rawBottleVolume > 0
+    ? rawBottleVolume
+    : undefined;
   const formulas = Array.isArray(content.formulas)
     ? content.formulas.filter((item): item is { name: string; percentage: number } => Boolean(item) && typeof item === "object" && typeof (item as { name?: unknown }).name === "string" && typeof (item as { percentage?: unknown }).percentage === "number")
     : [];
@@ -34,6 +38,7 @@ export async function loadPrescriptionDocument(clinicId: string, documentId: str
     treatment: typeof content.treatment === "string" ? content.treatment : "Tratamento não informado",
     phase: typeof content.phase === "string" ? content.phase : undefined,
     bottles: typeof content.bottles === "number" ? content.bottles : 1,
+    bottleVolumeMl,
     drops: typeof content.drops === "number" ? content.drops : 0,
     frequency: typeof content.frequency === "string" ? content.frequency : "Conforme prescrição",
     posology: typeof content.posology === "string" ? content.posology : "",
